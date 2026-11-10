@@ -5,8 +5,9 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { type Ctx, isOwner, type StoreSelf } from "@p2/app/v1";
-import { type RequestAccess, Routes } from "@p2/app/v1/server";
+import { type RequestAccess, Routes, requestLanguage } from "@p2/app/v1/server";
 import { McpManager } from "./contract.ts";
+import { mcpMessages } from "./messages.ts";
 import { resultPage, sendPage, sendProbePage } from "./pages.ts";
 
 /** Contributes the sign-in routes. */
@@ -20,6 +21,15 @@ export function signInRoutes(self: StoreSelf): void {
 /** The path of the callback route on p2's own origin. */
 const CALLBACK_PATH = "/mcp/callback";
 
+/** The page's language and its translator: the owner's cookie or the browser's list. */
+function translator(request: IncomingMessage) {
+	const language = requestLanguage(
+		request,
+		mcpMessages.translations.map(({ locale }) => locale),
+	);
+	return { language, t: mcpMessages.in(language) };
+}
+
 /**
  * Begins the sign-in to the server the path names. `?via=loopback|callback` is the probe page's answer; without it, the
  * device owner signs in through loopback and any other owner gets the probe page.
@@ -30,20 +40,21 @@ async function signIn(
 	{ principal, origin }: RequestAccess,
 	ctx: Ctx,
 ): Promise<void> {
-	if (!isOwner(principal)) return refuse(response, principal === undefined);
+	const { language, t } = translator(request);
+	if (!isOwner(principal)) return refuse(request, response, principal === undefined);
 	const url = new URL(request.url ?? "/", "http://localhost");
 	let name: string;
 	try {
 		name = decodeURIComponent(url.pathname.slice("/mcp/sign-in/".length));
 	} catch {
-		return sendPage(response, 400, resultPage("Unknown MCP server", "The sign-in link is malformed."));
+		return sendPage(response, 400, resultPage(language, t("unknownServerTitle"), t("malformedLink")));
 	}
 	const via = url.searchParams.get("via");
 	const local = principal.access === "local" && !origin.remote;
 	const manager = await ctx.get(McpManager, {});
 	if (!local && via !== "loopback" && via !== "callback") {
 		const { url: probeUrl } = await manager.probe({ origin: origin.origin }, ctx);
-		return sendProbePage(response, name, probeUrl);
+		return sendProbePage(response, name, probeUrl, language, t);
 	}
 	let start: Awaited<ReturnType<typeof manager.beginSignIn>>;
 	try {
@@ -58,10 +69,10 @@ async function signIn(
 			ctx,
 		);
 	} catch (error) {
-		return sendPage(response, 502, resultPage(`Signing in to ${name} failed`, messageOf(error)));
+		return sendPage(response, 502, resultPage(language, t("signInFailedTitle", name), messageOf(error)));
 	}
 	if (start.kind === "authorized")
-		return sendPage(response, 200, resultPage(`Signed in to ${name}`, "You may close this page."));
+		return sendPage(response, 200, resultPage(language, t("signedInTitle", name), t("closePage")));
 	response.writeHead(302, { Location: start.url });
 	response.end();
 }
@@ -73,19 +84,16 @@ async function callback(
 	{ principal }: RequestAccess,
 	ctx: Ctx,
 ): Promise<void> {
+	const { language, t } = translator(request);
 	const params = new URL(request.url ?? "/", "http://localhost").searchParams;
 	if (!isOwner(principal))
 		return sendPage(
 			response,
 			principal === undefined ? 401 : 403,
-			resultPage(
-				"Sign-in not finished",
-				"This browser is not signed in to p2 here. Copy this page's full address from the address bar and paste it in p2's MCP panel.",
-			),
+			resultPage(language, t("notFinishedTitle"), t("notSignedInHere")),
 		);
 	const state = params.get("state");
-	if (state === null)
-		return sendPage(response, 400, resultPage("Sign-in not finished", "The authorization response has no state."));
+	if (state === null) return sendPage(response, 400, resultPage(language, t("notFinishedTitle"), t("noState")));
 	const [code, iss, error] = [params.get("code"), params.get("iss"), params.get("error")];
 	try {
 		const { server } = await (await ctx.get(McpManager, {})).completeSignIn(
@@ -97,19 +105,16 @@ async function callback(
 			},
 			ctx,
 		);
-		sendPage(response, 200, resultPage(`Signed in to ${server}`, "You may close this page."));
+		sendPage(response, 200, resultPage(language, t("signedInTitle", server), t("closePage")));
 	} catch (failure) {
-		sendPage(response, 400, resultPage("Signing in failed", messageOf(failure)));
+		sendPage(response, 400, resultPage(language, t("failedTitle"), messageOf(failure)));
 	}
 }
 
 /** Guests and people without a sign-in get no sign-in. */
-function refuse(response: ServerResponse, anonymous: boolean): void {
-	sendPage(
-		response,
-		anonymous ? 401 : 403,
-		resultPage("Not signed in", "Only p2's owner signs in to MCP servers. Open p2 and sign in first."),
-	);
+function refuse(request: IncomingMessage, response: ServerResponse, anonymous: boolean): void {
+	const { language, t } = translator(request);
+	sendPage(response, anonymous ? 401 : 403, resultPage(language, t("notSignedInTitle"), t("ownerOnly")));
 }
 
 function messageOf(error: unknown): string {

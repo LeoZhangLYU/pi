@@ -10,6 +10,7 @@ import {
 	isChordError,
 	liveIn,
 	serveKeyed,
+	Translations,
 	UI_LINGER,
 	whenLive,
 } from "@p2/app/v1";
@@ -81,6 +82,7 @@ import {
 	useConnected,
 	useFileCompletion,
 	useHost,
+	useMessages,
 	useNavigation,
 	useNewSessionState,
 	useObject,
@@ -117,6 +119,7 @@ import { SessionMetrics, SessionStatus, WorkerControl } from "../status/contract
 import { type Child, conversationLocation, SubagentControl, Subagents } from "../subagents/contract.ts";
 import { SessionTree } from "../tree/contract.ts";
 import { Chat, ChatCosts, TranscriptEntries } from "./contract.ts";
+import { chatMessages } from "./messages.ts";
 import { type Outgoing, outboxOf } from "./outbox.ts";
 import { sessionStart } from "./session-start.ts";
 
@@ -270,13 +273,14 @@ function useDetail(resources: ResourceSnapshot | undefined): Detail | undefined 
 
 /** The model and thinking chip that opens the model sheet. */
 function ModelControl({ resources, choice }: { resources: ResourceSnapshot | undefined; choice?: ModelChoice }) {
-	const name = choice ? modelName(resources, choice.model) : "Choose model";
+	const { t } = useMessages(chatMessages);
+	const name = choice ? modelName(resources, choice.model) : t("chooseModel");
 	const level = choice && choice.thinkingLevel !== "off" ? choice.thinkingLevel : undefined;
 	return (
 		<button
 			type="button"
 			className="model-control footer-action"
-			aria-label="Model and thinking"
+			aria-label={t("modelAndThinking")}
 			title={`${name}${level ? ` · ${level}` : ""}`}
 			onClick={() => openLayer({ kind: "sheet", name: "model" })}
 			disabled={!resources}
@@ -326,6 +330,7 @@ function Composer({
 	textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 	children?: React.ReactNode;
 }) {
+	const { t } = useMessages(chatMessages);
 	// The draft straight from the app's composer state, not through the screen's dock content: that arrives a layout
 	// effect after a keystroke, so the controlled textarea rendered the previous text first, which put the caret at the
 	// end on every keystroke and broke a phone keyboard's composition (its first tap on Send only closed the keyboard).
@@ -356,9 +361,9 @@ function Composer({
 			{replying && (
 				<div className="replying">
 					<span>
-						Replying to <strong>{replying.name}</strong>
+						{t("replyingTo")} <strong>{replying.name}</strong>
 					</span>
-					<button type="button" aria-label="Cancel reply" onClick={replying.onCancel}>
+					<button type="button" aria-label={t("cancelReply")} onClick={replying.onCancel}>
 						<CloseIcon />
 					</button>
 				</div>
@@ -371,7 +376,7 @@ function Composer({
 							<span className="attachment-name">{file.file.name}</span>
 							<button
 								type="button"
-								aria-label={`Remove ${file.file.name}`}
+								aria-label={t("removeFile", file.file.name)}
 								onClick={() => attaching?.remove(file)}
 							>
 								<CloseIcon />
@@ -385,8 +390,8 @@ function Composer({
 				ref={textarea}
 				rows={1}
 				value={draft}
-				placeholder={busy ? (steer ? "Steer the current run…" : "Queue a follow-up…") : "Message Pi…"}
-				aria-label="Message"
+				placeholder={busy ? (steer ? t("steerPlaceholder") : t("queuePlaceholder")) : t("messagePlaceholder")}
+				aria-label={t("message")}
 				onChange={(event) => {
 					setDraft(event.target.value);
 					completion?.update();
@@ -419,7 +424,7 @@ function Composer({
 			/>
 			<div className="composer-bar">
 				{attaching && (
-					<label className="round attach" aria-label="Attach files" title="Attach files">
+					<label className="round attach" aria-label={t("attachFiles")} title={t("attachFiles")}>
 						<PlusIcon />
 						<input
 							type="file"
@@ -439,18 +444,18 @@ function Composer({
 						aria-pressed={steer}
 						onClick={() => setSteer(!steer)}
 					>
-						Steer
+						{t("steerChip")}
 					</button>
 				)}
 				{children}
 				<span className="spacer" />
 				{busy && onStop && (
-					<button type="button" className="round stop" aria-label="Stop" onClick={onStop}>
+					<button type="button" className="round stop" aria-label={t("stop")} onClick={onStop}>
 						<StopIcon />
 					</button>
 				)}
 				{(!busy || content) && (
-					<button type="submit" className="round send" aria-label="Send" disabled={!content || disabled}>
+					<button type="submit" className="round send" aria-label={t("send")} disabled={!content || disabled}>
 						<SendIcon />
 					</button>
 				)}
@@ -579,6 +584,7 @@ function TopBar({
 	/** The session is being moved (a relocation job runs). */
 	moving?: boolean;
 }) {
+	const { t } = useMessages(chatMessages);
 	const connected = useConnected();
 	const nav = useNavigation();
 	const route = useRoute();
@@ -598,7 +604,7 @@ function TopBar({
 				onClick={() =>
 					window.matchMedia("(min-width: 900px)").matches ? setSidebarCollapsed(false) : setDrawer(true)
 				}
-				aria-label="Sessions"
+				aria-label={t("sessions")}
 			>
 				<MenuIcon />
 			</button>
@@ -618,17 +624,17 @@ function TopBar({
 					</>
 				) : (
 					<>
-						<h1>{session?.title ?? "New session"}</h1>
+						<h1>{session?.title ?? t("newSession")}</h1>
 						{session &&
 							(owner ? (
 								<button
 									type="button"
 									className="title-cwd"
 									onClick={() => openLayer(directoryPickerLayer(session.env ?? null, session.cwd))}
-									{...(sandboxed ? { title: `Sandbox ${session.env}: tools run in its VM` } : {})}
+									{...(sandboxed ? { title: t("sandboxTitle", String(session.env)) } : {})}
 								>
 									{moving ? (
-										"Moving…"
+										t("moving")
 									) : (
 										<>
 											{lock}
@@ -642,7 +648,7 @@ function TopBar({
 					</>
 				)}
 			</div>
-			{!connected && <span className="offline">Offline</span>}
+			{!connected && <span className="offline">{t("offline")}</span>}
 			<Slot name="artifact-actions" />
 			<Slot name="terminal-actions" />
 			<Slot name="workspace-actions" />
@@ -709,6 +715,7 @@ function useRestoredDrafts(
 }
 
 function SessionChat({ sessionId, conversationId }: { sessionId: string; conversationId: number }) {
+	const { t } = useMessages(chatMessages);
 	const nav = useNavigation();
 	const openConversation = useCallback(
 		(conversation: number) => {
@@ -1240,7 +1247,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		/>
 	);
 	const toBottom = !follow.atBottom && (
-		<button type="button" className="to-bottom" onClick={follow.toBottom} aria-label="Scroll to bottom">
+		<button type="button" className="to-bottom" onClick={follow.toBottom} aria-label={t("scrollToBottom")}>
 			<DownIcon />
 		</button>
 	);
@@ -1251,19 +1258,17 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 			{oneShot && toBottom}
 			<div className="subagent-bar">
 				<span>
-					{oneShot ? "One-shot agent of a script · read-only · " : ""}
-					Tools: {child.tools.join(", ") || "none"}
-					{!oneShot && viewLocation && ` · in ${locationLabel(viewLocation.env, viewLocation.cwd)}`}
-					{!oneShot && !child.location && " · follows the session"}
-					{archived ? " · archived" : ""}
+					{oneShot ? t("oneShotAgent") : ""}
+					{t("tools")} {child.tools.join(", ") || t("none")}
+					{!oneShot && viewLocation && t("inLocation", locationLabel(viewLocation.env, viewLocation.cwd))}
+					{!oneShot && !child.location && t("followsSession")}
+					{archived ? t("archivedTag") : ""}
 				</span>
 				{canWrite && !oneShot && subagentControl && (
 					<button
 						type="button"
 						className="text-action"
-						title={
-							archived ? "Show it in the sidebar again" : "Stop it and move it to the sidebar's archived row"
-						}
+						title={archived ? t("restoreAction") : t("archiveAction")}
 						onClick={() =>
 							archive(!archived, () =>
 								subagentControl.archive(
@@ -1273,11 +1278,11 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 							)
 						}
 					>
-						{archived ? "Restore" : "Archive"}
+						{archived ? t("restore") : t("archive")}
 					</button>
 				)}
 				{canWrite && oneShot && busy && (
-					<button type="button" className="round stop" aria-label="Stop" onClick={stop}>
+					<button type="button" className="round stop" aria-label={t("stop")} onClick={stop}>
 						<StopIcon />
 					</button>
 				)}
@@ -1286,7 +1291,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	);
 	const readOnlyBar = (!canWrite || failure) && (
 		<div className="subagent-bar">
-			<span>{failure ? "Session unavailable" : grant ? `Joined as ${grant.name} · read-only` : "Connecting…"}</span>
+			<span>{failure ? t("sessionUnavailable") : grant ? t("joinedAsReadOnly", grant.name) : t("connecting")}</span>
 		</div>
 	);
 	const queuedRows = queued.length + pendingQueued.length > 0 && (
@@ -1296,19 +1301,19 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 					<button
 						type="button"
 						className="queue-edit"
-						title="Move back to editor"
+						title={t("moveBackToEditor")}
 						onClick={() => {
 							if (!outbox.take(message.id)) return;
 							restore([message.text], true);
 							setFiles((current) => [...current, ...message.files]);
 						}}
 					>
-						<span>{message.whenBusy === "steer" ? "Steer" : "Queued"}</span> {message.text}
+						<span>{message.whenBusy === "steer" ? t("steer") : t("queued")}</span> {message.text}
 					</button>
 					<button
 						type="button"
 						className="queue-remove"
-						aria-label="Remove from queue"
+						aria-label={t("removeFromQueue")}
 						onClick={() => outbox.remove(message.id)}
 					>
 						<CloseIcon />
@@ -1320,7 +1325,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 					<button
 						type="button"
 						className="queue-edit"
-						title="Move back to editor"
+						title={t("moveBackToEditor")}
 						onClick={() =>
 							writer &&
 							dequeue(item.id, async () => {
@@ -1332,12 +1337,12 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 							})
 						}
 					>
-						<span>{item.mode === "steer" ? "Steer" : "Queued"}</span> {item.text}
+						<span>{item.mode === "steer" ? t("steer") : t("queued")}</span> {item.text}
 					</button>
 					<button
 						type="button"
 						className="queue-remove"
-						aria-label="Remove from queue"
+						aria-label={t("removeFromQueue")}
 						onClick={() =>
 							writer && dequeue(item.id, () => writer.dequeue({ submissionId: item.id }, BACKGROUND_CONTEXT))
 						}
@@ -1441,7 +1446,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 							{owner ? (
 								<div className="actions">
 									<button type="button" className="button" disabled={retrying} onClick={() => void retry()}>
-										{retrying ? "Retrying…" : "Retry"}
+										{retrying ? t("retrying") : t("retry")}
 									</button>
 									<button
 										type="button"
@@ -1786,4 +1791,5 @@ export default defineFacet((host, self) => {
 	// The chat plugin defines the transcript's entry displays (chat-mode adds its own): served on the page too.
 	serveKeyed(host, TranscriptEntries);
 	self.contribute(Slots, { main: Main });
+	self.contribute(Translations, chatMessages.translations);
 });

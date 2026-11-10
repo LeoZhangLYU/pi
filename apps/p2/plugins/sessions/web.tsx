@@ -1,7 +1,17 @@
 // The mobile drawer's component tree, with catalog/status/subagent/search handles supplying its data, and the owner's
 // session actions on its rows.
 
-import { Access, BACKGROUND_CONTEXT, contribute, defineFacet, type HeldIn, keptIn, liveIn, whenLive } from "@p2/app/v1";
+import {
+	Access,
+	BACKGROUND_CONTEXT,
+	contribute,
+	defineFacet,
+	type HeldIn,
+	keptIn,
+	liveIn,
+	Translations,
+	whenLive,
+} from "@p2/app/v1";
 import {
 	ChevronIcon,
 	closeLayers,
@@ -19,6 +29,7 @@ import {
 	useComposerState,
 	useConnected,
 	useHost,
+	useMessages,
 	useNavigation,
 	useNewSessionState,
 	useObject,
@@ -38,6 +49,7 @@ import { SessionTree } from "../tree/contract.ts";
 import { BranchSheet } from "./BranchSheet.tsx";
 import { type Operation, type Session, Sessions } from "./contract.ts";
 import { type DrawerRows, DrawerRowsContext } from "./contract.web.tsx";
+import { sessionsMessages } from "./messages.ts";
 import { SessionSheet } from "./SessionSheet.tsx";
 
 const subscribeVisibility = (listener: () => void) => {
@@ -105,12 +117,23 @@ const footer = <FooterMenu />;
 const head = <SlotList prefix="drawer-head" />;
 
 /** What a row says about a lifecycle operation (`Sessions.operations`), by kind: running, and failed. */
-const OPERATION_LABELS: Record<Operation["kind"], { running: string; failed: string }> = {
-	relocate: { running: "Moving…", failed: "Move failed" },
-	clone: { running: "Cloning…", failed: "Clone failed" },
-	fork: { running: "Forking…", failed: "Fork failed" },
-	archive: { running: "Archiving…", failed: "Archive failed" },
+const OPERATION_LABELS: Record<Operation["kind"], { running: OperationKey; failed: OperationKey }> = {
+	relocate: { running: "moving", failed: "moveFailed" },
+	clone: { running: "cloning", failed: "cloneFailed" },
+	fork: { running: "forking", failed: "forkFailed" },
+	archive: { running: "archiving", failed: "archiveFailed" },
 };
+
+type OperationKey =
+	| "moving"
+	| "moveFailed"
+	| "cloning"
+	| "cloneFailed"
+	| "forking"
+	| "forkFailed"
+	| "archiving"
+	| "archiveFailed"
+	| "copyingFiles";
 
 /**
  * The operation row `session` shows: a failed one of it first (with Dismiss), else one running on it, else a copy
@@ -120,16 +143,21 @@ function operationOf(
 	operations: readonly Operation[],
 	session: string,
 	dismiss: (operation: string) => void,
+	translate: (key: OperationKey) => string,
 ): SessionSummary["operation"] {
 	const failed = operations.find((operation) => operation.phase === "failed" && operation.session === session);
 	if (failed?.phase === "failed")
-		return { label: OPERATION_LABELS[failed.kind].failed, error: failed.error, dismiss: () => dismiss(failed.id) };
+		return {
+			label: translate(OPERATION_LABELS[failed.kind].failed),
+			error: failed.error,
+			dismiss: () => dismiss(failed.id),
+		};
 	const running = operations.find((operation) => operation.session === session);
-	if (running) return { label: OPERATION_LABELS[running.kind].running };
+	if (running) return { label: translate(OPERATION_LABELS[running.kind].running) };
 	const copying = operations.find(
 		(operation) => operation.phase === "running" && operation.target === session && operation.copying,
 	);
-	return copying ? { label: "Copying files…" } : undefined;
+	return copying ? { label: translate("copyingFiles") } : undefined;
 }
 
 /** A change to one session's row while its call is in flight. */
@@ -144,6 +172,7 @@ const applyRow = (rows: Session[] | undefined, { id, change }: RowGuess): Sessio
  * `keptIn`: while the connection is down the rows stay as last seen; actions need the live catalog.
  */
 function Sidebar() {
+	const { t } = useMessages(sessionsMessages);
 	const connected = useConnected();
 	const route = useRoute();
 	const nav = useNavigation();
@@ -191,10 +220,10 @@ function Sidebar() {
 						unread: (answers?.[session.id] ?? 0) > (reads?.[session.id] ?? 0),
 					},
 					subagents: children?.[session.id] ?? [],
-					operation: operationOf(operations, session.id, dismiss),
+					operation: operationOf(operations, session.id, dismiss, t),
 				};
 			}),
-		[list, statuses, children, answers, reads, operations, dismiss],
+		[list, statuses, children, answers, reads, operations, dismiss, t],
 	);
 	// Sessions a `drawer-head` entry shows are left out of the folders.
 	const [apart, setApart] = useState<Readonly<Record<string, readonly string[]>>>({});
@@ -262,12 +291,12 @@ function Sidebar() {
 			return whenLive(held)
 				.then(() => {
 					const tree = liveIn(held, "owner");
-					if (!tree) throw new Error("Only the owner changes branches");
+					if (!tree) throw new Error(t("onlyOwnerBranches"));
 					return action(tree);
 				})
 				.finally(() => held.release());
 		},
-		[host],
+		[host, t],
 	);
 	// The row marks the chosen branch at once; the view follows once the session's main conversation moved.
 	const onBranch = useCallback(
@@ -380,6 +409,7 @@ function Sidebar() {
 
 /** The top bar's button that opens the Session sheet (the drawer renders the sheet, where the rows are). */
 function SessionOptions() {
+	const { t } = useMessages(sessionsMessages);
 	const route = useRoute();
 	const rows = useReadable(useObject(Sessions, {}, { variant: "owner" })?.sessions);
 	const session = rows?.find((row) => row.id === route.session);
@@ -388,7 +418,7 @@ function SessionOptions() {
 		<button
 			type="button"
 			className="icon-button"
-			aria-label="Session options"
+			aria-label={t("sessionOptions")}
 			onClick={() => openLayer({ kind: "sheet", name: "session" })}
 		>
 			<MoreIcon />
@@ -399,5 +429,6 @@ function SessionOptions() {
 export default defineFacet((host) => {
 	contribute(host, "p2.web-sessions", (self) => {
 		self.contribute(Slots, { sidebar: Sidebar, "session-options": SessionOptions });
+		self.contribute(Translations, sessionsMessages.translations);
 	});
 });

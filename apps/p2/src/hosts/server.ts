@@ -5,17 +5,25 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isChordError, type PluginFacet, webSocketLink } from "@earendil-works/chord";
+import {
+	isChordError,
+	localeChoiceFacet,
+	type PluginFacet,
+	translationsFacet,
+	webSocketLink,
+} from "@earendil-works/chord";
 import { filesFacet } from "@earendil-works/chord/app/files";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { RolloutResult } from "@earendil-works/chord/plugins";
 import { WebSocketServer } from "ws";
 import { type Ctx, createHost, type Host, type HostError, hostErrorText, Server } from "../runtime/chord.ts";
+import { coreMessages } from "../runtime/core-messages.ts";
 import { envDefaultModel } from "../runtime/default-model.ts";
 import { type DevCommand, type DevResult, parseDevCommand } from "../runtime/dev-protocol.ts";
 import { configureFetch } from "../runtime/fetch.ts";
 import { assertMigrated, hostFiles, openHostStore, serverDirectory } from "../runtime/host-dirs.ts";
 import { fromOrigin, sendJson } from "../runtime/http.ts";
+import { requestLanguage } from "../runtime/locale.ts";
 import { captureProcessLogs, processLogs } from "../runtime/logs.ts";
 import { mintOwnerLink } from "../runtime/owner-link.ts";
 import { type SignInState, signIn } from "../runtime/page.ts";
@@ -321,6 +329,10 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 			{
 				kind: "server",
 				core: [
+					// The host's catalogs and the per-principal language choice (Chord's app kit). First: the core and
+					// plugin facets contribute their catalogs while they activate.
+					{ name: "chord.translations", facet: translationsFacet() },
+					{ name: "chord.locale.choice", facet: localeChoiceFacet() },
 					{
 						name: "@p2/core",
 						facet: serverCore(host, info, {
@@ -538,6 +550,7 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 		response.setHeader("Content-Security-Policy", contentSecurityPolicy(nonce, undefined));
 		response.setHeader("X-Frame-Options", "DENY");
 		const path = new URL(request.url ?? "/", "http://localhost").pathname;
+		const t = plainText(request);
 		void host
 			.root(async (ctx) => {
 				const access = await resolveAccess(request, ctx);
@@ -548,7 +561,7 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 				}
 				if (access === undefined || !sameOrigin(request, access.origin)) {
 					response.writeHead(403, { "Content-Type": "text/plain" });
-					response.end(access === undefined ? "Localhost only" : "Invalid origin");
+					response.end(access === undefined ? t("localhostOnly") : t("invalidOrigin"));
 					return;
 				}
 				const { principal, origin } = access;
@@ -634,19 +647,19 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 				if (isOwner(principal) || (isGuest(principal) && (await web?.guestMayLoad(request, principal)))) {
 					if (web !== undefined) return web.handle(request, response);
 					response.writeHead(404, { "Content-Type": "text/plain" });
-					response.end("Not found");
+					response.end(t("notFound"));
 					return;
 				}
 				if (isGuest(principal)) {
 					response.writeHead(403, { "Content-Type": "text/plain" });
-					response.end("Forbidden");
+					response.end(t("forbidden"));
 					return;
 				}
 				request.resume();
 				// A Radius user is signed in already; owner sign-in is not for them.
 				if (origin.relayUser !== undefined) {
 					response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-					response.end("Nothing on this brain is shared with you. Ask its owner for a share link.\n");
+					response.end(`${t("notShared")}\n`);
 					return;
 				}
 				// A link from another site may arrive without the owner's cookie (Chrome launching an installed app sent
@@ -753,6 +766,15 @@ const CLOSE_DEADLINE_MS = 8000;
 /** What the sign-in page shows: the first registered state provider (the devices plugin owns the owner account). */
 const signInStateFor = (states: ReadonlyMap<string, () => SignInState>): SignInState | undefined =>
 	[...states.values()][0]?.();
+
+/** The server's plain-text answers in the language the request asks for. */
+const plainText = (request: IncomingMessage) =>
+	coreMessages.in(
+		requestLanguage(
+			request,
+			coreMessages.translations.map(({ locale }) => locale),
+		),
+	);
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	// Provider logins and server plugins (e.g. the Radius gateway) fetch in this process too.

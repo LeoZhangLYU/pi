@@ -31,6 +31,7 @@ import {
 	type SessionLock,
 	sameLocation,
 	signalOf,
+	Translations,
 	unsafe,
 	until,
 	type Watchable,
@@ -47,6 +48,7 @@ import { McpCredentials } from "./credentials.ts";
 import type { ConnectEnv } from "./environments.ts";
 import { type ClientInfo, Instances, RECONNECT } from "./instances.ts";
 import { heldLease, type Lease, type ProjectSource, releaseGeneration, setLocations } from "./leases.ts";
+import { mcpMessages } from "./messages.ts";
 import { oauthServerOf, type Placement, place, type WorkEnvironments } from "./placement.ts";
 import { LoopbackProbe } from "./probe.ts";
 import { signInRoutes } from "./routes.ts";
@@ -85,6 +87,7 @@ export function mcpServerFacet(viewLingerMs: number, connector: EnvConnector): F
 		host.serve(McpManager, managerFactory(connector));
 		host.serve(Mcp, view, { linger: viewLingerMs });
 		contribute(host, "p2.mcp-routes", signInRoutes);
+		contribute(host, "p2.mcp-i18n", (self) => self.contribute(Translations, mcpMessages.translations));
 	});
 }
 

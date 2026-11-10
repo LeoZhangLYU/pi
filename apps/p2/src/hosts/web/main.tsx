@@ -3,13 +3,14 @@
 import { createRoot } from "react-dom/client";
 import "../../web/elanor.css";
 import "../../web/style.css";
-import { type WebSocketLike, webSocketLink } from "@earendil-works/chord";
+import { translationsFacet, type WebSocketLike, webSocketLink } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Access } from "../../runtime/access.ts";
 import { createHost, type Facet, hostErrorText, newerPeerProtocol } from "../../runtime/chord.ts";
 import { SERVER } from "../../runtime/principals.ts";
 import { whenLive } from "../../runtime/refs.ts";
 import { HostContext, Slot, setConnected, setShareEnded, webCoreFacet } from "../../runtime/web.tsx";
+import { startLanguage } from "../../web/language.ts";
 import { browserEnvironment, keepConnected } from "../../web/reconnect.ts";
 import { startTheme } from "../../web/theme.ts";
 
@@ -75,11 +76,17 @@ export function startWeb(facets: readonly (readonly [string, Facet])[]): void {
 	// First: holds before `load` was called throw. Held references wait for the load; rendering need not.
 	void host
 		.load(
-			[{ name: "@p2/web-core", facet: webCoreFacet }, ...facets.map(([name, facet]) => ({ name, facet }))],
+			[
+				{ name: "chord.translations", facet: translationsFacet() },
+				{ name: "@p2/web-core", facet: webCoreFacet },
+				...facets.map(([name, facet]) => ({ name, facet })),
+			],
 			BACKGROUND_CONTEXT,
 		)
 		.then((report) => {
 			for (const { plugin, error } of report.failed) console.error(`p2 web: plugin ${plugin} failed to load`, error);
+			// Follows the user's LocaleChoice and the browser's languages; re-renders every useMessages consumer.
+			void startLanguage(host);
 		});
 	const access = host.hold(Access, {}, BACKGROUND_CONTEXT);
 	void whenLive(access).then(

@@ -9,6 +9,7 @@ import {
 	type FollowObserver,
 	local,
 	method,
+	Translations,
 } from "@earendil-works/chord";
 import type { Context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
@@ -27,7 +28,10 @@ import {
 	type Self,
 	serveKeyed,
 } from "./chord.ts";
+import { contribute } from "./contribute.ts";
+import { coreMessages } from "./core-messages.ts";
 import type { SignInState } from "./page.ts";
+import { pageMessages } from "./page-messages.ts";
 import { isGuest, isOwner, type P2Principal } from "./principals.ts";
 import { record } from "./schema.ts";
 
@@ -308,6 +312,11 @@ export function serveServerRegistries(facet: FacetHost): void {
 export function serverCore(host: Host, info: ServerInfo, parts: ServerParts): Facet {
 	return defineFacet((facet, self) => {
 		serveServerRegistries(facet);
+		// The server's own catalogs: its plain-text answers and the sign-in page, contributed by a served local (like
+		// every plugin's catalogs).
+		contribute(facet, "p2.server-i18n", (catalogs) => {
+			catalogs.contribute(Translations, [...coreMessages.translations, ...pageMessages.translations]);
+		});
 		facet.serve(ServerNatives, { compose: (table) => table[0]?.value });
 		self.contribute(ServerNatives, parts);
 		facet.serve(Server, () => ({

@@ -15,14 +15,18 @@ import {
 	isGuest,
 	isOwner,
 	type P2Principal,
+	Translations,
 } from "@p2/app/v1";
 import {
 	Authenticators,
 	cookieValue,
+	escapeHtml,
 	fromOrigin,
+	languageLinks,
 	page,
 	type RequestOrigin,
 	Routes,
+	requestLanguage,
 	Server,
 	type ServerInfo,
 	SessionAccess,
@@ -33,6 +37,7 @@ import { Catalog } from "../sessions/contract.ts";
 import { ChildStore, remoteEnvironments } from "../subagents/contract.ts";
 import { GuestPresence, Presence, type ShareLink, type ShareMode, Shares, Sharing } from "./contract.ts";
 import { type GuestRow, JoinError, openEmails, ShareDb } from "./db.ts";
+import { sharingMessages } from "./messages.ts";
 
 /** Registers the join routes, the guest cookie and Radius authenticators, and guest session access. */
 
@@ -67,11 +72,17 @@ function sendPage(
 	content: { title: string; heading: string; body: string; script?: string },
 ): void {
 	const nonce = randomBytes(18).toString("base64url");
+	const offered = sharingMessages.translations.map(({ locale }) => locale);
+	const language = requestLanguage(request, offered);
 	response.writeHead(status, {
 		"Content-Type": "text/html; charset=utf-8",
 		"Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
 	});
-	response.end(request.method === "HEAD" ? undefined : page({ ...content, nonce }));
+	response.end(
+		request.method === "HEAD"
+			? undefined
+			: page({ ...content, nonce, language, languages: languageLinks(request, language, offered) }),
+	);
 }
 
 const JOIN_SCRIPT =
@@ -301,6 +312,7 @@ export default defineFacet((host) => {
 	});
 
 	contribute(host, "p2.sharing-http", (self) => {
+		self.contribute(Translations, sharingMessages.translations);
 		const shares = self.get(Shares, {});
 		const catalog = self.get(Catalog, {});
 		const joinPage = async (
@@ -310,12 +322,18 @@ export default defineFacet((host) => {
 			ctx: Ctx,
 		): Promise<void> => {
 			const token = new URL(request.url ?? "/", "http://localhost").pathname.split("/")[2] ?? "";
+			const t = sharingMessages.in(
+				requestLanguage(
+					request,
+					sharingMessages.translations.map(({ locale }) => locale),
+				),
+			);
 			const link = await shares.active({ token }, ctx);
 			if (!link) {
 				sendPage(request, response, 410, {
-					title: "Share ended",
-					heading: "This share has ended",
-					body: "<p>The link was reset or the session was archived. Ask the owner for a new one.</p>",
+					title: t("endedTitle"),
+					heading: t("endedHeading"),
+					body: `<p>${escapeHtml(t("endedBody"))}</p>`,
 				});
 				return;
 			}
@@ -327,14 +345,11 @@ export default defineFacet((host) => {
 				return;
 			}
 			const title = (await catalog.get({ id: link.session }, ctx)).title;
-			const access =
-				link.mode === "full"
-					? "You can read, send messages and uploads, and stop runs. This lets you make the agent run commands on the host."
-					: "You can read along, but not send messages.";
+			const access = link.mode === "full" ? t("accessFull") : t("accessView");
 			sendPage(request, response, 200, {
-				title: "Join shared session",
+				title: t("joinTitle"),
 				heading: title,
-				body: `<p>A session has been shared with you. ${access} Enter your name to join; names are not verified.</p><form id="join"><label for="name">Your name</label><input id="name" maxlength="40" required autocomplete="nickname"><button>Join session</button></form><p id="status" role="status"></p>`,
+				body: `<p>${escapeHtml(t("joinLead"))} ${escapeHtml(access)} ${escapeHtml(t("nameHint"))}</p><form id="join"><label for="name">${escapeHtml(t("nameLabel"))}</label><input id="name" maxlength="40" required autocomplete="nickname"><button>${escapeHtml(t("join"))}</button></form><p id="status" role="status"></p>`,
 				script: JOIN_SCRIPT,
 			});
 		};

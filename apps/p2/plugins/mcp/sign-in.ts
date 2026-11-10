@@ -23,8 +23,10 @@ import {
 	startMcpSignIn,
 } from "@earendil-works/pi-mcp/oauth";
 import { PluginError } from "@p2/app/v1";
+import { ENGLISH } from "@p2/app/v1/server";
 import { expandHostVariables } from "./config.ts";
 import type { McpCredentials } from "./credentials.ts";
+import { mcpMessages } from "./messages.ts";
 import { resultPage } from "./pages.ts";
 
 /** An HTTP server that signs in with OAuth: its name, URL and the client settings of its `oauth` entry. */
@@ -331,11 +333,16 @@ function keyOf(server: OAuthServer): string {
 	return JSON.stringify([server.name, server.url]);
 }
 
-/** The loopback callback's page after the redirect. */
+/** The loopback callback's page after the redirect. It has no request to read a language from: English, for now. */
 function callbackPage(server: string, page: OAuthCallbackPage): string {
+	const t = mcpMessages.in(ENGLISH);
 	return page.ok
-		? resultPage(`Signed in to ${server}`, "You may close this page.")
-		: resultPage(`Signing in to ${server} failed`, page.details ? `${page.message} ${page.details}` : page.message);
+		? resultPage(ENGLISH, t("signedInTitle", server), t("closePage"))
+		: resultPage(
+				ENGLISH,
+				t("signInFailedTitle", server),
+				page.details ? `${page.message} ${page.details}` : page.message,
+			);
 }
 
 function messageOf(error: unknown): string {

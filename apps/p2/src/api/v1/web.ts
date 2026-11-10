@@ -15,6 +15,7 @@ export * from "../../web/file-completion.tsx";
 export * from "../../web/haptics.ts";
 export * from "../../web/history.ts";
 export * from "../../web/icons.tsx";
+export * from "../../web/language.ts";
 export * from "../../web/Markdown.tsx";
 export * from "../../web/ModelPicker.tsx";
 export * from "../../web/navigation.ts";

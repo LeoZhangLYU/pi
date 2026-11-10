@@ -4,6 +4,9 @@
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { posix } from "node:path";
+import type { Language } from "@earendil-works/chord";
+import { coreMessages } from "../runtime/core-messages.ts";
+import { requestLanguage } from "../runtime/locale.ts";
 import type { GuestPrincipal } from "../runtime/principals.ts";
 import { WEB_BUNDLE_PATH, type WebBundle, type WebManifest, webManifest } from "./bundles.ts";
 
@@ -54,9 +57,9 @@ function guestPage(path: string, guest: GuestPrincipal): boolean {
  * The app page. The inline style and theme script run before any CSS so the first paint has the right background;
  * the bundle's stylesheet follows them, so its rules win. The module script runs after parsing, wherever it stands.
  */
-function page(nonce: string, manifest: WebManifest): string {
+function page(nonce: string, manifest: WebManifest, language: Language): string {
 	return `<!doctype html>
-<html lang="en" data-web-version="${manifest.version}">
+<html lang="${language.locale}"${language.dir === "rtl" ? ' dir="rtl"' : ""} data-web-version="${manifest.version}">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
@@ -136,14 +139,19 @@ export function createWeb(options: {
 
 	async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
 		const path = new URL(request.url ?? "/", "http://localhost").pathname;
+		const language = requestLanguage(
+			request,
+			coreMessages.translations.map(({ locale }) => locale),
+		);
+		const t = coreMessages.in(language);
 		const head = request.method === "HEAD";
 		if (request.method !== "GET" && !head) {
 			response.writeHead(404, { "Content-Type": "text/plain" });
-			response.end("Not found");
+			response.end(t("notFound"));
 			return;
 		}
 		if (path === "/" || PAGE.test(path)) {
-			const html = page(options.nonce, webManifest(await options.bundle()));
+			const html = page(options.nonce, webManifest(await options.bundle()), language);
 			response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 			response.end(head ? undefined : html);
 			return;
@@ -180,7 +188,7 @@ export function createWeb(options: {
 			return;
 		}
 		response.writeHead(404, { "Content-Type": "text/plain" });
-		response.end("Not found");
+		response.end(t("notFound"));
 	}
 
 	return {
@@ -189,7 +197,14 @@ export function createWeb(options: {
 			handle(request, response).catch((error: unknown) => {
 				console.error("p2 web:", error);
 				if (!response.headersSent) response.writeHead(500, { "Content-Type": "text/plain" });
-				response.end("Could not load the UI");
+				response.end(
+					coreMessages.in(
+						requestLanguage(
+							request,
+							coreMessages.translations.map(({ locale }) => locale),
+						),
+					)("uiUnavailable"),
+				);
 			});
 		},
 		guestMayLoad,

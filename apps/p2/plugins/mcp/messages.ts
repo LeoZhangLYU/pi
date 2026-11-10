@@ -1,0 +1,48 @@
+// The MCP sign-in pages and how-to hints sent to the browser sign-in controller, in the languages p2 offers. `en` is
+// the source catalog.
+
+import { defineMessages } from "@p2/app/v1";
+
+export const mcpMessages = defineMessages("p2.mcp", {
+	en: {
+		unknownServerTitle: "Unknown MCP server",
+		malformedLink: "The sign-in link is malformed.",
+		signInFailedTitle: (server: string) => `Signing in to ${server} failed`,
+		signedInTitle: (server: string) => `Signed in to ${server}`,
+		closePage: "You may close this page.",
+		probeHeading: (server: string) => `Sign in to ${server}`,
+		checking: "Checking whether this browser runs on the p2 computer…",
+		whereRuns: "Where does this browser run?",
+		onP2: "On the p2 computer",
+		otherDevice: "On another device",
+		runsOnP2: "This browser runs on the p2 computer",
+		runsElsewhere: "This browser runs on another device",
+		notFinishedTitle: "Sign-in not finished",
+		notSignedInHere:
+			"This browser is not signed in to p2 here. Copy this page's full address from the address bar and paste it in p2's MCP panel.",
+		noState: "The authorization response has no state.",
+		failedTitle: "Signing in failed",
+		notSignedInTitle: "Not signed in",
+		ownerOnly: "Only p2's owner signs in to MCP servers. Open p2 and sign in first.",
+	},
+	"zh-CN": {
+		unknownServerTitle: "未知的 MCP 服务器",
+		malformedLink: "登录链接格式不正确。",
+		signInFailedTitle: (server) => `登录 ${server} 失败`,
+		signedInTitle: (server) => `已登录 ${server}`,
+		closePage: "你可以关闭此页面。",
+		probeHeading: (server) => `登录 ${server}`,
+		checking: "正在检查此浏览器是否运行在 p2 主机上…",
+		whereRuns: "这个浏览器运行在哪里？",
+		onP2: "在 p2 主机上",
+		otherDevice: "在其他设备上",
+		runsOnP2: "这个浏览器运行在 p2 主机上",
+		runsElsewhere: "这个浏览器运行在其他设备上",
+		notFinishedTitle: "登录未完成",
+		notSignedInHere: "此浏览器没有登录这里的 p2。请从地址栏复制本页完整地址，粘贴到 p2 的 MCP 面板中。",
+		noState: "授权响应中缺少 state。",
+		failedTitle: "登录失败",
+		notSignedInTitle: "未登录",
+		ownerOnly: "只有 p2 的所有者可以登录 MCP 服务器。请先打开 p2 并登录。",
+	},
+});

@@ -14,6 +14,7 @@ export type SessionSummary = Session & {
 	operation?: { readonly label: string; readonly error?: string; readonly dismiss?: () => void };
 };
 
+import { useMessages } from "../runtime/web.tsx";
 import { requestReveal } from "./Chat.tsx";
 import {
 	BranchIcon,
@@ -28,13 +29,16 @@ import {
 	SunIcon,
 	SystemThemeIcon,
 } from "./icons.tsx";
+import { LanguageButton } from "./LanguageButton.tsx";
+import { webMessages } from "./messages.ts";
 import { PiLogo } from "./PiLogo.tsx";
 import { getTheme, setTheme, subscribeTheme, type ThemePreference } from "./theme.ts";
 
 /** Working (pulsing), else an unread answer (steady blue), else nothing. */
 export function SessionDot({ worker }: { worker: SessionSummary["worker"] }) {
-	if (worker.busy?.length) return <span className="live-dot" title="Working" />;
-	if (worker.unread) return <span className="unread-dot" title="New answer" />;
+	const { t } = useMessages(webMessages);
+	if (worker.busy?.length) return <span className="live-dot" title={t("working")} />;
+	if (worker.unread) return <span className="unread-dot" title={t("newAnswer")} />;
 	return null;
 }
 
@@ -47,23 +51,29 @@ function ago(time: number): string {
 	return new Date(time).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-const THEMES: Record<ThemePreference, { label: string; icon: ReactNode; next: ThemePreference }> = {
-	system: { label: "System", icon: <SystemThemeIcon />, next: "light" },
-	light: { label: "Light", icon: <SunIcon />, next: "dark" },
-	dark: { label: "Dark", icon: <MoonIcon />, next: "system" },
+const THEMES: Record<
+	ThemePreference,
+	{ labelKey: "themeSystem" | "themeLight" | "themeDark"; icon: ReactNode; next: ThemePreference }
+> = {
+	system: { labelKey: "themeSystem", icon: <SystemThemeIcon />, next: "light" },
+	light: { labelKey: "themeLight", icon: <SunIcon />, next: "dark" },
+	dark: { labelKey: "themeDark", icon: <MoonIcon />, next: "system" },
 };
 
 /** Cycles System → Light → Dark; the choice is kept per browser. */
 function ThemeButton() {
+	const { t } = useMessages(webMessages);
 	const theme = useSyncExternalStore(subscribeTheme, getTheme, getTheme);
-	const { label, icon, next } = THEMES[theme];
+	const { labelKey, icon, next } = THEMES[theme];
+	const label = t(labelKey);
+	const nextLabel = t(THEMES[next].labelKey);
 	return (
 		<button
 			type="button"
 			className="icon-button theme-toggle"
 			onClick={() => setTheme(next)}
-			aria-label={`Theme: ${label}. Switch to ${THEMES[next].label}`}
-			title={`Theme: ${label}`}
+			aria-label={t("themeSwitch", label, nextLabel)}
+			title={t("themeTitle", label)}
 		>
 			{icon}
 		</button>
@@ -93,6 +103,7 @@ function BranchRows({
 	onRenameBranch?: (id: string, conversationId: number) => void;
 	hidden: boolean;
 }) {
+	const { t } = useMessages(webMessages);
 	return (
 		<div className="branch-rows" id={`branches-${session.id}`} hidden={hidden}>
 			{session.branches.map((branch) => {
@@ -103,7 +114,7 @@ function BranchRows({
 						<button
 							type="button"
 							className={`subagent-row branch-row ${active && conversationId === branch.conversation ? "active" : ""}`}
-							title={current ? "The current branch" : "Switch the session to this branch"}
+							title={current ? t("currentBranch") : t("switchBranch")}
 							onClick={() =>
 								current ? onOpen(session.id, branch.conversation) : onBranch(session.id, branch.conversation)
 							}
@@ -111,17 +122,17 @@ function BranchRows({
 							<span className="branch" />
 							<BranchIcon size={13} />
 							<span className="session-title">{label}</span>
-							{current && <span className="session-meta">current</span>}
+							{current && <span className="session-meta">{t("current")}</span>}
 							{session.worker.busy?.includes(branch.conversation) && (
-								<span className="live-dot" title="Working" />
+								<span className="live-dot" title={t("working")} />
 							)}
 						</button>
 						{onRenameBranch && (
 							<button
 								type="button"
 								className="branch-rename"
-								aria-label={`Rename branch ${label}`}
-								title="Rename branch"
+								aria-label={t("renameBranchOf", label)}
+								title={t("renameBranch")}
 								onClick={() => onRenameBranch(session.id, branch.conversation)}
 							>
 								<PencilIcon />
@@ -156,6 +167,7 @@ function SessionRow({
 	archived?: boolean;
 	children: ReactNode;
 }) {
+	const { t } = useMessages(webMessages);
 	// One control expands a session's branch rows and its subagents; a subagent shown expands them. Not any conversation
 	// but the main one: right after a `/tree` switch the page shows the new branch before the row names it main.
 	const showsSubagent = session.subagents.some((agent) => agent.conversationId === conversationId);
@@ -172,7 +184,15 @@ function SessionRow({
 	const [showStored, setShowStored] = useState(false);
 	const storedOpen = showStored || stored.some((agent) => agent.conversationId === conversationId);
 	const branches = onBranch !== undefined && !archived && session.branches.length >= 2;
-	const nested = [branches && "branches", listed.length > 0 && "subagents"].filter(Boolean).join(" and ");
+	const nestedWhat =
+		branches && listed.length > 0
+			? t("branchesAndSubagents")
+			: branches
+				? t("branchesOnly")
+				: listed.length > 0
+					? t("subagentsOnly")
+					: undefined;
+	const nested = nestedWhat !== undefined;
 	const row = (agent: (typeof listed)[number]) => (
 		<button
 			type="button"
@@ -180,8 +200,8 @@ function SessionRow({
 			className={`subagent-row ${conversationId === agent.conversationId ? "active" : ""}`}
 			title={
 				agent.location
-					? `Works in ${locationLabel(agent.location.env, agent.location.cwd)}`
-					: `Follows the session: ${locationLabel(session.env, session.cwd)}`
+					? t("worksIn", locationLabel(agent.location.env, agent.location.cwd))
+					: t("followsSession", locationLabel(session.env, session.cwd))
 			}
 			onClick={() => onOpen(session.id, agent.conversationId)}
 		>
@@ -192,7 +212,7 @@ function SessionRow({
 				{agent.location && (
 					<span className="subagent-location">{locationLabel(agent.location.env, agent.location.cwd)}</span>
 				)}
-				{session.worker.busy?.includes(agent.conversationId) && <span className="live-dot" title="Working" />}
+				{session.worker.busy?.includes(agent.conversationId) && <span className="live-dot" title={t("working")} />}
 				{agent.model.split("/").pop()}
 			</span>
 		</button>
@@ -205,7 +225,7 @@ function SessionRow({
 					<button
 						type="button"
 						className="subagent-toggle"
-						aria-label={`${expanded ? "Collapse" : "Expand"} ${nested}`}
+						aria-label={t("expandOrCollapse", expanded, nestedWhat ?? "")}
 						aria-expanded={expanded}
 						aria-controls={[branches && `branches-${session.id}`, listed.length > 0 && `subagents-${session.id}`]
 							.filter(Boolean)
@@ -214,7 +234,7 @@ function SessionRow({
 					>
 						{listed.length > 0 && <span>{agents.length}</span>}
 						{branches && (
-							<span className="toggle-branches" title={`${session.branches.length} branches`}>
+							<span className="toggle-branches" title={t("branches", session.branches.length)}>
 								<BranchIcon size={11} />
 								{session.branches.length}
 							</span>
@@ -233,7 +253,7 @@ function SessionRow({
 					</span>
 					{session.operation.dismiss && (
 						<button type="button" className="text-action" onClick={session.operation.dismiss}>
-							Dismiss
+							{t("dismiss")}
 						</button>
 					)}
 				</div>
@@ -260,7 +280,7 @@ function SessionRow({
 							onClick={() => setShowStored(!storedOpen)}
 						>
 							<span className="branch" />
-							<span className="session-title">{stored.length} archived</span>
+							<span className="session-title">{t("archivedCount", stored.length)}</span>
 							<span className={`chev ${storedOpen ? "open" : ""}`}>
 								<ChevronIcon size={12} />
 							</span>
@@ -321,6 +341,7 @@ export const Drawer = memo(function Drawer({
 	/** Environments that are sandboxes (the owner's view): their groups show a lock. */
 	sandboxes?: ReadonlySet<string>;
 }) {
+	const { t } = useMessages(webMessages);
 	const [query, setQuery] = useState("");
 	const [archived, setArchived] = useState(false);
 	const [results, setResults] = useState<SearchResults>();
@@ -360,18 +381,18 @@ export const Drawer = memo(function Drawer({
 		list.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
 	if (guest)
 		return (
-			<nav className="drawer-content" aria-label="Shared session">
+			<nav className="drawer-content" aria-label={t("sharedSession")}>
 				<div className="drawer-top">
 					<div className="brand">
 						<PiLogo compact />
-						<span>Shared session</span>
+						<span>{t("sharedSession")}</span>
 					</div>
 				</div>
 				<p className="empty-note">
-					Joined as <strong>{guest.name}</strong>
+					{t("joinedAs")} <strong>{guest.name}</strong>
 					<br />
 					{/* The open session's access: sessions may be shared with a guest in different modes. */}
-					{grantMode(guest, activeId) === "full" ? "Read/write" : "Read-only"}
+					{grantMode(guest, activeId) === "full" ? t("readWrite") : t("readOnly")}
 				</p>
 				<div className="session-scroll">
 					{sessions.map((session) => (
@@ -398,12 +419,13 @@ export const Drawer = memo(function Drawer({
 				</div>
 				<div className="drawer-foot">
 					<span className="spacer" />
+					<LanguageButton />
 					<ThemeButton />
 				</div>
 			</nav>
 		);
 	return (
-		<nav className="drawer-content" aria-label="Sessions">
+		<nav className="drawer-content" aria-label={t("sessions")}>
 			<div className="drawer-top">
 				<div className="brand">
 					<PiLogo compact />
@@ -411,9 +433,14 @@ export const Drawer = memo(function Drawer({
 				<div className="drawer-actions">
 					<button type="button" className="new-session" onClick={onNew} disabled={!connected}>
 						<PlusIcon size={16} />
-						<span>New session</span>
+						<span>{t("newSession")}</span>
 					</button>
-					<button type="button" className="collapse-sidebar" onClick={onCollapse} aria-label="Collapse sidebar">
+					<button
+						type="button"
+						className="collapse-sidebar"
+						onClick={onCollapse}
+						aria-label={t("collapseSidebar")}
+					>
 						<ChevronIcon size={20} />
 					</button>
 				</div>
@@ -424,8 +451,8 @@ export const Drawer = memo(function Drawer({
 					type="search"
 					value={query}
 					onChange={(event) => setQuery(event.target.value)}
-					placeholder={archived ? "Search archive" : "Search sessions"}
-					aria-label="Search sessions and messages"
+					placeholder={archived ? t("searchArchive") : t("searchSessions")}
+					aria-label={t("searchSessionsAndMessages")}
 				/>
 			</label>
 			<div className="session-scroll">
@@ -439,7 +466,7 @@ export const Drawer = memo(function Drawer({
 							<h3 className="group-head" title={`${first.env ? `${first.env}:` : ""}${first.cwd}`}>
 								<FolderIcon />
 								{first.env && sandboxes?.has(first.env) && (
-									<span className="group-lock" title="Sandbox">
+									<span className="group-lock" title={t("sandbox")}>
 										<LockIcon size={12} />
 									</span>
 								)}
@@ -448,8 +475,8 @@ export const Drawer = memo(function Drawer({
 									<button
 										type="button"
 										className="group-new"
-										aria-label={`New session in ${location}`}
-										title={`New session in ${location}`}
+										aria-label={t("newSessionIn", location)}
+										title={t("newSessionIn", location)}
 										disabled={!connected}
 										onClick={() => onNewIn(first.env ?? null, first.cwd)}
 									>
@@ -480,11 +507,11 @@ export const Drawer = memo(function Drawer({
 										<span className="session-meta">
 											{session.worker.error && (
 												<span className="error session-worker-error" title={session.worker.error}>
-													Worker failed
+													{t("workerFailed")}
 												</span>
 											)}
 											<SessionDot worker={session.worker} />
-											{archived ? "Tap to restore" : ago(session.updatedAt)}
+											{archived ? t("tapToRestore") : ago(session.updatedAt)}
 										</span>
 									</button>
 								</SessionRow>
@@ -494,7 +521,7 @@ export const Drawer = memo(function Drawer({
 				})}
 				{results && results.messages.length > 0 && (
 					<section className="group">
-						<h3>Messages</h3>
+						<h3>{t("messages")}</h3>
 						{results.messages.slice(0, 40).map((hit) => (
 							<button
 								type="button"
@@ -515,7 +542,7 @@ export const Drawer = memo(function Drawer({
 				)}
 				{!visible.length && !results?.messages.length && (
 					<p className="empty-note">
-						{query ? "Nothing found." : archived ? "No archived sessions." : "No sessions yet."}
+						{query ? t("nothingFound") : archived ? t("noArchivedSessions") : t("noSessionsYet")}
 					</p>
 				)}
 			</div>
@@ -526,22 +553,23 @@ export const Drawer = memo(function Drawer({
 					aria-pressed={archived}
 					onClick={() => setArchived(!archived)}
 				>
-					Archived
+					{t("archived")}
 				</button>
 				{footer ?? (
 					<>
 						<button type="button" className="foot-button" onClick={onProviders}>
-							Providers
+							{t("providers")}
 						</button>
-						<button type="button" className="foot-button" onClick={onEnvs} title="Remote environments">
-							Envs
+						<button type="button" className="foot-button" onClick={onEnvs} title={t("envsTitle")}>
+							{t("envs")}
 						</button>
-						<button type="button" className="foot-button" onClick={onOwnerLink} title="Sign in another device">
-							Devices
+						<button type="button" className="foot-button" onClick={onOwnerLink} title={t("devicesTitle")}>
+							{t("devices")}
 						</button>
 					</>
 				)}
 				<span className="spacer" />
+				<LanguageButton />
 				<ThemeButton />
 			</div>
 		</nav>

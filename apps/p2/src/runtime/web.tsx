@@ -1,6 +1,7 @@
 // Browser runtime: the client host in React, slots that plugins fill, object hooks, connection state, navigation.
 
-import type { Contract, Held, ParamsOf } from "@earendil-works/chord";
+import type { Contract, Held, Messages, ParamsOf, Translator } from "@earendil-works/chord";
+import { hostLanguage } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { NativeWatchable, Watchable } from "@earendil-works/chord/watch";
 import {
@@ -10,6 +11,7 @@ import {
 	useContext,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useOptimistic,
 	useRef,
 	useState,
@@ -55,6 +57,19 @@ export function useHost(): Host {
 	const host = useContext(HostContext);
 	if (host === undefined) throw new Error("no chord2 host in context");
 	return host;
+}
+
+/**
+ * `messages` in the language of the page's host (the user's pick, else the device's, matched against the catalogs),
+ * with its locale; re-renders when the locale or a translation changes. Before `startLanguage` follows a language, `t`
+ * renders the first catalog and `locale` is `undefined`.
+ */
+export function useMessages<N extends string, M>(
+	messages: Messages<N, M>,
+): { readonly t: Translator<N, M>; readonly locale: string | undefined } {
+	const state = hostLanguage(useHost());
+	const language = useSyncExternalStore(state.subscribe, state.read, state.read);
+	return useMemo(() => ({ t: messages.in(language), locale: language?.locale }), [messages, language]);
 }
 
 const EMPTY: ReadonlyMap<string, never> = new Map<string, never>();

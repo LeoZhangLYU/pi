@@ -20,7 +20,7 @@ export {
 	type SocketEvents,
 } from "./connection.ts";
 export { formatNumber, formatTime } from "./format.ts";
-export { createLanguage, type Language, type MessagesReport } from "./language.ts";
+export { createLanguage, type Language, type MessagesReport, resolveLocale } from "./language.ts";
 export { LoadedFacets, type Prepared, type SetEntry } from "./loaded.ts";
 export { LocaleChoice, localeChoiceFacet } from "./locale-choice.ts";
 export {
@@ -61,6 +61,7 @@ export {
 	themeVariables,
 } from "./themes.ts";
 export {
+	NO_TRANSLATIONS,
 	type Translation,
 	type TranslationIndex,
 	Translations,

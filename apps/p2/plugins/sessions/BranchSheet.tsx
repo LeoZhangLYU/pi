@@ -1,7 +1,8 @@
 // The owner's sheet for a `/tree` branch's label (docs/tree.md): a new label, or for conversation 1 the session title.
-import { Sheet } from "@p2/app/v1/web";
+import { Sheet, useMessages } from "@p2/app/v1/web";
 import { useState } from "react";
 import { PREVIEW_LENGTH } from "../tree/contract.ts";
+import { sessionsMessages } from "./messages.ts";
 
 /**
  * Renames a branch; `label` null shows `title` (conversation 1's default), and only conversation 1 may go back to it.
@@ -21,6 +22,7 @@ export function BranchSheet({
 	onSave: (label: string | null) => void;
 	onClose: () => void;
 }) {
+	const { t } = useMessages(sessionsMessages);
 	const [draft, setDraft] = useState(label ?? title);
 	const next = draft.replace(/\s+/g, " ").trim();
 	const resettable = conversation === 1;
@@ -30,7 +32,7 @@ export function BranchSheet({
 		onClose();
 	};
 	return (
-		<Sheet title="Branch name" onClose={onClose}>
+		<Sheet title={t("branchName")} onClose={onClose}>
 			<form
 				className="stack"
 				onSubmit={(event) => {
@@ -39,7 +41,7 @@ export function BranchSheet({
 				}}
 			>
 				<label className="field">
-					<span className="label">Label in the sidebar and /tree</span>
+					<span className="label">{t("branchLabel")}</span>
 					<input
 						className="input"
 						value={draft}
@@ -47,16 +49,14 @@ export function BranchSheet({
 						onChange={(event) => setDraft(event.target.value)}
 					/>
 				</label>
-				{resettable && (
-					<p className="muted small">The first branch shows the session title until it gets a label of its own.</p>
-				)}
+				{resettable && <p className="muted small">{t("branchFirstNote")}</p>}
 				<div className="inline-form">
 					<button type="submit" className="button" disabled={unchanged || (!next && !resettable)}>
-						Save
+						{t("save")}
 					</button>
 					{resettable && label !== null && (
 						<button type="button" className="text-action" onClick={() => save(null)}>
-							Use the session title
+							{t("useSessionTitle")}
 						</button>
 					)}
 				</div>
