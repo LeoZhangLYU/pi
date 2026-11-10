@@ -1,4 +1,4 @@
-// `/devices` in the TUI (p2-tui-port.md P11g), after the web's Devices sheet (owner): a one-time sign-in token for
+// `/devices` in the TUI (p2-tui-port.md P11g), after the web's Devices sheet (owner): a one-time recovery token for
 // another device (only the localhost device owner may mint one), and signing out this device or all devices. Signing
 // out is the launcher's: the TUI's sign-in cookie lives there, never in this worker, so it is a C launcher action
 // (`signOut`, section 3.2) whose consent UI shows the scope ("all devices, this one included").
@@ -13,7 +13,7 @@ function showToken(ctx: TuiContext, token: string): void {
 		"device-token",
 		new TextOverlay(
 			ctx,
-			"One-time sign-in token",
+			"One-time recovery token",
 			() => [
 				"This token grants full owner access. Give it only to your own device, not to collaborators.",
 				"Open Pi's domain on the other device, paste it into the sign-in page and sign in. It expires.",
@@ -57,11 +57,11 @@ function openDevices(ctx: TuiContext): void {
 			title: "Devices",
 			rows: () => [
 				...(canMint
-					? [{ key: "token", label: "Generate a one-time sign-in token for another device" }]
+					? [{ key: "token", label: "Generate a one-time recovery token for another device" }]
 					: [
 							{
 								key: "token-help",
-								label: "Tokens come from the host: npm run owner-link (associated devices cannot mint)",
+								label: "Recovery tokens come from the host: npm run owner-link (associated devices cannot mint)",
 								color: "muted" as const,
 							},
 						]),
@@ -79,7 +79,7 @@ function openDevices(ctx: TuiContext): void {
 							showToken(ctx, token);
 						})
 						.catch((error: unknown) => {
-							status = error instanceof Error ? error.message : "Could not generate a sign-in token.";
+							status = error instanceof Error ? error.message : "Could not generate a recovery token.";
 						})
 						.finally(() => ctx.requestRender());
 				} else if (row.key === "signout" || row.key === "signout-all") {

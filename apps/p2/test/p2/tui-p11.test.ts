@@ -697,7 +697,7 @@ test("/devices mints a token and signs out through the launcher's consent", asyn
 		return { ok: false, error: "denied" };
 	};
 	runtime.ctx.commands.run("p2.devices");
-	await poll(async () => (await screen()).includes("Generate a one-time sign-in token"));
+	await poll(async () => (await screen()).includes("Generate a one-time recovery token"));
 	send(ENTER);
 	await poll(async () => (await screen()).includes("one-time-token-123"));
 	assert.match(await screen(), /full owner access/);

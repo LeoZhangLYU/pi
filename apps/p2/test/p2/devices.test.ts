@@ -89,8 +89,8 @@ test("Devices plugin signs in a remote owner over HTTP/WS, never grants remote o
 		const token = (await devices.token(BACKGROUND_CONTEXT)).token;
 		const landing = await http(port, "/owner", { headers: TUNNEL });
 		assert.equal(landing.status, 200);
-		assert(landing.body.includes("One-time token") && landing.body.includes("Devices"));
-		assert(landing.body.includes('fetch("/owner/claim"'));
+		assert(landing.body.includes("No owner password is configured") && landing.body.includes("recovery token"));
+		assert(landing.body.includes('"/owner/claim"'));
 		assert(landing.body.includes('type="password"'));
 		assert(!landing.body.includes(token));
 		assert.match(String(landing.headers["content-security-policy"]), /script-src 'nonce-/);

@@ -3,6 +3,9 @@
 export { processLock } from "@earendil-works/chord/workers";
 export { PROXY_MARKER_HEADER, requestOrigin } from "../../hosts/principals.ts";
 export * from "../../runtime/http.ts";
-export { LOCAL_CHALLENGE_PATH, LOCAL_CLAIM_PATH, localOwnerProof } from "../../runtime/local-owner.ts";
+export * from "../../runtime/local-owner.ts";
+export * from "../../runtime/login-attempts.ts";
+export * from "../../runtime/owner-account.ts";
 export * from "../../runtime/page.ts";
+export * from "../../runtime/private-file.ts";
 export * from "../../runtime/server.ts";

@@ -8,6 +8,7 @@
 		"dev": "node --import ./src/source.ts scripts/dev.mjs",
 		"reload": "node --import ./src/source.ts scripts/reload.mjs",
 		"owner-link": "node --import ./src/source.ts scripts/owner-link.ts",
+		"set-password": "node --import ./src/source.ts scripts/set-password.ts",
 		"migrate-data": "node --import ./src/source.ts scripts/migrate-data.ts",
 		"radius:login": "node --import ./src/source.ts plugins/radius/login.ts",
 		"check": "node ../../scripts/biome-check.mjs && tsc --noEmit",

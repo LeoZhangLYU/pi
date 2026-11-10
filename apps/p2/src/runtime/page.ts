@@ -53,18 +53,34 @@ export function page({
 	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escapeHtml(title)}</title><style>${STYLE}</style>${nonce ? `<script nonce="${nonce}">${THEME}</script>` : ""}</head><body><main><header>${LOGO}<h1>${escapeHtml(heading)}</h1></header>${body}</main>${script && nonce ? `<script nonce="${nonce}">${script}</script>` : ""}</body></html>`;
 }
 
+/** What the sign-in page should show: whether an owner password exists, or why it cannot be used. */
+export type SignInState = { readonly account?: "configured" | "absent" | "invalid" };
+
+export type SignInOptions = SignInState & { readonly reload?: boolean };
+
 /**
- * Public, credential-free landing page. An invitation is only ever submitted in a same-origin POST. `reload`: load the
- * page once more from this origin first (a navigation from another site may have arrived without the owner's cookie);
- * that load is same-origin, so it never reloads again.
+ * Public, credential-free landing page. Sign-in is a same-origin POST (`/owner/login` for the password, `/owner/claim`
+ * for a recovery token); the page never contains a secret. Without a configured password it shows the recovery form
+ * only. `reload`: load the page once more from this origin first (a navigation from another site may have arrived
+ * without the owner's cookie); that load is same-origin, so it never reloads again.
  */
 export function signIn(
 	request: IncomingMessage,
 	response: ServerResponse,
 	status = 200,
-	options: { readonly reload?: boolean } = {},
+	options: SignInOptions = {},
 ): void {
 	const nonce = randomBytes(18).toString("base64url");
+	const configured = options.account === "configured";
+	let intro = `<p>No owner password is configured yet. Sign in with a recovery token, or run <span class="mono">npm run set-password</span> on the host (or start it with <span class="mono">P2_PASSWORD</span>) to create one.</p>`;
+	if (configured) intro = `<p>Sign in with the owner account for this server.</p>`;
+	else if (options.account === "invalid")
+		intro = `<p>Password sign-in is unavailable: the owner account file cannot be read. Sign in with a recovery token, or fix <span class="mono">owner-account.json</span> in the data directory on the host.</p>`;
+	const passwordForm = configured
+		? `<form id="sign-in"><label for="username">Username</label><input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required><button id="submit" type="submit">Sign in</button></form>`
+		: "";
+	const recovery = `<form id="recovery"><label for="token">Recovery token</label><input id="token" class="mono" type="password" autocomplete="off" spellcheck="false"${configured ? "" : " required autofocus"}><button id="recovery-submit" type="submit">Sign in</button></form>
+<p class="small">A recovery token is printed when the server starts; <span class="mono">npm run owner-link</span> on the host creates a link to one. It expires after ten minutes and works once.</p>`;
 	response.writeHead(status, {
 		"Content-Type": "text/html; charset=utf-8",
 		"Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
@@ -76,16 +92,18 @@ export function signIn(
 					title: "Pi · Sign in",
 					heading: "Sign in to Pi",
 					nonce,
-					body: `<p>Paste the sign-in token the server printed when it started, or run <span class="mono">npm run owner-link</span> on the host and open its link on this device. You can also paste a one-time token from Devices.</p>
-<form id="sign-in"><label for="token">One-time token</label><input id="token" class="mono" type="password" autocomplete="off" spellcheck="false" required autofocus><button id="submit" type="submit">Sign in</button></form>
-<p id="status" role="status"></p><p class="small">This grants full owner access, including shell commands. Tokens expire after ten minutes and work once.</p>`,
-					script: `${options.reload ? "if(!location.hash)location.replace(location.href);" : ""}const input=document.getElementById("token"),button=document.getElementById("submit"),status=document.getElementById("status");
-async function claim(token){button.disabled=true;status.className="";status.textContent="Signing in…";try{
- const r=await fetch("/owner/claim",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
- if(!r.ok)throw new Error("Invalid, expired or already-used link. Generate a fresh owner link on the host.");input.value="";location.replace("/");
-}catch(e){status.className="error";status.textContent=e.message;button.disabled=false;}}
-document.getElementById("sign-in").onsubmit=(event)=>{event.preventDefault();claim(input.value.trim());};
-if(location.hash){const fragment=location.hash.slice(1);history.replaceState(null,"","/owner");try{claim(decodeURIComponent(fragment));}catch{status.className="error";status.textContent="Invalid owner link.";}}`,
+					body: `${intro}
+${passwordForm}
+${configured ? `<details><summary class="small">Use a recovery token</summary>${recovery}</details>` : recovery}
+<p id="status" role="status"></p><p class="small">This grants full owner access, including shell commands. A sign-in lasts 30 days and renews while you use it.</p>`,
+					script: `${options.reload ? "if(!location.hash)location.replace(location.href);" : ""}const status=document.getElementById("status");
+const fail=(message)=>{status.className="error";status.textContent=message;};
+async function post(path,body){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});let data={};try{data=await response.json();}catch{data={};}if(!response.ok)throw new Error(data.error||"Sign-in failed. Try again.");}
+const signIn=document.getElementById("sign-in");
+if(signIn){const username=document.getElementById("username"),password=document.getElementById("password"),submit=document.getElementById("submit");signIn.onsubmit=(event)=>{event.preventDefault();submit.disabled=true;status.className="";status.textContent="Signing in…";post("/owner/login",{username:username.value,password:password.value}).then(()=>location.replace("/")).catch((error)=>{fail(error.message);password.value="";submit.disabled=false;});};}
+const recovery=document.getElementById("recovery"),token=document.getElementById("token"),recoverySubmit=document.getElementById("recovery-submit");
+if(recovery)recovery.onsubmit=(event)=>{event.preventDefault();recoverySubmit.disabled=true;status.className="";status.textContent="Signing in…";post("/owner/claim",{token:token.value.trim()}).then(()=>location.replace("/")).catch(()=>{fail("Invalid, expired or already-used link. Generate a fresh owner link on the host.");token.value="";recoverySubmit.disabled=false;});};
+if(location.hash){const fragment=location.hash.slice(1);history.replaceState(null,"","/owner");try{post("/owner/claim",{token:decodeURIComponent(fragment)}).then(()=>location.replace("/")).catch(()=>fail("Invalid owner link."));}catch{fail("Invalid owner link.");}}`,
 				}),
 	);
 }

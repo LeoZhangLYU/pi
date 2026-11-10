@@ -18,7 +18,7 @@ import { assertMigrated, hostFiles, openHostStore, serverDirectory } from "../ru
 import { fromOrigin, sendJson } from "../runtime/http.ts";
 import { captureProcessLogs, processLogs } from "../runtime/logs.ts";
 import { mintOwnerLink } from "../runtime/owner-link.ts";
-import { signIn } from "../runtime/page.ts";
+import { type SignInState, signIn } from "../runtime/page.ts";
 import { isGuest, isOwner, type P2Principal, SERVER } from "../runtime/principals.ts";
 import { takeProcessLock } from "../runtime/process-lock.ts";
 import {
@@ -30,6 +30,7 @@ import {
 	RequestResolvers,
 	Routes,
 	type ServerResourceOptions,
+	SignInStates,
 	serverCore,
 	Upgrades,
 	WorkerInitValues,
@@ -613,7 +614,8 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 					if (isGuest(principal)) {
 						response.writeHead(403);
 						response.end();
-					} else signIn(request, response, 401);
+					} else
+						signIn(request, response, 401, signInStateFor((await host.registry(SignInStates, ctx)).value) ?? {});
 					return;
 				}
 				const route = findRoute((await host.registry(Routes, ctx)).value, request.method ?? "GET", path);
@@ -649,7 +651,10 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 				}
 				// A link from another site may arrive without the owner's cookie (Chrome launching an installed app sent
 				// none): the page loads itself once more from this origin, which sends it.
-				signIn(request, response, 401, { reload: foreignBrowserRequest(request) && pageNavigation(request) });
+				signIn(request, response, 401, {
+					reload: foreignBrowserRequest(request) && pageNavigation(request),
+					...(signInStateFor((await host.registry(SignInStates, ctx)).value) ?? {}),
+				});
 			}, BACKGROUND_CONTEXT)
 			.catch((error: unknown) => {
 				console.error("p2 server: request failed", error);
@@ -745,21 +750,28 @@ function isOwnerNotice(error: HostError): boolean {
 /** How long a signalled server may take to close before it exits anyway (below `scripts/dev.mjs`'s 10 s SIGKILL). */
 const CLOSE_DEADLINE_MS = 8000;
 
+/** What the sign-in page shows: the first registered state provider (the devices plugin owns the owner account). */
+const signInStateFor = (states: ReadonlyMap<string, () => SignInState>): SignInState | undefined =>
+	[...states.values()][0]?.();
+
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	// Provider logins and server plugins (e.g. the Radius gateway) fetch in this process too.
 	configureFetch();
 	const server = await startServer();
 	const local = new URL(`http://127.0.0.1:${server.port}`);
 	console.log(`p2: ${local.origin} (data ${server.dataDir})`);
-	// A browser on this machine signs in once per profile by pasting this one-time token into the sign-in page (ten
-	// minutes; later ones: npm run owner-link). It is redacted from the server's log buffer; only the terminal shows it.
+	// The recovery token: if the owner password is lost, this one-time token (ten minutes; later ones: npm run
+	// owner-link) signs in on loopback or through an allowed tunnel host. It is redacted from the server's log
+	// buffer; only the terminal shows it.
 	await mintOwnerLink(local, server.dataDir, local).then(
 		(link) => {
 			const token = link.hash.slice(1);
 			processLogs.redactor.addSecret(token);
-			console.log(`p2: sign-in token (one use, ten minutes; paste it at ${local.origin}): ${token}`);
+			console.log(
+				`p2: recovery token (one use, ten minutes; paste it at ${local.origin} if the password is lost): ${token}`,
+			);
 		},
-		(error: unknown) => console.error(`p2: no sign-in token: ${error instanceof Error ? error.message : error}`),
+		(error: unknown) => console.error(`p2: no recovery token: ${error instanceof Error ? error.message : error}`),
 	);
 	// Every way out goes through `process.exit`: a signal's default action skips the exit hooks, which remove the
 	// macOS lock socket file (else the next start refuses) and kill the MCP servers' process groups.

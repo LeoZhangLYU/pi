@@ -49,7 +49,7 @@ function DevicesSheet() {
 					if (current) setToken(token);
 				})
 				.catch((reason: unknown) => {
-					if (current) setError(reason instanceof Error ? reason.message : "Could not generate a sign-in token.");
+					if (current) setError(reason instanceof Error ? reason.message : "Could not generate a recovery token.");
 				});
 		return () => {
 			current = false;
@@ -59,7 +59,8 @@ function DevicesSheet() {
 		<Sheet title="Devices" onClose={closeLayers}>
 			<div className="stack">
 				<p className="small">
-					This token grants full owner access. Give it only to your own device, not to collaborators.
+					This token grants full owner access. Give it only to your own device, not to collaborators. Use it to
+					sign in another device, or to recover access if the password is lost.
 				</p>
 				<p className="muted small">
 					Open Pi's domain on the other device, paste this token into the sign-in page, and tap Sign in. It expires
@@ -76,7 +77,7 @@ function DevicesSheet() {
 				) : token ? (
 					<>
 						<label className="label" htmlFor="owner-token">
-							One-time sign-in token
+							One-time recovery token
 						</label>
 						<textarea
 							id="owner-token"

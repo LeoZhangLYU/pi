@@ -27,8 +27,10 @@ P2_FAKE=1 npm start          # http://127.0.0.1:8788, data in ~/.pi/p2
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `P2_DATA_DIR` | `~/.pi/p2` | data directory: `catalog.sqlite`, `server/` and `sessions/<id>/` (see **Host stores and files**), `settings.json`, `models.json`, `envs.json`, `projects.json`, `mcp.json`, `mcp-auth.json`, `auth.json`, `radius.json`, `forwards.json` |
+| `P2_DATA_DIR` | `~/.pi/p2` | data directory: `catalog.sqlite`, `server/` and `sessions/<id>/` (see **Host stores and files**), `settings.json`, `models.json`, `envs.json`, `projects.json`, `mcp.json`, `mcp-auth.json`, `auth.json`, `radius.json`, `forwards.json`, `owner-account.json` |
 | `PORT` | `8788` | listen port (loopback only), so p2 never collides with pi-mobile on 8787 |
+| `P2_USERNAME` | `owner` | owner account username; read only when `P2_PASSWORD` bootstraps a missing account |
+| `P2_PASSWORD` | unset | creates `<P2_DATA_DIR>/owner-account.json` when none exists; ignored once the account exists (unset it after the first start) |
 | `P2_FAKE` | unset | `1`: the faux provider (`faux/faux-1`, echoes the prompt; `slow …` streams long; `rename-session <title>` calls the tool; `subagent`, `subagent-bad`, `subagent-answer`, `subagent-configure`, `subagent-send`, `subagent-archive`, `subagent-status` exercise subagents, `subagent <json>` calls the tool with those arguments, as do `team <json>`, `history_search|read|handoff <json>`, `location_envs|dirs|move <json>`, `tool_search <json>`, `terminal <json>` and `mcp__<server>__<tool> <json>`; `codemode` runs a script calling bash and read, `codemode-restart` one whose slow middle call a restart interrupts, `codemode <script>` runs that script; `artifact <json>` calls the artifact tool with those arguments; `steps` makes a turn of thinking, calls and words, `inline-steps` one with an inline artifact between two calls; `json <text>` answers exactly `<text>`; a one-shot agent whose task is not `json …`/`slow…` answers a small value matching its schema) |
 | `P2_IDLE_MS` | `300000` | idle time before a session worker stops |
 | `P2_PROVIDER`, `P2_MODEL` | unset | default model for new sessions after settings.json's `defaultModel` (both or neither; Pi Mobile's `PI_MOBILE_PROVIDER`/`PI_MOBILE_MODEL` work too) |
@@ -64,13 +66,14 @@ P2_FAKE=1 npm start          # http://127.0.0.1:8788, data in ~/.pi/p2
   aee97d3a9; the generator went with v1); `v1-data.test.ts` opens a copy and checks both tools and the contracts.
 - One server per data directory (process lock). To try p2 next to a real setup without touching it, set
   `P2_DATA_DIR` to a temporary directory.
-- Loopback alone is nobody: the local owner holds a local session cookie, from a sign-in link opened on the host or
-  a local sign-in with the data directory's owner key (TUI, owner-link, scripts; **Loopback owner** under Devices).
-  Through an HTTPS tunnel host listed in `P2_ALLOWED_HOSTS` (comma-separated),
-  the Devices plugin's owner cookie admits an associated remote owner; a share cookie admits only that session's
-  guest. Open `/owner` to sign in with a one-time token (see README). Other Host/Origin headers and forwarded
-  localhost requests get 403. Radius independently authenticates its owner; proxies never do. Associated cookies
-  are remote owners (`access: "device"` with a device ID). See README for owner links, logout and cookie migration.
+- Loopback alone is nobody: the owner signs in at `/owner` with the owner account (one username and password, see
+  **Owner account** below), or gets a local session cookie from a sign-in link opened on the host or a local sign-in
+  with the data directory's owner key (TUI, owner-link, scripts; **Loopback owner** under Devices). Through an HTTPS
+  tunnel host listed in `P2_ALLOWED_HOSTS` (comma-separated), the Devices plugin's owner cookie admits an associated
+  remote owner; a share cookie admits only that session's guest. The one-time recovery token (startup line or owner
+  link) signs in when the password is lost. Other Host/Origin headers and forwarded localhost requests get 403. Radius
+  independently authenticates its owner; proxies never do. Associated cookies are remote owners (`access: "device"`
+  with a device ID). See README for owner links, logout and cookie migration.
 - Tests: `node --import ./src/source.ts --test test/p2/<file>.test.ts` (fake provider, temporary data dirs, port 0).
   Wait for state changes with `until(readable, predicate)` (it subscribes). Never poll `ref.member.value`: an
   unsubscribed reference member keeps its last value.
@@ -1149,6 +1152,17 @@ translated phone drawer and intercept chat taps.
   and cannot mint invitations; redeemed on loopback they are local sessions. Compatible reloads keep invitations; restarts invalidate them but keep cookies/revocations.
   Tests use only temporary directories and port 0, with no real provider requests (`devices`, `proxy-marker`, `tui`,
   and the fragment-link browser regression in `ui-parity.test.ts`).
+- **Owner account** (`plugins/devices`, `src/runtime/owner-account.ts`): one username and one password, stored only as
+  a scrypt hash in `<data>/owner-account.json` (v1 parameters N=16384, r=8, p=1, keylen=32; mode 0600; atomic write).
+  `P2_USERNAME`/`P2_PASSWORD` bootstrap it only when no account file exists; `npm run set-password [username]` reads
+  the password from `P2_PASSWORD` or stdin and rewrites it. `POST /owner/login` (same-origin JSON, at most 1 KiB)
+  derives the key for every configured attempt, compares username and hash with `timingSafeEqual`, and throttles
+  globally (5 failures, 30 s, doubling to 5 minutes; one scrypt in flight). It answers 409 (no account), 503
+  (unreadable account file), 429 (blocked) or 401 (same text for either wrong field). A password session is the
+  devices cookie with a `pw.` kind (`p2_owner_<port>=pw.<generation>.<id>.<expiry>.<sig>`): a local session on
+  loopback, a Secure device session on a remote origin, renewed on each app load. Every password write regenerates
+  `generation`, so password-issued sessions end on their next request while owner-link and owner-key sessions stay
+  valid. Tests: `password-login.test.ts`.
 - **Loopback owner** (`plugins/devices`, `src/runtime/local-owner.ts`): loopback alone proves nothing on a shared
   machine, so the local owner (`access: "local"`) is a signed session cookie, the devices cookie with a `local.` kind
   (`p2_owner_<port>=local.<id>.<expiry>.<sig>`, HttpOnly, SameSite=Lax, never Secure, accepted only on loopback). A

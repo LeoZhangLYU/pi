@@ -1,30 +1,25 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
-import { cookieValue, localOwnerProof } from "@p2/app/v1/server";
+import { cookieValue, localOwnerProof, privateWrite } from "@p2/app/v1/server";
 
-/** An owner session of a browser or client: an associated device's, or the local owner's (loopback only). */
-export type OwnerSession = { readonly kind: "device" | "local"; readonly id: string; readonly expires: number };
+/**
+ * An owner session of a browser or client: an associated device's, the local owner's (loopback only), or one issued by
+ * the password (`generation` names the account write it belongs to; a changed password invalidates it).
+ */
+export type OwnerSession =
+	| { readonly kind: "device"; readonly id: string; readonly expires: number }
+	| { readonly kind: "local"; readonly id: string; readonly expires: number }
+	| { readonly kind: "password"; readonly id: string; readonly expires: number; readonly generation: string };
 
 export const ownerCookieName = (port: number): string => `p2_owner_${port}`;
 const TOKEN_LIFETIME = 10 * 60_000;
 const CHALLENGE_LIFETIME = 60_000;
 const COOKIE_LIFETIME = 30 * 24 * 60 * 60_000;
-/** `[local.]<id>.<expiry>.<signature>`; the signature covers the port and everything before it. */
-const SESSION_COOKIE = /^((?:local\.)?)([a-f0-9]{32})\.(\d+)\.([a-f0-9]{64})$/;
+/** `[local.|pw.<generation>.]<id>.<expiry>.<signature>`; the signature covers the port and everything before it. */
+const SESSION_COOKIE = /^(?:(local\.)|pw\.([a-f0-9]{32})\.)?([a-f0-9]{32})\.(\d+)\.([a-f0-9]{64})$/;
 const hash = (value: string): string => createHash("sha256").update(value).digest("hex");
-
-/** Atomically replace private state; a failed write never truncates the previous key or revocations. */
-async function privateWrite(path: string, content: string): Promise<void> {
-	const temporary = `${path}.${randomBytes(8).toString("hex")}.tmp`;
-	try {
-		await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
-		await rename(temporary, path);
-	} finally {
-		await rm(temporary, { force: true });
-	}
-}
 
 /**
  * Owner sessions are signed cookies, never the installation key: one per associated device, and local sessions that
@@ -144,6 +139,14 @@ export class OwnerAccess {
 		return this.sessionCookie(port, "local.", id, false);
 	}
 
+	/**
+	 * A session issued by the owner password, bound to `generation`: a new session (or `id`'s renewed). Secure only for
+	 * a remote origin; the same cookie is a local or a device session there.
+	 */
+	passwordCookie(port: number, generation: string, secure: boolean, id = randomBytes(16).toString("hex")): string {
+		return this.sessionCookie(port, `pw.${generation}.`, id, secure);
+	}
+
 	// SameSite=Lax, not Strict: a link into p2 from another site or local port must arrive signed in. The server drops
 	// every cookie principal of another site's requests except top-level page navigations (Fetch Metadata).
 	private sessionCookie(port: number, prefix: string, id: string, secure: boolean): string {
@@ -160,14 +163,17 @@ export class OwnerAccess {
 		const value = cookieValue(request, ownerCookieName(port));
 		const match = value && SESSION_COOKIE.exec(value);
 		if (!match) return undefined;
-		const [, prefix, id, expiry, signature] = match;
+		const [, localPrefix, generation, id, expiry, signature] = match;
 		const expires = Number(expiry);
 		if (!Number.isSafeInteger(expires) || expires <= this.now() || (this.revoked[id!] ?? 0) > this.now())
 			return undefined;
+		const prefix = localPrefix ?? (generation ? `pw.${generation}.` : "");
 		const payload = `${prefix}${id}.${expiry}`;
 		if (!timingSafeEqual(Buffer.from(signature!, "hex"), Buffer.from(this.signature(port, payload), "hex")))
 			return undefined;
-		return { kind: prefix ? "local" : "device", id: id!, expires };
+		if (localPrefix) return { kind: "local", id: id!, expires };
+		if (generation) return { kind: "password", id: id!, expires, generation };
+		return { kind: "device", id: id!, expires };
 	}
 
 	logout(session: OwnerSession): Promise<void> {

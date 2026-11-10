@@ -60,7 +60,8 @@ cd apps/p2
 npm run dev                  # dev mode: apply plugin changes, including web facets, with Reload or `npm run reload`
 npm start                    # without the dev supervisor
 P2_FAKE=1 npm start          # fake model, no provider needed
-npm run owner-link [url]     # one-time owner sign-in link for another device (run on the machine itself)
+npm run owner-link [url]     # one-time recovery sign-in link for another device (run on the machine itself)
+npm run set-password [user]  # set/change the owner password (password from P2_PASSWORD or stdin)
 npm run tui [url]            # TUI (Node >= 26.5.1); on loopback it signs in with the data directory's owner key
 npm run reload [plugins] [--restart]
 npm run check                # Biome + tsc
@@ -70,11 +71,13 @@ npm test                     # full suite; TUI tests need Node 26, browser tests
 Environment variables: `docs/p2-notes.md` (Running). Configuration in the data dir: `models.json`, `settings.json`
 (incl. `codemode`, default on in p2), `envs.json`, `projects.json`, `mcp.json`, `auth.json`, `radius.json`, `forwards.json`.
 
-**Sign-in.** Loopback alone is nobody (shared machines). A browser on the host signs in once per profile with the
-token the server prints at startup (pasted into the sign-in page); the TUI and scripts sign in with the data directory's owner key (README, Signing
-in on this machine). Other devices get owner rights with a link from `npm run owner-link` (single use, 10 minutes,
-long-lived signed cookie). Guests join through share links. Requests other
-websites make never carry owner rights. Sign out per device or all devices in the Devices sheet.
+**Sign-in.** Loopback alone is nobody (shared machines). The owner signs in at `/owner` with the owner account; the
+first one comes from `P2_USERNAME`/`P2_PASSWORD` on a data dir without `owner-account.json`, or from `npm run
+set-password`. The startup recovery token (pasted into the sign-in page) and `npm run owner-link` are the escape
+hatch when the password is lost; the TUI and scripts sign in with the data directory's owner key (README, Signing in
+on this machine). Other devices sign in with the password or a recovery link (single use, 10 minutes, long-lived
+signed cookie). Guests join through share links. Requests other websites make never carry owner rights. Sign out per
+device or all devices in the Devices sheet.
 
 **Dev mode.** A file watcher only marks plugins dirty; reloads are explicit (button, `npm run reload`, the
 owner-only `reload_plugins` tool) because a watcher can't tell when an agent has finished a multi-file edit.

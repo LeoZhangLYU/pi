@@ -11,7 +11,7 @@ export type LogSnapshot = { source: string; lines: LogLine[] };
 export type LogNotice = { id: number; time: number; source: string; message: string };
 const REDACTED = "[redacted]";
 const SENSITIVE =
-	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|authorization|cookie|credential|private[-_]?key|^key$|^access$|^refresh$)/i;
+	/(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|authorization|cookie|credential|private[-_]?key|^key$|^access$|^refresh$|^hash$|^salt$)/i;
 
 /** Literal secrets supplement structural redaction (e.g. a key printed without its field name). */
 export class LogRedactor {
@@ -67,6 +67,7 @@ export class LogRedactor {
 				"discord.json",
 				"owner-key",
 				"owner-token.txt",
+				"owner-account.json",
 			]) {
 				const path = join(directory, name);
 				try {

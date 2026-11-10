@@ -20,7 +20,9 @@ cd apps/p2
 npm start
 ```
 
-Open http://127.0.0.1:8788 and paste the sign-in token the server prints at startup (`p2: sign-in token (…): <token>`).
+Open http://127.0.0.1:8788 and sign in with the owner account. Set it on the first start with
+`P2_USERNAME`/`P2_PASSWORD` (see below), or run `npm run set-password` and open `/owner`. The startup `p2: recovery
+token (…): <token>` line is the escape hatch if the password is lost.
 `PORT` changes the port; `P2_DATA_DIR` changes the default data directory `~/.pi/p2`.
 `P2_FAKE=1 npm start` uses a fake provider for demos, but tools still act on real files.
 See [development notes](docs/p2-notes.md) for dev mode, architecture and testing.
@@ -31,20 +33,28 @@ search until nothing new).
 ## Signing in on this machine
 
 Loopback alone proves nothing: on a machine with several users, any of them reaches `127.0.0.1:8788`. The owner is
-whoever can read the server's private data directory (0700; its `owner-key` is 0600):
+whoever has the owner password or can read the server's private data directory (0700; its `owner-key` is 0600):
 
-- **Browser:** each browser profile signs in once: paste the one-time token the server prints at startup (valid ten
-  minutes) into the sign-in page, or open a fresh link from `npm run owner-link -- http://127.0.0.1:$PORT`. Redeemed
-  on loopback, the token gives a local owner session (`access: "local"`): it may mint owner links and use loopback
-  provider sign-ins. The session
-  cookie lasts 30 days and each app load renews it, so a browser in use stays signed in. A browser without it gets the
-  sign-in page (`/health` stays open).
+- **Owner account:** sign in at `/owner` with the owner username and password. Create the first one by starting the
+  server with `P2_USERNAME` (default `owner`) and `P2_PASSWORD`, which write `<P2_DATA_DIR>/owner-account.json` (0600,
+  scrypt hash) only when no account exists; or run `npm run set-password [username]` (password from `P2_PASSWORD` or
+  stdin). The sign-in cookie lasts 30 days and each app load renews it, so a browser in use stays signed in. A browser
+  without it gets the sign-in page (`/health` stays open).
+- **Recovery token (escape hatch):** the one-time token the server prints at startup (valid ten minutes) or a fresh
+  link from `npm run owner-link -- http://127.0.0.1:$PORT`. Paste the token at `/owner`, or open the link. Redeemed on
+  loopback, it gives a local owner session (`access: "local"`): it may mint owner links and use loopback provider
+  sign-ins. Use it when the password is lost.
 - **TUI, `npm run owner-link`, `scripts/verify-sessions.ts`:** they sign in by themselves with the owner key of the data
   directory (`P2_DATA_DIR`, default `~/.pi/p2`), which must be the running server's: run them as the server's user,
   with its `P2_DATA_DIR`. Otherwise they say which directory did not match (the TUI then asks for an owner link). The
   key never leaves the client: the server sends a one-time challenge, and the client answers with an HMAC of it and the
   server's port, so whatever listens on that port (another user's process while p2 is down) cannot replay the answer.
 - **Radius** authenticates its relayed requests itself and needs none of this.
+
+Changing the password (another `npm run set-password` or `P2_PASSWORD` write) regenerates the account's session
+generation: password-issued sessions end on their next request, while owner-link and owner-key sessions stay valid.
+Already-open WebSockets from an old password session persist until they reconnect; **Sign out all devices** ends every
+session immediately.
 
 **Remaining risk:** browser cookies are not port-scoped, so a browser holding the session cookie sends it to any
 `127.0.0.1:<port>` page it opens, including another local user's server. That cookie is a session, not the key: **Sign
@@ -54,6 +64,10 @@ out all devices** ends it (and every other session). Use a separate browser prof
 
 The server listens only on loopback. Use an HTTPS tunnel or reverse proxy preserving the public Host header, and
 list its hostname in `P2_ALLOWED_HOSTS` (comma-separated for several hosts).
+
+Open `https://your-domain/owner` on the other device and sign in with the owner username and password. On a remote
+origin the password session is a Secure device session: it cannot mint recovery tokens. To invite the device with a
+recovery link instead, on the host with `PORT` matching its running server:
 
 1. On the host, with `PORT` matching its running server:
 

@@ -146,6 +146,19 @@ test("logs redact provider credentials, proxy secrets, cookies and Basic auth be
 		JSON.stringify({ providers: { fixture: { apiKey: "fixture-model-key" } } }),
 	);
 	await writeFile(join(directory, "owner-key"), "fixture-owner-key");
+	await writeFile(
+		join(directory, "owner-account.json"),
+		JSON.stringify({
+			version: 1,
+			username: "owner",
+			salt: "fixture-account-salt",
+			hash: "fixture-account-hash",
+			scrypt: { N: 16384, r: 8, p: 1, keylen: 32 },
+			revision: 1,
+			generation: "fixture-account-generation",
+			updatedAt: 1,
+		}),
+	);
 	const store = new LogStore({ lines: 4, bytes: 500, sources: 2, lineBytes: 128 });
 	store.redactor.addDirectory(directory);
 	store.redactor.addSecret("fixture-proxy-secret");
@@ -159,6 +172,8 @@ test("logs redact provider credentials, proxy secrets, cookies and Basic auth be
 		"fixture-oauth-refresh",
 		"fixture-model-key",
 		"fixture-owner-key",
+		"fixture-account-salt",
+		"fixture-account-hash",
 		"fixture-proxy-secret",
 		"fixture-url-code",
 		"fixture-url-state",

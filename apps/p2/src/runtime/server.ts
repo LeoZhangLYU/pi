@@ -27,6 +27,7 @@ import {
 	type Self,
 	serveKeyed,
 } from "./chord.ts";
+import type { SignInState } from "./page.ts";
 import { isGuest, isOwner, type P2Principal } from "./principals.ts";
 import { record } from "./schema.ts";
 
@@ -184,6 +185,13 @@ export const Routes = keyedRegistry<RouteHandler>("p2.routes");
 export type PageCookie = (request: IncomingMessage, access: RequestAccess) => string | undefined;
 export const PageCookies = keyedRegistry<PageCookie>("p2.page-cookies");
 
+/**
+ * What the sign-in page shows beyond the request: whether an owner password is configured. The devices plugin answers;
+ * without an answer the page offers the recovery token only.
+ */
+export type SignInStateProvider = () => SignInState;
+export const SignInStates = keyedRegistry<SignInStateProvider>("p2.sign-in-states");
+
 /** Authorized WebSocket upgrades by exact path. Plugins own their byte channels, not the server host. */
 export type UpgradeHandler = (
 	request: IncomingMessage,
@@ -283,6 +291,7 @@ export function serveServerRegistries(facet: FacetHost): void {
 		RequestResolvers,
 		Routes,
 		PageCookies,
+		SignInStates,
 		Upgrades,
 		Authenticators,
 		ShareUrls,

@@ -14,14 +14,19 @@ import {
 	fromOrigin,
 	LOCAL_CHALLENGE_PATH,
 	LOCAL_CLAIM_PATH,
+	LoginAttempts,
+	OwnerAccounts,
 	PageCookies,
 	type RequestOrigin,
 	RequestResolvers,
 	Routes,
 	requestOrigin,
 	Server,
+	type SignInState,
+	SignInStates,
 	sendJson,
 	signIn,
+	type Verification,
 } from "@p2/app/v1/server";
 import { DeviceAccess, DeviceAccesses, Devices } from "./contract.ts";
 import { OwnerAccess } from "./owner-access.ts";
@@ -34,6 +39,18 @@ export default defineFacet((host) => {
 			async () => OwnerAccess.open(server.info.value.dataDir),
 			(access) => access.close(),
 		);
+		// The owner account (one username and password) and the login throttle. Both stay in this plugin object.
+		const accountsResource = self.open(
+			async () => OwnerAccounts.open(server.info.value.dataDir),
+			() => {},
+		);
+		const loginAttempts = new LoginAttempts();
+		const signInState = (): SignInState => {
+			const state = accountsResource.value.state();
+			return {
+				account: state.kind === "configured" ? "configured" : state.kind === "absent" ? "absent" : "invalid",
+			};
+		};
 		self.contribute(DeviceAccesses, {
 			get access() {
 				return accessResource.value;
@@ -42,6 +59,14 @@ export default defineFacet((host) => {
 		// A local session counts only on loopback: a copied cookie on a tunnel host or through Radius is nobody.
 		const principal = (request: IncomingMessage, origin: RequestOrigin): P2Principal | undefined => {
 			const session = accessResource.value.session(request, origin.port);
+			if (session?.kind === "password") {
+				// A password change regenerates the account's generation: its sessions end on their next request.
+				const state = accountsResource.value.state();
+				if (state.kind !== "configured" || state.account.generation !== session.generation) return undefined;
+				return origin.remote
+					? { kind: "owner", access: "device", device: session.id }
+					: { kind: "owner", access: "local" };
+			}
 			if (session?.kind === "device") return { kind: "owner", access: "device", device: session.id };
 			return session?.kind === "local" && !origin.remote ? { kind: "owner", access: "local" } : undefined;
 		};
@@ -54,13 +79,22 @@ export default defineFacet((host) => {
 				return origin && owner ? { origin, principal: owner } : undefined;
 			},
 		});
-		// A local session in use does not expire: each app load renews it for another 30 days.
+		// A local or password session in use does not expire: each app load renews it for another 30 days.
 		self.contribute(PageCookies, {
 			localSession: (request, { origin }) => {
 				const session = origin.remote ? undefined : accessResource.value.session(request, origin.port);
 				return session?.kind === "local" ? accessResource.value.localCookie(origin.port, session.id) : undefined;
 			},
+			passwordSession: (request, { origin }) => {
+				const session = accessResource.value.session(request, origin.port);
+				if (session?.kind !== "password") return undefined;
+				const state = accountsResource.value.state();
+				if (state.kind !== "configured" || state.account.generation !== session.generation) return undefined;
+				return accessResource.value.passwordCookie(origin.port, session.generation, origin.remote, session.id);
+			},
 		});
+		// What the sign-in page shows: whether the owner password exists (see src/runtime/page.ts).
+		self.contribute(SignInStates, { ownerAccount: signInState });
 		/** Reads a small JSON body; undefined (after answering 413/400) when it is too large or not JSON. */
 		const readJson = async (request: IncomingMessage, response: ServerResponse): Promise<unknown> => {
 			let body = "";
@@ -109,9 +143,11 @@ export default defineFacet((host) => {
 				if (all) await accessResource.value.rotate();
 				else if (session) await accessResource.value.logout(session);
 			} finally {
-				// Local sessions share one principal: ending one leaves the others' live links alone.
+				// Local sessions share one principal: ending one leaves the others' live links alone. A remote password
+				// session is a device of its own (loopback password sessions are the shared local principal).
 				if (all) await server.revokeOwners({}, ctx);
-				else if (session?.kind === "device") await server.revokeOwners({ device: session.id }, ctx);
+				else if (session && (session.kind === "device" || (session.kind === "password" && access.origin.remote)))
+					await server.revokeOwners({ device: session.id }, ctx);
 			}
 			sendJson(
 				response,
@@ -121,14 +157,71 @@ export default defineFacet((host) => {
 			);
 		};
 		self.contribute(Routes, {
-			"GET /owner": (request, response) => signIn(request, response),
-			"HEAD /owner": (request, response) => signIn(request, response),
+			"GET /owner": (request, response) => signIn(request, response, 200, signInState()),
+			"HEAD /owner": (request, response) => signIn(request, response, 200, signInState()),
 			"GET /owner/check": (request, response, { principal }) => {
 				if (!isOwner(principal)) {
-					signIn(request, response, 401);
+					signIn(request, response, 401, signInState());
 					return;
 				}
 				sendJson(response, 200, { owner: true });
+			},
+			// The owner account (one username and password). The token routes below are the recovery escape hatch.
+			"POST /owner/login": async (request, response, { origin }) => {
+				if (!sameOriginPost(request, response, origin)) return;
+				const value = await readJson(request, response);
+				if (value === undefined) return;
+				const field = (key: string): unknown =>
+					value && typeof value === "object" && key in value ? (value as Record<string, unknown>)[key] : undefined;
+				const username = field("username");
+				const password = field("password");
+				if (typeof username !== "string" || typeof password !== "string") {
+					sendJson(response, 400, { error: "Username and password are required" });
+					return;
+				}
+				const state = accountsResource.value.state();
+				if (state.kind !== "configured") {
+					sendJson(response, state.kind === "absent" ? 409 : 503, {
+						error:
+							state.kind === "absent"
+								? "No owner password is configured. Sign in with a recovery token or run npm run set-password."
+								: "Password sign-in is unavailable. Sign in with a recovery token.",
+					});
+					return;
+				}
+				const release = loginAttempts.acquire();
+				if (release === undefined) {
+					response.setHeader("Retry-After", String(Math.max(1, Math.ceil(loginAttempts.retryAfterMs() / 1000))));
+					sendJson(response, 429, { error: "Too many attempts. Wait and try again." });
+					return;
+				}
+				let verification: Verification;
+				try {
+					verification = await accountsResource.value.verify(username.trim(), password);
+				} finally {
+					release();
+				}
+				if (verification.kind !== "configured") {
+					sendJson(response, verification.kind === "absent" ? 409 : 503, {
+						error:
+							verification.kind === "absent"
+								? "No owner password is configured. Sign in with a recovery token or run npm run set-password."
+								: "Password sign-in is unavailable. Sign in with a recovery token.",
+					});
+					return;
+				}
+				if (!verification.matched) {
+					loginAttempts.failed();
+					sendJson(response, 401, { error: "Invalid username or password" });
+					return;
+				}
+				loginAttempts.succeeded();
+				const cookie = accessResource.value.passwordCookie(
+					origin.port,
+					verification.account.generation,
+					origin.remote,
+				);
+				sendJson(response, 200, { ok: true }, { "Set-Cookie": cookie });
 			},
 			"POST /owner/logout": (request, response, access, ctx) => logout(request, response, access, false, ctx),
 			"POST /owner/logout-all": (request, response, access, ctx) => logout(request, response, access, true, ctx),
