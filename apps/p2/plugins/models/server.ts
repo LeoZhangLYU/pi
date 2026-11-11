@@ -1,7 +1,14 @@
-import { defineFacet, deriveTyped, followNative, forbidden, isOwner } from "@p2/app/v1";
+import { defineFacet, deriveTyped, followNative, forbidden, isOwner, nativeOf } from "@p2/app/v1";
 import { Server, serverOf } from "@p2/app/v1/server";
 import { openResources, resourceState } from "./config.ts";
-import { ModelConfig, ModelResources, Models } from "./contract.ts";
+import { CustomProviders, ModelConfig, ModelResources, Models } from "./contract.ts";
+import {
+	addCustomProvider,
+	discoverModels,
+	normalizeCustomProvider,
+	removeCustomProvider,
+	updateCustomProvider,
+} from "./custom-providers.ts";
 import { resolveModelScope } from "./scope.ts";
 
 export default defineFacet((host) => {
@@ -40,6 +47,69 @@ export default defineFacet((host) => {
 				const cleaned = patterns.map((pattern) => pattern.trim()).filter(Boolean);
 				await opened.saveSettings(cleaned.length ? { ...settings, enabledModels: cleaned } : settings);
 				return null;
+			},
+		};
+	});
+
+	host.serve(CustomProviders, (_params, principal, self) => {
+		if (!isOwner(principal)) throw forbidden("Custom providers are only available to owners");
+		const config = self.get(ModelConfig, {});
+		const resources = nativeOf(self, ModelResources, "The model configuration");
+		const providers = deriveTyped(self, [config.snapshot], ([snapshot]) => {
+			const stored = new Set(snapshot.credentials.map((credential) => credential.providerId));
+			const configured = new Set(snapshot.configuredProviders ?? []);
+			return (snapshot.customProviders ?? []).map((provider) => ({
+				...provider,
+				storedKey: stored.has(provider.id),
+				configuredKey: configured.has(provider.id),
+			}));
+		});
+		return {
+			variant: "owner",
+			members: {
+				providers,
+				add: async ({ provider, apiKey }) => {
+					const opened = resources().resources;
+					const input = normalizeCustomProvider(provider);
+					const custom = opened.customProviderIds();
+					const builtin = new Set(
+						opened.models
+							.getProviders()
+							.map((entry) => entry.id)
+							.filter((id) => !custom.has(id)),
+					);
+					await opened.writeModels((doc) => addCustomProvider(doc, input, builtin));
+					if (apiKey !== undefined) {
+						try {
+							await opened.credentials.modify(input.id, async () => ({ type: "api_key", key: apiKey }));
+						} catch (error) {
+							// The provider is useless without its key: put models.json back as it was.
+							await opened.writeModels((doc) => removeCustomProvider(doc, input.id)).catch(() => {});
+							throw error;
+						}
+					}
+					return null;
+				},
+				update: async ({ provider, apiKey, clearKey }) => {
+					const opened = resources().resources;
+					const id = provider.id.trim();
+					if (!opened.customProviderIds().has(id)) throw new Error(`Provider ${id} is not defined in models.json`);
+					const input = normalizeCustomProvider(provider);
+					await opened.writeModels((doc) => updateCustomProvider(doc, id, input));
+					if (apiKey !== undefined)
+						await opened.credentials.modify(id, async () => ({ type: "api_key", key: apiKey }));
+					else if (clearKey) await opened.credentials.delete(id);
+					return null;
+				},
+				remove: async ({ id }) => {
+					const opened = resources().resources;
+					await opened.writeModels((doc) => removeCustomProvider(doc, id));
+					await opened.credentials.delete(id);
+					return null;
+				},
+				discover: async ({ baseUrl, api, apiKey }) => ({
+					models: await discoverModels({ baseUrl, api, apiKey }),
+				}),
 			},
 		};
 	});

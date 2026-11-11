@@ -79,9 +79,15 @@ export default defineFacet((host) => {
 		);
 		const providers = deriveTyped(self, [config.snapshot], ([snapshot]) => {
 			const stored = new Map(snapshot.credentials.map((credential) => [credential.providerId, credential.type]));
+			const configured = new Set(snapshot.configuredProviders ?? []);
 			return snapshot.providers
 				.filter((provider) => provider.loginMethods.length > 0)
-				.map(({ id, name, loginMethods }) => ({ id, name, loginMethods, signedIn: stored.get(id) ?? null }));
+				.map(({ id, name, loginMethods }) => ({
+					id,
+					name,
+					loginMethods,
+					signedIn: stored.get(id) ?? (configured.has(id) ? "api_key" : null),
+				}));
 		});
 		return {
 			variant: "owner",

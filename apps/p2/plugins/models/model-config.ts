@@ -394,7 +394,47 @@ export class ModelConfig {
 		return [...this.providers.keys()];
 	}
 
+	/** Whether the provider's models.json entry carries an API key (literal, `$ENV` or `!command`). */
+	hasConfiguredKey(providerId: string): boolean {
+		return this.providers.get(providerId)?.apiKey !== undefined;
+	}
+
 	getError(): string | undefined {
 		return this.error;
 	}
+}
+
+/** models.json as edited: the providers and whatever else the file has (`$schema`, unknown keys). */
+export type ModelsDocument = { providers: Record<string, ModelsJsonProvider>; [key: string]: unknown };
+
+/** The document in `content`; comments and a BOM are accepted, a missing `providers` becomes `{}`. */
+export function parseModelsDocument(content: string | undefined): ModelsDocument {
+	if (!content?.trim()) return { providers: {} };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(stripJsonComments(stripBom(content)));
+	} catch {
+		throw new Error("Invalid models.json syntax");
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+		throw new Error("Invalid models.json: expected an object");
+	const providers = (parsed as { providers?: unknown }).providers;
+	if (providers === undefined) return { ...(parsed as object), providers: {} } as ModelsDocument;
+	if (!providers || typeof providers !== "object" || Array.isArray(providers))
+		throw new Error("Invalid models.json: providers must be an object");
+	return parsed as ModelsDocument;
+}
+
+/** The document as written: normalized JSON, no comments (models.json is read back by pi and p2). */
+export function serializeModelsDocument(doc: ModelsDocument): string {
+	return `${JSON.stringify(doc, null, 2)}\n`;
+}
+
+/** What is wrong with a document per models.json's schema, or undefined. */
+export function modelsDocumentError(value: unknown): string | undefined {
+	if (validateModelsConfig.check(value)) return undefined;
+	const errors = validateModelsConfig
+		.errors(value)
+		.map((error) => `  - ${formatValidationPath(error)}: ${error.message}`);
+	return errors.join("\n") || "Unknown schema error";
 }

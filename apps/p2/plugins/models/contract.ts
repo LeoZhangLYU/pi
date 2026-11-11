@@ -1,4 +1,4 @@
-import { arr, nul, num, obj, opt, type Static, str, union, unknown } from "@earendil-works/pi-schema";
+import { arr, bool, nul, num, obj, opt, type Static, str, union, unknown } from "@earendil-works/pi-schema";
 import { defineRegistry, local, method, remote, serverHost, unsafe } from "@p2/app/v1";
 import type { MobileSettings } from "@p2/app/v1/node";
 import type { ResourceSnapshot, Resources } from "./resources.ts";
@@ -84,6 +84,72 @@ export const ModelResources = defineRegistry<
 	{ readonly resources: Resources },
 	{ readonly resources: Resources } | undefined
 >("p2.model-resources", { version: 1 });
+
+/** A custom provider's model, as models.json defines it. */
+export const CustomProviderModelSchema = obj({
+	id: str({ minLength: 1, maxLength: 300 }),
+	name: opt(str({ minLength: 1, maxLength: 128 })),
+});
+
+/** A custom provider without its API key: never send a secret to the page. */
+export const CustomProviderSchema = obj({
+	id: str(),
+	name: str(),
+	baseUrl: str(),
+	api: str(),
+	models: arr(CustomProviderModelSchema),
+	/** An auth.json credential is stored for it. */
+	storedKey: bool(),
+	/** Its models.json entry carries an API key (literal, `$ENV` or `!command`). */
+	configuredKey: bool(),
+});
+export type CustomProvider = Static<typeof CustomProviderSchema>;
+
+/** What the custom provider form saves; the ID is immutable after creation. */
+export const CustomProviderInputSchema = obj({
+	id: str({ minLength: 1 }),
+	name: opt(str({ minLength: 1, maxLength: 128 })),
+	baseUrl: str({ minLength: 1 }),
+	api: str({ minLength: 1 }),
+	models: arr(CustomProviderModelSchema, { minItems: 1, maxItems: 500 }),
+});
+
+/** models.json's custom providers, added, edited and removed from the Providers sheet (the owner only). */
+export const CustomProviders = remote("p2.custom-providers", {
+	version: 1,
+	params: {},
+	hostAddress: serverHost,
+	variants: {
+		owner: {
+			state: { providers: arr(CustomProviderSchema) },
+			methods: {
+				add: method(
+					obj({
+						provider: CustomProviderInputSchema,
+						apiKey: opt(str({ minLength: 1, maxLength: 10_000 })),
+					}),
+				),
+				update: method(
+					obj({
+						provider: CustomProviderInputSchema,
+						apiKey: opt(str({ minLength: 1, maxLength: 10_000 })),
+						clearKey: opt(bool()),
+					}),
+				),
+				remove: method(obj({ id: str({ minLength: 1 }) })),
+				/** Best effort: the models an endpoint lists, using `apiKey` for this request only. */
+				discover: method(
+					obj({
+						baseUrl: str({ minLength: 1 }),
+						api: str({ minLength: 1 }),
+						apiKey: opt(str({ maxLength: 10_000 })),
+					}),
+					obj({ models: arr(CustomProviderModelSchema) }),
+				),
+			},
+		},
+	},
+});
 
 /** The worker's own configuration observer (host-internal): its current, valid `settings.json`, hot-reloaded. */
 export const WorkerModels = local("p2.worker-models", {

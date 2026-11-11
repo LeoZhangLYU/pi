@@ -2,11 +2,13 @@
 
 import type { AuthEvent } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT, contribute, defineFacet, Translations } from "@p2/app/v1";
+import type { Layer } from "@p2/app/v1/web";
 import {
 	CheckIcon,
 	ChevronIcon,
 	closeLayers,
 	openLayer,
+	PlusIcon,
 	SearchIcon,
 	Sheet,
 	Slots,
@@ -22,6 +24,8 @@ import {
 	useSheet,
 } from "@p2/app/v1/web";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { CustomProviders } from "../models/contract.ts";
+import { CustomProviderSheet } from "./CustomProviderSheet.tsx";
 import { type LoginState, ProviderLogin } from "./contract.ts";
 import { loginMessages } from "./messages.ts";
 
@@ -175,7 +179,18 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 	const [query, setQuery] = useState("");
 	const nav = useNavigation();
 	const route = useRoute();
-	const selected = useSheet("providers")?.locator;
+	// The list or a provider's page is the topmost layer named "providers": a custom provider form may stack above it.
+	const sheets = route.layers.filter(
+		(layer): layer is Extract<Layer, { kind: "sheet" | "viewer" }> => layer.kind !== "drawer",
+	);
+	const selected = sheets.reverse().find((layer) => layer.kind === "sheet" && layer.name === "providers")?.locator;
+	const customService = useObject(CustomProviders, {});
+	const custom = useReadable(customService?.providers) ?? [];
+	const [removing, setRemoving] = useState(false);
+	const [removingBusy, setRemovingBusy] = useState(false);
+	const openCustom = (id: string) => {
+		void nav.push({ ...route, layers: [...route.layers, { kind: "sheet", name: "provider-custom", locator: id }] });
+	};
 	const current = useRef(state);
 	current.current = state;
 	const host = useHost();
@@ -186,7 +201,7 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 		const held = host.hold(ProviderLogin, {}, BACKGROUND_CONTEXT);
 		return () => {
 			const flow = current.current;
-			if (flow?.providerId !== selected) {
+			if (!flow || flow.providerId !== selected) {
 				held.release();
 				return;
 			}
@@ -205,8 +220,10 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 	const providerId = selected;
 	const provider = providers.find((entry) => entry.id === providerId);
 	if (login && provider) {
+		const edited = custom.find((entry) => entry.id === provider.id);
 		const back = () => {
 			setResult(undefined);
+			setRemoving(false);
 			void nav.close({ ...route, layers: [...route.layers.slice(0, -1), { kind: "sheet", name: "providers" }] });
 		};
 		if (state && state.providerId === selected)
@@ -269,6 +286,15 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 							: t("notSignedIn")}
 					</p>
 					<p className="muted small">{provider.signedIn ? t("credentialsStored") : t("envKeysNote")}</p>
+					{edited && (
+						<>
+							<p className="muted small mono">{edited.baseUrl}</p>
+							<p className="muted small">
+								{edited.api} · {t("modelsCount", edited.models.length)} ·{" "}
+								{edited.storedKey ? t("keySaved") : edited.configuredKey ? t("keyConfigured") : t("keyMissing")}
+							</p>
+						</>
+					)}
 					<div className="login-actions">
 						{provider.loginMethods.map((method) => (
 							<button
@@ -293,7 +319,7 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 								<ChevronIcon />
 							</button>
 						))}
-						{provider.signedIn && (
+						{provider.signedIn && !edited && (
 							<button
 								type="button"
 								className="login-action"
@@ -313,7 +339,7 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 								<span>{busy ? t("updatingCatalog") : t("updateCatalog")}</span>
 							</button>
 						)}
-						{provider.signedIn && (
+						{provider.signedIn && (!edited || edited.storedKey) && (
 							<button
 								type="button"
 								className="login-action danger"
@@ -323,6 +349,53 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 							>
 								<span>{t("signOut")}</span>
 							</button>
+						)}
+						{edited && (
+							<button type="button" className="login-action" onClick={() => openCustom(edited.id)}>
+								<span>{t("edit")}</span>
+								<ChevronIcon />
+							</button>
+						)}
+						{edited && !removing && (
+							<button type="button" className="login-action danger" onClick={() => setRemoving(true)}>
+								<span>{t("remove")}</span>
+							</button>
+						)}
+						{edited && removing && (
+							<div className="stack">
+								<p className="muted small">{t("removeProviderConfirm", edited.name)}</p>
+								<div className="inline-form">
+									<button
+										type="button"
+										className="text-action danger"
+										disabled={removingBusy}
+										onClick={() => {
+											if (!customService) return;
+											setRemovingBusy(true);
+											void customService
+												.remove({ id: edited.id }, BACKGROUND_CONTEXT)
+												.then(() => {
+													setRemoving(false);
+													setRemovingBusy(false);
+													setResult(undefined);
+													void nav.close({
+														...route,
+														layers: route.layers.slice(0, -1),
+													});
+												})
+												.catch((reason: unknown) => {
+													setRemovingBusy(false);
+													fail(reason);
+												});
+										}}
+									>
+										{removingBusy ? t("removing") : t("remove")}
+									</button>
+									<button type="button" className="text-action" onClick={() => setRemoving(false)}>
+										{t("cancel")}
+									</button>
+								</div>
+							</div>
 						)}
 					</div>
 					{result && <p className="provider-result">{result}</p>}
@@ -379,6 +452,12 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 				{known && !matching.length && (
 					<p className="empty-note">{query ? t("noProviderMatches") : t("noProvidersAvailable")}</p>
 				)}
+				<button type="button" className="row-button" onClick={() => openCustom("new")}>
+					<span>
+						<PlusIcon size={14} /> {t("customProvider")}
+					</span>
+					<ChevronIcon />
+				</button>
 			</div>
 		</Sheet>
 	);
@@ -388,7 +467,9 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 function ProvidersButton() {
 	const { t } = useMessages(loginMessages);
 	const owner = useOwner();
-	const open = useSheet("providers") !== undefined;
+	const list = useSheet("providers");
+	const custom = useSheet("provider-custom");
+	const open = list !== undefined || custom !== undefined;
 	if (!owner) return null;
 	return (
 		<>
@@ -400,6 +481,7 @@ function ProvidersButton() {
 				{t("providers")}
 			</button>
 			{open && <ProvidersSheet onClose={closeLayers} />}
+			{custom && <CustomProviderSheet id={custom.locator ?? "new"} />}
 		</>
 	);
 }

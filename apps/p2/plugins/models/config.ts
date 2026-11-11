@@ -24,6 +24,7 @@ export type ModelSummary = {
 export function summarize(resources: Resources, fake: boolean): ModelSummary {
 	const snapshot = resources.snapshot();
 	const signedIn = new Set(snapshot.credentials.map((credential) => credential.providerId));
+	for (const providerId of snapshot.configuredProviders ?? []) signedIn.add(providerId);
 	if (fake) signedIn.add("faux");
 	const models = snapshot.models.filter((model) => signedIn.has(model.provider));
 	// settings.json's default, then the environment's (Pi Mobile's order), then the first signed-in model.

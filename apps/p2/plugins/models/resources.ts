@@ -5,6 +5,7 @@ import { getSupportedThinkingLevels, type Models, type MutableModels } from "@ea
 import type { HarnessSettings } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import {
+	LockedFile,
 	type MobileSettings,
 	normalizePath,
 	Observer,
@@ -14,7 +15,8 @@ import {
 } from "@p2/app/v1/node";
 import type { ServerResourceOptions } from "@p2/app/v1/server";
 import { FileCredentials } from "./credentials.ts";
-import { ModelConfig } from "./model-config.ts";
+import { type CustomProviderView, customProviderView, type ModelsDocument } from "./custom-providers.ts";
+import { ModelConfig, modelsDocumentError, parseModelsDocument, serializeModelsDocument } from "./model-config.ts";
 import { FileModelsStore } from "./model-store.ts";
 import { createP2Models } from "./models.ts";
 import { applyModelConfig } from "./provider-config.ts";
@@ -31,6 +33,10 @@ export type ResourceSnapshot = {
 		loginMethods: { type: "api_key" | "oauth"; label: string }[];
 	}[];
 	models: { provider: string; modelId: string; name: string; thinkingLevels: string[]; contextWindow: number }[];
+	/** models.json's custom providers (no keys), as the providers sheet edits them. */
+	customProviders: CustomProviderView[];
+	/** Providers whose models.json entry carries an API key: signed in without an auth.json credential. */
+	configuredProviders: string[];
 	errors: ResourceError[];
 };
 export type ResourceOptions = ServerResourceOptions & {
@@ -50,6 +56,8 @@ export class Resources {
 	readonly models: Models;
 	private readonly options: ResourceOptions;
 	private current: MutableModels;
+	/** The last valid models.json; undefined until the first successful load. */
+	private modelConfig: ModelConfig | undefined;
 	private settingsValue: MobileSettings = {};
 	private readonly errors = new Map<ResourceError["resource"], string>();
 	private readonly fingerprints = new Map<string, string>();
@@ -211,6 +219,7 @@ export class Resources {
 			restoring = false;
 			applyModelConfig(next, config); // Build/validate completely before publishing.
 			this.current = next;
+			this.modelConfig = config;
 			this.errors.delete("models");
 			changed = true;
 		});
@@ -236,10 +245,13 @@ export class Resources {
 	}
 
 	snapshot(): ResourceSnapshot {
+		const customProviders = this.customProviders();
 		return {
 			version: this.revision,
 			settings: this.settings,
 			credentials: this.credentials.metadata(),
+			customProviders,
+			configuredProviders: this.configuredProviderIds(),
 			errors: this.resourceErrors,
 			providers: this.models.getProviders().map((provider) => ({
 				id: provider.id,
@@ -280,6 +292,56 @@ export class Resources {
 
 	async saveSettings(value: unknown): Promise<void> {
 		const operation = saveSettings(join(this.directory, "settings.json"), value, { signal: this.controller.signal });
+		this.writes.add(operation);
+		try {
+			await operation;
+			await this.reload();
+		} finally {
+			this.writes.delete(operation);
+		}
+	}
+
+	/** Custom providers from the last valid models.json (no keys). */
+	customProviders(): CustomProviderView[] {
+		const config = this.modelConfig;
+		if (!config) return [];
+		const views: CustomProviderView[] = [];
+		for (const id of config.getProviderIds()) {
+			const provider = config.getProvider(id);
+			const view = provider && customProviderView(id, provider);
+			if (view) views.push(view);
+		}
+		return views;
+	}
+
+	/** Provider IDs models.json defines. */
+	customProviderIds(): Set<string> {
+		return new Set(this.modelConfig?.getProviderIds() ?? []);
+	}
+
+	/** Providers whose models.json entry carries an API key. */
+	configuredProviderIds(): string[] {
+		const config = this.modelConfig;
+		if (!config) return [];
+		return config.getProviderIds().filter((id) => config.hasConfiguredKey(id));
+	}
+
+	/**
+	 * Models.json with `mutate` applied, locked and validated; the resources reload it before resolving. The mutation
+	 * runs against the file as it is now, so providers added by hand in between stay.
+	 */
+	async writeModels(mutate: (doc: ModelsDocument) => void): Promise<void> {
+		const path = join(this.directory, "models.json");
+		const operation = new LockedFile(path).withLockAsync(
+			async (content) => {
+				const doc = parseModelsDocument(content);
+				mutate(doc);
+				const problem = modelsDocumentError(doc);
+				if (problem) throw new Error(`Invalid models.json:\n${problem}`);
+				return { result: undefined, next: serializeModelsDocument(doc) };
+			},
+			{ signal: this.controller.signal },
+		);
 		this.writes.add(operation);
 		try {
 			await operation;
