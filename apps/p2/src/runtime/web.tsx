@@ -164,6 +164,7 @@ export function Sheet({
 	onBack,
 	className,
 	testId,
+	hidden = false,
 	children,
 }: {
 	title: string;
@@ -171,6 +172,8 @@ export function Sheet({
 	onBack?: () => void;
 	className?: string;
 	testId?: string;
+	/** Kept mounted (its slots render the sheets stacked above it) but not shown: only the top layer is visible. */
+	hidden?: boolean;
 	children: ReactNode;
 }) {
 	const body = useRef<HTMLDivElement>(null);
@@ -181,6 +184,7 @@ export function Sheet({
 	// Phones: a downward drag on the grip or header closes the sheet (src/web/sheet-swipe.ts).
 	useSheetSwipe(section, scrim, onClose);
 	useEffect(() => {
+		if (hidden) return;
 		const key = (event: KeyboardEvent) => {
 			if (event.key !== "Escape" || event.defaultPrevented) return;
 			event.preventDefault();
@@ -188,11 +192,11 @@ export function Sheet({
 		};
 		window.addEventListener("keydown", key);
 		return () => window.removeEventListener("keydown", key);
-	}, [onClose]);
+	}, [hidden, onClose]);
 	// Footer sheets may be mounted inside the translated phone drawer. A portal keeps their fixed layout
 	// relative to the viewport, as in Pi Mobile's app-level sheets, instead of the hidden drawer.
 	return createPortal(
-		<div className="sheet-layer">
+		<div className="sheet-layer" hidden={hidden}>
 			<button type="button" className="scrim" aria-label="Close" onClick={onClose} ref={scrim} />
 			<section
 				className={`sheet ${className ?? ""}`}

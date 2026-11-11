@@ -226,6 +226,12 @@ describe("clients through a public-origin proxy", { skip: !browserTests }, () =>
 		await browser.wait('document.querySelector(".composer textarea") && !document.querySelector(".offline")');
 		// Remote owners (not only the device) may sign in to model providers.
 		await browser.wait(
+			'[...document.querySelectorAll("button")].some((button) => button.textContent === "Settings")',
+		);
+		await browser.evaluate(
+			'[...document.querySelectorAll("button")].find((button) => button.textContent === "Settings").click()',
+		);
+		await browser.wait(
 			'[...document.querySelectorAll("button")].some((button) => button.textContent === "Providers")',
 		);
 		await new Promise((resolve) => setTimeout(resolve, 1500));

@@ -13,7 +13,6 @@ import {
 	whenLive,
 } from "@p2/app/v1";
 import {
-	ChevronIcon,
 	closeLayers,
 	conversationRoute,
 	Drawer,
@@ -22,6 +21,7 @@ import {
 	openLayer,
 	rememberMains,
 	type SessionSummary,
+	Sheet,
 	Slot,
 	SlotList,
 	Slots,
@@ -39,7 +39,7 @@ import {
 	useRoute,
 	useSheet,
 } from "@p2/app/v1/web";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Envs } from "../envs/contract.ts";
 import { directoryPickerLayer } from "../envs/contract.web.tsx";
 import { Search, SessionReads } from "../search/contract.ts";
@@ -60,46 +60,15 @@ const subscribeVisibility = (listener: () => void) => {
 const usePageVisible = () => useSyncExternalStore(subscribeVisibility, () => document.visibilityState === "visible");
 
 /**
- * The footer's owner entries, in an explicit order, behind one "More" button whose menu opens upwards: one row of
- * buttons no longer fits them. The entries stay mounted while the menu is closed, because each renders the sheet it
- * opens (through a portal, so the hidden menu does not hide it).
+ * The footer's Settings button and its sheet: the owner entries in an explicit order. The sheet stays mounted while an
+ * entry's own sheet is open above it (each entry renders that sheet through a portal); it is hidden, not unmounted,
+ * then, so Back returns to it.
  */
-function FooterMenu() {
+function SettingsSheet({ shown, onClose }: { shown: boolean; onClose: () => void }) {
 	const { t } = useMessages(sessionsMessages);
-	const [open, setOpen] = useState(false);
-	const menu = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		if (!open) return;
-		const outside = (event: PointerEvent) => {
-			if (!menu.current?.contains(event.target as Node)) setOpen(false);
-		};
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === "Escape") setOpen(false);
-		};
-		document.addEventListener("pointerdown", outside);
-		document.addEventListener("keydown", onKey);
-		return () => {
-			document.removeEventListener("pointerdown", outside);
-			document.removeEventListener("keydown", onKey);
-		};
-	}, [open]);
 	return (
-		<div className="foot-menu" ref={menu}>
-			<button
-				type="button"
-				className={`foot-button ${open ? "on" : ""}`}
-				aria-haspopup="true"
-				aria-expanded={open}
-				onClick={() => setOpen(!open)}
-			>
-				{t("more")}
-				<span className="foot-menu-chevron">
-					<ChevronIcon size={14} />
-				</span>
-			</button>
-			{/* An entry's click opens its sheet, then closes the menu. */}
-			{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the entries are buttons; this only notices their clicks. */}
-			<div className="foot-menu-list" hidden={!open} onClick={() => setOpen(false)}>
+		<Sheet title={t("settings")} onClose={onClose} className="settings-sheet" hidden={!shown}>
+			<div className="list settings-list">
 				<Slot name="sidebar-foot:providers" />
 				<Slot name="sidebar-foot:mcp" />
 				<Slot name="sidebar-foot:envs" />
@@ -109,11 +78,32 @@ function FooterMenu() {
 				<Slot name="sidebar-foot:voice" />
 				<Slot name="sidebar-foot:logs" />
 			</div>
-		</div>
+		</Sheet>
 	);
 }
 
-const footer = <FooterMenu />;
+/** The drawer footer's owner entries behind one Settings button. */
+function SettingsButton() {
+	const { t } = useMessages(sessionsMessages);
+	const owner = useOwner();
+	const route = useRoute();
+	const settings = route.layers.findLastIndex((layer) => layer.kind === "sheet" && layer.name === "settings");
+	if (!owner) return null;
+	return (
+		<>
+			<button
+				type="button"
+				className="foot-button"
+				onClick={() => openLayer({ kind: "sheet", name: "settings" }, { fromDrawer: true })}
+			>
+				{t("settings")}
+			</button>
+			{settings >= 0 && <SettingsSheet shown={settings === route.layers.length - 1} onClose={closeLayers} />}
+		</>
+	);
+}
+
+const footer = <SettingsButton />;
 /** Entries above the folders, e.g. the Familiar's. */
 const head = <SlotList prefix="drawer-head" />;
 

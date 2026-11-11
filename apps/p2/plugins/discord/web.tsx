@@ -1,4 +1,4 @@
-// The discord plugin's web facet: More › Discord (the owner's bots, BotsSheet.tsx), the Session sheet's Discord row and
+// The discord plugin's web facet: Settings › Discord (the owner's bots, BotsSheet.tsx), the Session sheet's Discord row and
 // the session's link sheet (LinkSheet.tsx), and the transcript's note on a delivered batch. The sheets render from the
 // sidebar foot's slot, which stays mounted while they stack on the Session sheet.
 import { contribute, defineFacet, Translations } from "@p2/app/v1";

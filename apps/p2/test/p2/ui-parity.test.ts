@@ -171,6 +171,11 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 	it("opens Providers in the viewport after closing the translated phone drawer", async () => {
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/`);
 		await browser.evaluate('document.querySelector("button[aria-label=Sessions]").click()');
+		await browser.wait('[...document.querySelectorAll("button")].some(button => button.textContent === "Settings")');
+		await browser.evaluate(
+			'[...document.querySelectorAll("button")].find(button => button.textContent === "Settings").click()',
+		);
+		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Settings]"))');
 		await browser.wait('[...document.querySelectorAll("button")].some(button => button.textContent === "Providers")');
 		await browser.evaluate(
 			'[...document.querySelectorAll("button")].find(button => button.textContent === "Providers").click()',
@@ -178,18 +183,25 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Providers]"))');
 		// The sheet starts below the viewport during its slide animation; measure the final layout.
 		await browser.wait(
-			'[...document.querySelector("[role=dialog]").getAnimations()].every(animation => animation.playState === "finished")',
+			'[...document.querySelector("[role=dialog][aria-label=Providers]").getAnimations()].every(animation => animation.playState === "finished")',
 		);
 		const visible = await browser.evaluate<boolean>(
-			'(() => { const sheet = document.querySelector("[role=dialog]"); const rect = sheet.getBoundingClientRect(); return !sheet.closest(".drawer") && rect.left >= 0 && rect.right <= 390 && rect.bottom <= 844; })()',
+			'(() => { const sheet = document.querySelector("[role=dialog][aria-label=Providers]"); const rect = sheet.getBoundingClientRect(); return !sheet.closest(".drawer") && rect.left >= 0 && rect.right <= 390 && rect.bottom <= 844; })()',
 		);
 		assert(visible, "the Providers dialog must not be inside the off-screen drawer");
-		await browser.evaluate('document.querySelector("[role=dialog] button[aria-label=Close]").click()');
+		await browser.evaluate(
+			'document.querySelector("[role=dialog][aria-label=Providers] button[aria-label=Close]").click()',
+		);
 	});
 
 	it("opens Devices and offers a private one-time token to the localhost owner", async () => {
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/`);
 		await browser.evaluate('document.querySelector("button[aria-label=Sessions]").click()');
+		await browser.wait('[...document.querySelectorAll("button")].some(button => button.textContent === "Settings")');
+		await browser.evaluate(
+			'[...document.querySelectorAll("button")].find(button => button.textContent === "Settings").click()',
+		);
+		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Settings]"))');
 		await browser.wait('[...document.querySelectorAll("button")].some(button => button.textContent === "Devices")');
 		await browser.evaluate(
 			'[...document.querySelectorAll("button")].find(button => button.textContent === "Devices").click()',
@@ -419,6 +431,11 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 			403,
 		);
 		await browser.evaluate('document.querySelector("button[aria-label=Sessions]").click()');
+		await browser.wait('[...document.querySelectorAll("button")].some(button => button.textContent === "Settings")');
+		await browser.evaluate(
+			'[...document.querySelectorAll("button")].find(button => button.textContent === "Settings").click()',
+		);
+		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Settings]"))');
 		await browser.wait('[...document.querySelectorAll("button")].some(button => button.textContent === "Devices")');
 		await browser.evaluate(
 			'[...document.querySelectorAll("button")].find(button => button.textContent === "Devices").click()',
