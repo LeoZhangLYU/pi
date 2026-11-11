@@ -7,7 +7,7 @@ const READ_CHUNK = 1024 * 1024;
 
 /**
  * Saves a snapshot of `name` (`size` bytes, read in order by `next` until it gives none) into the session's files, as
- * offered by conversation `conversation` (what reads a turn's offered files, e.g. Discord's reply, finds it by that).
+ * offered by conversation `conversation` (whoever posts a turn's reply finds it by that).
  */
 export type SaveSnapshot = (
 	snapshot: { readonly name: string; readonly size: number; readonly conversation: number },

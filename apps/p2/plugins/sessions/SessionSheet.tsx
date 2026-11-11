@@ -72,7 +72,7 @@ export function SessionSheet({
 						{reindex?.phase === "failed" && <small className="row-value error">{reindex.error}</small>}
 					</button>
 				)}
-				{/* Plugins' rows for the session (`session-rows:<name>`, e.g. Discord): they read it from the route. */}
+				{/* Plugins' rows for the session (`session-rows:<name>`): they read it from the route. */}
 				<SlotList prefix="session-rows" />
 				<button type="button" className="row-button danger" onClick={onArchive}>
 					<span>{t("archive")}</span>

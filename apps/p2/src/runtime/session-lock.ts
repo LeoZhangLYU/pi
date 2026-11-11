@@ -1,4 +1,4 @@
-// A session's lock (browser-safe): a locked session (one listening to a Discord channel, say) uses only the resources
+// A session's lock (browser-safe): a locked session (one listening to an outside channel, say) uses only the resources
 // its owner picked, and everyone who can send it input may use all of them. Kept by the sessions plugin on the server
 // (`SessionLocks`), mirrored into the session's Durable state by its worker, where the tool guard, the prompt and MCP
 // placement read it.

@@ -131,7 +131,7 @@ async function mcpHost(
 					return { children, report: UNUSED };
 				},
 			],
-			// Sessions' locks (a Discord link's picks), changed by `lock` below.
+			// Sessions' locks (the owner's picks for a locked session), changed by `lock` below.
 			[
 				SessionLocks,
 				(_params, _principal, self) => {
@@ -197,7 +197,7 @@ async function mcpHost(
 			sessions!.change(TEST, (draft) => {
 				for (const entry of draft) if (entry.id === id) entry.env = env;
 			}),
-		/** Locks session `id` to `lock` (null: unlocks it), as linking it to Discord or editing its link does. */
+		/** Locks session `id` to `lock` (null: unlocks it), as the owner's link settings do. */
 		lock: (id: string, lock: SessionLock | null) =>
 			locks!.change(TEST, (draft) => {
 				if (lock === null) delete draft[id];

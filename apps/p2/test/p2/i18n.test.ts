@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { chatMessages } from "../../plugins/chat/messages.ts";
 import { chatModeMessages } from "../../plugins/chat-mode/messages.ts";
 import { devicesMessages } from "../../plugins/devices/messages.ts";
-import { discordMessages } from "../../plugins/discord/messages.ts";
 import { envsMessages } from "../../plugins/envs/messages.ts";
 import { familiarMessages } from "../../plugins/familiar/messages.ts";
 import { historyMessages } from "../../plugins/history/messages.ts";
@@ -67,7 +66,6 @@ test("every catalog has the same keys and value types in English and Chinese", (
 		["p2.logs", logsMessages],
 		["p2.history", historyMessages],
 		["p2.voice", voiceMessages],
-		["p2.discord", discordMessages],
 	] as const) {
 		const catalogs = new Map(messages.translations.map(({ locale, messages: catalog }) => [locale, catalog]));
 		const en = catalogs.get("en");
