@@ -9,7 +9,6 @@ import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { WebSocket } from "ws";
 import { Chat } from "../../plugins/chat/contract.ts";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { browserTests } from "./browser.ts";
 import { type Fixture, holdIn, http, poll, startFixture, until } from "./helpers.ts";
@@ -194,7 +193,7 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		);
 	});
 
-	it("opens Devices and offers a private one-time token to the localhost owner", async () => {
+	it("opens Devices with sign-out only, and no token for another machine", async () => {
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/`);
 		await browser.evaluate('document.querySelector("button[aria-label=Sessions]").click()');
 		await browser.wait('[...document.querySelectorAll("button")].some(button => button.textContent === "Settings")');
@@ -206,11 +205,11 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		await browser.evaluate(
 			'[...document.querySelectorAll("button")].find(button => button.textContent === "Devices").click()',
 		);
-		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Devices] #owner-token"))');
-		assert(await browser.evaluate<boolean>('/^[a-f0-9]{64}$/.test(document.querySelector("#owner-token").value)'));
+		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Devices]"))');
+		assert(!(await browser.evaluate<boolean>('Boolean(document.querySelector("#owner-token"))')));
 		assert(
 			await browser.evaluate<boolean>(
-				'[...document.querySelectorAll("[role=dialog] button")].some(button => button.textContent.trim() === "Copy token")',
+				'[...document.querySelectorAll("[role=dialog] button")].some(button => button.textContent.trim() === "Sign out on this device")',
 			),
 		);
 		await browser.evaluate('document.querySelector("[role=dialog] button[aria-label=Close]").click()');
@@ -410,7 +409,7 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 	});
 
 	it("redeems a fragment owner link, removes the token and signs out all devices from the Devices sheet", async () => {
-		const { token } = await fixture.browser().hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT);
+		const { token } = JSON.parse((await fixture.http("/owner-token")).body) as { token: string };
 		const origin = `http://127.0.0.1:${fixture.server.port}`;
 		await browser.open(`${origin}/owner#${token}`);
 		assert(await browser.evaluate<boolean>('location.pathname === "/" && location.hash === ""'));
@@ -441,8 +440,6 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 			'[...document.querySelectorAll("button")].find(button => button.textContent === "Devices").click()',
 		);
 		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Devices]"))');
-		// Redeemed on loopback, the link is a local session: it mints owner links itself.
-		await browser.wait('Boolean(document.querySelector("#owner-token")?.value)');
 		await browser.evaluate(
 			'[...document.querySelectorAll("[role=dialog] button")].find(button => button.textContent.trim() === "Sign out all devices").click()',
 		);

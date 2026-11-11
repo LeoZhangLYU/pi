@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { WebSocketServer } from "ws";
 import { VirtualTerminal } from "../../../../packages/tui/test/virtual-terminal.ts";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { Sharing } from "../../plugins/sharing/contract.ts";
 import { startServer } from "../../src/hosts/server.ts";
@@ -42,7 +41,7 @@ test(
 			}),
 		);
 		const url = new URL(`http://127.0.0.1:${fixture.server.port}`);
-		const token = (await fixture.browser().hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT)).token;
+		const token = (JSON.parse((await fixture.http("/owner-token")).body) as { token: string }).token;
 		const credentials = await claimOwner(url, token, {});
 		const terminal = new VirtualTerminal(100, 30);
 		const writes: string[] = [];
@@ -162,7 +161,7 @@ test(
 		const fixture = await startFixture();
 		t.after(() => fixture.close());
 		const url = new URL(`http://127.0.0.1:${fixture.server.port}`);
-		const token = (await fixture.browser().hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT)).token;
+		const token = (JSON.parse((await fixture.http("/owner-token")).body) as { token: string }).token;
 		const direct = cookieTransport(url, await claimOwner(url, token, {}));
 		let silent = false;
 		let sockets = 0;
@@ -248,7 +247,7 @@ test(
 		const fixture = await startFixture();
 		t.after(() => fixture.close());
 		const url = new URL(`http://127.0.0.1:${fixture.server.port}`);
-		const token = (await fixture.browser().hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT)).token;
+		const token = (JSON.parse((await fixture.http("/owner-token")).body) as { token: string }).token;
 		const terminal = new VirtualTerminal(100, 30);
 		const client = await startTuiClient({
 			terminal,

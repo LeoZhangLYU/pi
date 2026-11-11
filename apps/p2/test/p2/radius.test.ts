@@ -9,7 +9,6 @@ import { type TestContext, test } from "node:test";
 import { BACKGROUND_CONTEXT, statusOf, whenLive } from "@p2/app/v1";
 import { WebSocket, WebSocketServer } from "ws";
 import { Chat } from "../../plugins/chat/contract.ts";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { ProviderLogin } from "../../plugins/login/contract.ts";
 import { RadiusBrain, type RadiusStatus, readRadiusConfig, writeRadiusConfig } from "../../plugins/radius/brain.ts";
 import {
@@ -32,7 +31,7 @@ import { Sharing } from "../../plugins/sharing/contract.ts";
 import { Terminals } from "../../plugins/terminals/contract.ts";
 import { radiusTransport } from "../../src/hosts/tui-radius.ts";
 import { Access } from "../../src/runtime/access.ts";
-import { clientHost, expectChord, holdIn, http, localOwner, poll, until } from "./helpers.ts";
+import { clientHost, holdIn, http, localOwner, poll, until } from "./helpers.ts";
 import { radiusFixture as fixture, OWNER, PUBLIC_ORIGIN } from "./radius-fixture.ts";
 
 test(
@@ -87,8 +86,6 @@ test(
 		const login = browser.hold(ProviderLogin, {}, BACKGROUND_CONTEXT);
 		await whenLive(login);
 		assert.equal(login.variant, "owner");
-		const devices = browser.hold(Devices, {}, BACKGROUND_CONTEXT);
-		await expectChord(devices.token(BACKGROUND_CONTEXT), "forbidden");
 		assert.equal((await http(f.server.port, "/owner-token", { headers: marked })).status, 403);
 		// The shell frames the relayed UI (a cross-site iframe load): Radius authenticates it, not a browser cookie, so the
 		// foreign-request rule leaves it the owner.

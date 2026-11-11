@@ -12,7 +12,6 @@ import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { PROXY_MARKER_HEADER } from "../../plugins/proxy-marker/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { Sharing } from "../../plugins/sharing/contract.ts";
@@ -179,7 +178,7 @@ describe("clients through a public-origin proxy", { skip: !browserTests }, () =>
 			[PROXY_MARKER_HEADER]: "1",
 			"Content-Type": "application/json",
 		};
-		const { token } = await owner.hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT);
+		const { token } = JSON.parse((await fixture.http("/owner-token")).body) as { token: string };
 		const signed = await http(fixture.server.port, "/owner/claim", {
 			method: "POST",
 			headers,

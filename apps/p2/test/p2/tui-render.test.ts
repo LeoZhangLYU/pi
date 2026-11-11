@@ -14,7 +14,6 @@ import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { VirtualTerminal } from "../../../../packages/tui/test/virtual-terminal.ts";
 import { Chat, type EntriesPage } from "../../plugins/chat/contract.ts";
 import chatTui, { ChatSurface } from "../../plugins/chat/tui.ts";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { Drafts } from "../../plugins/drafts/contract.ts";
 import { Models } from "../../plugins/models/contract.ts";
 import { type Session, Sessions } from "../../plugins/sessions/contract.ts";
@@ -683,7 +682,7 @@ test(
 		t.after(() => fixture.close());
 		const url = new URL(`http://127.0.0.1:${fixture.server.port}`);
 		const browser = fixture.browser();
-		const token = (await browser.hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT)).token;
+		const token = (JSON.parse((await fixture.http("/owner-token")).body) as { token: string }).token;
 		const sessions = await holdIn(browser, Sessions, {}, "owner");
 		if (sessions.variant !== "owner") return;
 		await sessions.create({ cwd: fixture.workspace, env: null }, BACKGROUND_CONTEXT);

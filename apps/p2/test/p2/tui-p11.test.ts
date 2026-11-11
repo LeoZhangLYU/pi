@@ -15,7 +15,6 @@ import { Chat, type ModelMeta } from "../../plugins/chat/contract.ts";
 import chatTui from "../../plugins/chat/tui.ts";
 import { ChatMode } from "../../plugins/chat-mode/contract.ts";
 import chatModeTui from "../../plugins/chat-mode/tui.ts";
-import { Devices } from "../../plugins/devices/contract.ts";
 import devicesTui from "../../plugins/devices/tui.ts";
 import { Drafts } from "../../plugins/drafts/contract.ts";
 import { Envs } from "../../plugins/envs/contract.ts";
@@ -537,17 +536,6 @@ function ownerStubs(calls: Calls) {
 				};
 			},
 		],
-		[
-			Devices,
-			(_input, _principal, self) => ({
-				variant: "owner",
-				canMint: self.state(true),
-				token: () => {
-					record("token", true);
-					return { token: "one-time-token-123" };
-				},
-			}),
-		],
 	];
 	return { stubs, cells };
 }
@@ -687,7 +675,7 @@ test("/ports shows Radius addresses only; making a forward public needs a confir
 	assert.deepEqual(calls.addPort?.[0], { port: 3000, name: "api", public: true });
 });
 
-test("/devices mints a token and signs out through the launcher's consent", async (t) => {
+test("/devices signs out through the launcher's consent", async (t) => {
 	const calls: Calls = {};
 	const owner = ownerStubs(calls);
 	const { screen, send, runtime } = await setup(t, { calls, server: owner.stubs, facets: OWNER_FACETS });
@@ -697,13 +685,7 @@ test("/devices mints a token and signs out through the launcher's consent", asyn
 		return { ok: false, error: "denied" };
 	};
 	runtime.ctx.commands.run("p2.devices");
-	await poll(async () => (await screen()).includes("Generate a one-time recovery token"));
-	send(ENTER);
-	await poll(async () => (await screen()).includes("one-time-token-123"));
-	assert.match(await screen(), /full owner access/);
-	send(ESC);
 	await poll(async () => (await screen()).includes("Sign out all devices"));
-	send(DOWN);
 	send(DOWN);
 	send(ENTER);
 	await poll(() => grants.length === 1);

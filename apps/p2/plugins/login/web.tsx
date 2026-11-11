@@ -473,11 +473,7 @@ function ProvidersButton() {
 	if (!owner) return null;
 	return (
 		<>
-			<button
-				type="button"
-				className="foot-button"
-				onClick={() => openLayer({ kind: "sheet", name: "providers" }, { fromDrawer: true })}
-			>
+			<button type="button" className="foot-button" onClick={() => openLayer({ kind: "sheet", name: "providers" })}>
 				{t("providers")}
 			</button>
 			{open && <ProvidersSheet onClose={closeLayers} />}

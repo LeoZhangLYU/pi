@@ -123,11 +123,7 @@ function LogsButton() {
 	if (!useOwner()) return null;
 	return (
 		<>
-			<button
-				type="button"
-				className="foot-button"
-				onClick={() => openLayer({ kind: "sheet", name: "logs" }, { fromDrawer: true })}
-			>
+			<button type="button" className="foot-button" onClick={() => openLayer({ kind: "sheet", name: "logs" })}>
 				{t("logs")}
 			</button>
 			{sheet && <LogsSheet source={sheet.locator ?? "server"} />}

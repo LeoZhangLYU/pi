@@ -242,7 +242,7 @@ function McpButton() {
 			<button
 				type="button"
 				className="foot-button"
-				onClick={() => openLayer({ kind: "sheet", name: "mcp" }, { fromDrawer: true })}
+				onClick={() => openLayer({ kind: "sheet", name: "mcp" })}
 				title={t("mcpServers")}
 			>
 				MCP

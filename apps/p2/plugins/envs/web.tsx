@@ -13,7 +13,7 @@ function EnvsButton() {
 			<button
 				className="foot-button"
 				type="button"
-				onClick={() => openLayer({ kind: "sheet", name: "envs" }, { fromDrawer: true })}
+				onClick={() => openLayer({ kind: "sheet", name: "envs" })}
 				title={t("remoteTitle")}
 			>
 				{t("environments")}

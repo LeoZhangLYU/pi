@@ -5,9 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { stripTerminalSequences, TuiAltScreen } from "@earendil-works/pi-tui";
-import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { VirtualTerminal } from "../../../../packages/tui/test/virtual-terminal.ts";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { Models } from "../../plugins/models/contract.ts";
 import modelsTui from "../../plugins/models/tui.ts";
 import { PROXY_MARKER_HEADER } from "../../plugins/proxy-marker/contract.ts";
@@ -23,7 +21,7 @@ import {
 } from "../../src/hosts/tui-config.ts";
 import { TuiRuntime } from "../../src/runtime/tui.ts";
 import { tuiCoreFacet } from "../../src/tui/core-commands.ts";
-import { poll, startFixture, testHost, until } from "./helpers.ts";
+import { poll, startFixture, testHost } from "./helpers.ts";
 
 const plain = (lines: string[]): string => lines.map(stripTerminalSequences).join("\n");
 
@@ -99,11 +97,8 @@ test("TUI loopback signs in as the local owner with the data directory's owner k
 	assert.equal(credentials.local, true);
 	assert.match(String(credentials.cookie), /^p2_owner_\d+=local\./);
 	assert.deepEqual(config, { connections: {} }, "a local sign-in is never saved");
-	const client = fixture.client(connectionHeaders(url, credentials)).host;
-	const devices = client.hold(Devices, {}, BACKGROUND_CONTEXT);
-	assert.equal(await until(devices.canMint, (value) => value === true), true);
 	// A valid saved owner cookie (an owner link redeemed on loopback, say) comes first.
-	const token = (await devices.token(BACKGROUND_CONTEXT)).token;
+	const token = (JSON.parse((await fixture.http("/owner-token")).body) as { token: string }).token;
 	const associated = await claimOwner(url, token, {});
 	const saved = await authenticateTui(
 		{ url, dataDir: fixture.dataDir },

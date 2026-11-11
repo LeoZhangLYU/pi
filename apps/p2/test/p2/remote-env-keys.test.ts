@@ -4,7 +4,6 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT, type Held, whenLive } from "@p2/app/v1";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { Envs } from "../../plugins/envs/contract.ts";
 import { PROXY_MARKER_HEADER } from "../../plugins/proxy-marker/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
@@ -29,7 +28,7 @@ for (const via of ["token", "relay", "proxy"] as const)
 			const local = fixture.browser();
 			let envs: Held<typeof Envs>;
 			if (via === "token" || via === "proxy") {
-				const { token } = await local.hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT);
+				const { token } = JSON.parse((await fixture.http("/owner-token")).body) as { token: string };
 				const signedIn = await http(fixture.server.port, "/owner/claim", {
 					headers: { ...TUNNEL, "Content-Type": "application/json" },
 					method: "POST",

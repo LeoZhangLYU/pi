@@ -582,7 +582,7 @@ function VoiceButton() {
 				type="button"
 				className="foot-button"
 				title={owner ? t("voiceTitle") : t("pauseTitle")}
-				onClick={() => openLayer({ kind: "sheet", name: "voice" }, { fromDrawer: true })}
+				onClick={() => openLayer({ kind: "sheet", name: "voice" })}
 			>
 				{t("voice")}
 			</button>

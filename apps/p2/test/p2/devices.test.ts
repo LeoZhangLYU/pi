@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT, whenLive } from "@p2/app/v1";
 import { WebSocket } from "ws";
-import { DeviceAccesses, Devices } from "../../plugins/devices/contract.ts";
+import { DeviceAccesses } from "../../plugins/devices/contract.ts";
 import { OwnerAccess } from "../../plugins/devices/owner-access.ts";
 import { ProviderLogin } from "../../plugins/login/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
@@ -21,12 +21,19 @@ import {
 	localOwnerProof,
 	localOwnerSignIn,
 } from "../../src/runtime/local-owner.ts";
-import { clientHost, expectChord, holdIn, http, poll, startFixture, until, webBundle } from "./helpers.ts";
+import { clientHost, type Fixture, holdIn, http, poll, startFixture, until, webBundle } from "./helpers.ts";
 
 const TUNNEL = { Host: "owner.test", Origin: "https://owner.test" };
 const requestWith = (cookie: string) => ({ headers: { cookie } }) as IncomingMessage;
 const signedIn = (access: OwnerAccess, cookie: string, port: number) =>
 	access.session(requestWith(cookie), port) !== undefined;
+
+/** A one-time owner token as `npm run owner-link` takes it: a local owner's loopback request. */
+async function ownerToken(fixture: Fixture): Promise<string> {
+	const minted = await fixture.http("/owner-token");
+	assert.equal(minted.status, 200);
+	return (JSON.parse(minted.body) as { token: string }).token;
+}
 
 test("owner invitations are private, one use, bounded and expire after ten minutes; cookies survive restart", async (t) => {
 	const directory = await mkdtemp(join(tmpdir(), "p2-owner-access-"));
@@ -67,7 +74,7 @@ test("owner invitations are private, one use, bounded and expire after ten minut
 	await assert.rejects(OwnerAccess.open(directory), /Invalid owner key/);
 });
 
-test("Devices plugin signs in a remote owner over HTTP/WS, never grants remote or guest token minting", async () => {
+test("Devices plugin signs in a remote owner over HTTP/WS, never mints tokens for remote or guest requests", async () => {
 	const fixture = await startFixture({
 		allowedHosts: ["owner.test"],
 		web: true,
@@ -76,17 +83,7 @@ test("Devices plugin signs in a remote owner over HTTP/WS, never grants remote o
 	try {
 		const port = fixture.server.port;
 		const local = fixture.browser();
-		const devices = local.hold(Devices, {}, BACKGROUND_CONTEXT);
-		assert.equal(await until(devices.canMint, (value) => value === true), true);
-		const relayDevices = fixture.as({ kind: "owner", access: "relay" }).hold(Devices, {}, BACKGROUND_CONTEXT);
-		await expectChord(relayDevices.token(BACKGROUND_CONTEXT), "forbidden");
-		relayDevices.release();
-		const workerDevices = fixture
-			.as({ kind: "worker", session: "s", generation: 1 })
-			.hold(Devices, {}, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(workerDevices), "forbidden");
-		workerDevices.release();
-		const token = (await devices.token(BACKGROUND_CONTEXT)).token;
+		const token = await ownerToken(fixture);
 		const landing = await http(port, "/owner", { headers: TUNNEL });
 		assert.equal(landing.status, 200);
 		assert(landing.body.includes("No owner password is configured") && landing.body.includes("recovery token"));
@@ -146,15 +143,12 @@ test("Devices plugin signs in a remote owner over HTTP/WS, never grants remote o
 		assert.notEqual((await http(port, `/@fs${join(fixture.dataDir, "owner-token.txt")}`, { headers })).status, 200);
 		const remote = fixture.client(headers).host;
 		await holdIn(remote, Access, {}, "owner");
-		const remoteDevices = remote.hold(Devices, {}, BACKGROUND_CONTEXT);
-		assert.equal(await until(remoteDevices.canMint, (value) => value === false), false);
-		await expectChord(remoteDevices.token(BACKGROUND_CONTEXT), "forbidden");
 		const login = remote.hold(ProviderLogin, {}, BACKGROUND_CONTEXT);
 		await whenLive(login);
 		assert.equal(login.variant, "owner", "associated devices retain remote owner provider access");
 		const internal = (await fixture.server.host.registry(DeviceAccesses, BACKGROUND_CONTEXT)).value!.access;
 		assert.equal(internal.session(requestWith(cookie), port)?.kind, "device");
-		const outstanding = (await devices.token(BACKGROUND_CONTEXT)).token;
+		const outstanding = await ownerToken(fixture);
 		await fixture.server.reload(["devices"]);
 		const afterReload = await claim(JSON.stringify({ token: outstanding }));
 		assert.equal(afterReload.status, 200, "compatible reloads retain invitations and the owner key");
@@ -172,8 +166,6 @@ test("Devices plugin signs in a remote owner over HTTP/WS, never grants remote o
 		});
 		assert.equal(joined.status, 200);
 		const guestCookie = String(joined.headers["set-cookie"]).split(";")[0]!;
-		const guest = fixture.client({ ...TUNNEL, Cookie: guestCookie }).host;
-		await expectChord(whenLive(guest.hold(Devices, {}, BACKGROUND_CONTEXT)), "forbidden");
 		assert.equal((await http(port, "/owner-token", { headers: { ...TUNNEL, Cookie: guestCookie } })).status, 403);
 		const both = fixture.client({ ...TUNNEL, Cookie: `${guestCookie}; ${cookie}` }).host;
 		const ownerAgain = await holdIn(both, Access, {}, "owner");
@@ -247,9 +239,8 @@ test("signed cookies expire, logout persists, all-device rotation invalidates co
 test("sign out this device and all devices revoke live sockets as well as cookies", async (t) => {
 	const fixture = await startFixture({ allowedHosts: ["owner.test"] });
 	t.after(() => fixture.close());
-	const local = fixture.browser().hold(Devices, {}, BACKGROUND_CONTEXT);
 	const claim = async () => {
-		const { token } = await local.token(BACKGROUND_CONTEXT);
+		const token = await ownerToken(fixture);
 		const response = await http(fixture.server.port, "/owner/claim", {
 			method: "POST",
 			headers: { ...TUNNEL, "Content-Type": "application/json" },
@@ -381,8 +372,6 @@ test("local sign-in: a one-time, port-bound challenge answered with the data dir
 	const cookie = setCookie.split(";")[0]!;
 	const owner = clientHost({ port, cookie });
 	t.after(() => owner.close(BACKGROUND_CONTEXT));
-	const devices = owner.hold(Devices, {}, BACKGROUND_CONTEXT);
-	assert.equal(await until(devices.canMint, (value) => value === true), true, "a local session has local powers");
 	assert.equal(
 		(await http(port, "/owner/check", { headers: { ...TUNNEL, Cookie: cookie } })).status,
 		401,
@@ -415,9 +404,6 @@ test("an owner link redeemed on loopback is a local session, renewed on app load
 	const cookie = String(claimed.headers["set-cookie"]).split(";")[0]!;
 	assert.match(cookie, /=local\./);
 	assert(!String(claimed.headers["set-cookie"]).includes("Secure"));
-	const browser = fixture.client({ Cookie: cookie });
-	const devices = browser.host.hold(Devices, {}, BACKGROUND_CONTEXT);
-	assert.equal(await until(devices.canMint, (value) => value === true), true);
 	// Each app load renews the same session for another 30 days; other routes leave it alone.
 	const id = (value: string) => /=local\.([a-f0-9]{32})\./.exec(value)?.[1];
 	const loaded = await http(port, "/", { headers: { Cookie: cookie } });

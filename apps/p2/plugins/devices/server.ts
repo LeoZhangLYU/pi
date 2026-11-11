@@ -1,14 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-	type Ctx,
-	constant,
-	defineFacet,
-	forbidden,
-	isOwner,
-	nativeOf,
-	type P2Principal,
-	serveNative,
-} from "@p2/app/v1";
+import { type Ctx, defineFacet, isOwner, type P2Principal, serveNative } from "@p2/app/v1";
 import {
 	Authenticators,
 	fromOrigin,
@@ -28,7 +19,7 @@ import {
 	signIn,
 	type Verification,
 } from "@p2/app/v1/server";
-import { DeviceAccess, DeviceAccesses, Devices } from "./contract.ts";
+import { DeviceAccess, DeviceAccesses } from "./contract.ts";
 import { OwnerAccess } from "./owner-access.ts";
 
 export default defineFacet((host) => {
@@ -288,21 +279,5 @@ export default defineFacet((host) => {
 			},
 		});
 		return {};
-	});
-	host.serve(Devices, (_params, principal, self) => {
-		if (!isOwner(principal)) throw forbidden("Devices is owner-only");
-		self.get(DeviceAccess, {});
-		const access = nativeOf(self, DeviceAccesses, "The owner access");
-		const local = principal.access === "local";
-		return {
-			variant: "owner",
-			members: {
-				canMint: constant(local),
-				token: async () => {
-					if (!local) throw forbidden("Generate owner links on the host with npm run owner-link");
-					return { token: access().access.issueToken() };
-				},
-			},
-		};
 	});
 });

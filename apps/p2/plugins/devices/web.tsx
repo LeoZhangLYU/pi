@@ -1,28 +1,11 @@
-import { BACKGROUND_CONTEXT, contribute, defineFacet, Translations } from "@p2/app/v1";
-import {
-	CopyButton,
-	closeLayers,
-	forgetOwner,
-	openLayer,
-	Sheet,
-	Slots,
-	useMessages,
-	useObject,
-	useOwner,
-	useReadable,
-	useSheet,
-} from "@p2/app/v1/web";
-import { useEffect, useState } from "react";
-import { Devices } from "./contract.ts";
+import { contribute, defineFacet, Translations } from "@p2/app/v1";
+import { closeLayers, forgetOwner, openLayer, Sheet, Slots, useMessages, useOwner, useSheet } from "@p2/app/v1/web";
+import { useState } from "react";
 import { devicesMessages } from "./messages.ts";
 
 function DevicesSheet() {
 	const { t } = useMessages(devicesMessages);
-	const service = useObject(Devices, {});
-	const canMint = useReadable(service?.canMint);
-	const [token, setToken] = useState<string>();
 	const [error, setError] = useState<string>();
-	const [generation, setGeneration] = useState(0);
 	const [confirmAll, setConfirmAll] = useState(false);
 	const [signingOut, setSigningOut] = useState(false);
 	const signOut = (all: boolean) => {
@@ -40,63 +23,10 @@ function DevicesSheet() {
 				setSigningOut(false);
 			});
 	};
-	// biome-ignore lint/correctness/useExhaustiveDependencies: generation explicitly requests a fresh token.
-	useEffect(() => {
-		let current = true;
-		setToken(undefined);
-		setError(undefined);
-		if (service && canMint)
-			void service
-				.token(BACKGROUND_CONTEXT)
-				.then(({ token }) => {
-					if (current) setToken(token);
-				})
-				.catch((reason: unknown) => {
-					if (current) setError(reason instanceof Error ? reason.message : t("couldNotGenerate"));
-				});
-		return () => {
-			current = false;
-		};
-	}, [service, canMint, generation]);
 	return (
 		<Sheet title={t("devices")} onClose={closeLayers}>
 			<div className="stack">
-				<p className="small">{t("tokenIntro")}</p>
-				<p className="muted small">{t("tokenHowTo")}</p>
-				{canMint === false ? (
-					<p className="error" role="alert">
-						{t("cannotMint")}
-					</p>
-				) : error ? (
-					<p className="error" role="alert">
-						{error}
-					</p>
-				) : token ? (
-					<>
-						<label className="label" htmlFor="owner-token">
-							{t("oneTimeToken")}
-						</label>
-						<textarea
-							id="owner-token"
-							className="input mono"
-							rows={2}
-							readOnly
-							value={token}
-							onFocus={(event) => event.target.select()}
-						/>
-						<CopyButton key={token} primary text={token} label={t("copyToken")} />
-						<button type="button" className="text-action" onClick={() => setGeneration((value) => value + 1)}>
-							{t("generateNewToken")}
-						</button>
-					</>
-				) : (
-					<output className="muted">{t("generating")}</output>
-				)}
-				{canMint === false && error && (
-					<p className="error" role="alert">
-						{error}
-					</p>
-				)}
+				{error && <output className="notice error">{error}</output>}
 				<div className="list">
 					<button type="button" className="text-action" disabled={signingOut} onClick={() => signOut(false)}>
 						{t("signOutThisDevice")}
@@ -145,8 +75,8 @@ function DevicesButton() {
 			<button
 				type="button"
 				className="foot-button"
-				title={t("signInAnotherDevice")}
-				onClick={() => openLayer({ kind: "sheet", name: "devices" }, { fromDrawer: true })}
+				title={t("devices")}
+				onClick={() => openLayer({ kind: "sheet", name: "devices" })}
 			>
 				{t("devices")}
 			</button>

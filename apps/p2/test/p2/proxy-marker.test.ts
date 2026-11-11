@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT, whenLive } from "@p2/app/v1";
 import { WebSocket } from "ws";
-import { Devices } from "../../plugins/devices/contract.ts";
 import { DownloadStore } from "../../plugins/files/contract.ts";
 import { ProviderLogin } from "../../plugins/login/contract.ts";
 import { PROXY_MARKER_HEADER } from "../../plugins/proxy-marker/contract.ts";
@@ -70,7 +69,7 @@ describe("proxy marking is never authentication (including the loopback Unix-soc
 				BACKGROUND_CONTEXT,
 			)
 		).id;
-		const token = (await owner.hold(Devices, {}, BACKGROUND_CONTEXT).token(BACKGROUND_CONTEXT)).token;
+		const token = (JSON.parse((await fixture.http("/owner-token")).body) as { token: string }).token;
 		const signed = await http(fixture.server.port, "/owner/claim", {
 			headers: { ...PROXIED, "Content-Type": "application/json" },
 			method: "POST",
