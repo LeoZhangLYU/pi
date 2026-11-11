@@ -3,8 +3,9 @@
 // participate in Back.
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { type ReactNode, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { getNavigation, useRoute, useScrollMemory } from "../../runtime/web.tsx";
+import { getNavigation, useMessages, useRoute, useScrollMemory } from "../../runtime/web.tsx";
 import { ToolActivityContext, WorkingDirectory } from "../chat-context.ts";
+import { webMessages } from "../messages.ts";
 import type { Route } from "../navigation.ts";
 import { SidePanel, showInSidePanel, useSidePanelShown } from "../SidePanel.tsx";
 import { clockTime, Time } from "../Time.tsx";
@@ -100,6 +101,7 @@ function ActivityPanel({
 	expanded: ReadonlySet<string> | undefined;
 	onExpanded: (steps: ReadonlySet<string>) => void;
 }) {
+	const { t } = useMessages(webMessages);
 	const entries = activity.entries ?? activity.steps.map((step): WheelEntry => ({ kind: "call", step }));
 	const running = entries.findLast((entry) => entry.kind === "call" && entry.step.status === "running");
 	const initial = place.step ?? (running?.kind === "call" ? running.step.id : undefined);
@@ -109,7 +111,7 @@ function ActivityPanel({
 	const mounted = useRef(false);
 	const revealed = useRef<string>(undefined);
 	const time = useElapsed(activity.startedAt, activity.endedAt, activity.working);
-	const count = `${entries.length} ${entries.length === 1 ? "step" : "steps"}`;
+	const count = t("stepsCount", entries.length);
 	useScrollMemory(body);
 	useLayoutEffect(() => {
 		const element = body.current;
@@ -136,7 +138,7 @@ function ActivityPanel({
 	const meta = [count, time].filter(Boolean).join(" · ");
 	return (
 		<SidePanel
-			title="Activity"
+			title={t("activity")}
 			sheetTitle={meta}
 			meta={meta}
 			onClose={closeActivity}
@@ -162,13 +164,11 @@ function ActivityPanel({
 						onExpanded(next);
 					}}
 				/>
-				{!entries.length && <p className="empty-note">Working…</p>}
+				{!entries.length && <p className="empty-note">{t("workingEllipsis")}</p>}
 			</div>
 		</SidePanel>
 	);
 }
-
-const WORDS = { thought: "Thought", text: "Note" } as const;
 
 /** Thumbnails a collapsed row shows at most: the newest, the rest counted. */
 const THUMBNAILS = { phone: 2, wide: 4 } as const;
@@ -214,6 +214,7 @@ export function StepList({
 }) {
 	const tools = useContext(ToolActivityContext);
 	const cwd = useContext(WorkingDirectory)?.replace(/\/+$/, "");
+	const { t } = useMessages(webMessages);
 	let shownTime: string | undefined;
 	return (
 		<ul className="step-list" data-testid="timeline">
@@ -226,7 +227,7 @@ export function StepList({
 				const id = entry.kind === "call" ? entry.step.id : entry.id;
 				const open = expanded?.has(id) ?? false;
 				const argument = step
-					? argumentOf(step.tool, tools, cwd)
+					? t("argumentText", argumentOf(step.tool, tools, cwd))
 					: plainText(sentence(entry.kind !== "call" ? entry.text : ""));
 				const icon: ReactNode = step ? (
 					<KindIcon kind={describe(step, tools).label.kind} />
@@ -252,14 +253,22 @@ export function StepList({
 							<span className="step-icon">{icon}</span>
 							<span className="step-words">
 								<span className="step-name">
-									{step ? step.tool.name : WORDS[entry.kind === "thought" ? "thought" : "text"]}
+									{step ? step.tool.name : entry.kind === "thought" ? t("thought") : t("note")}
 								</span>
 								{argument && <span className="step-argument">{argument}</span>}
 							</span>
 							{step && <StepThumbnails images={step.tool.images} />}
 							<span className="step-end">
 								<span className="step-state" data-state={step?.status ?? "done"}>
-									{step ? stepState(step, tools) : entry.kind !== "call" && entry.live ? "● thinking" : ""}
+									{step
+										? stepState(step, tools, {
+												running: `● ${t("runningState")}`,
+												interrupted: t("interruptedState"),
+												failed: t("failedState"),
+											})
+										: entry.kind !== "call" && entry.live
+											? `● ${t("thinkingNow")}`
+											: ""}
 								</span>
 								{time !== undefined && <Time at={time} className="step-time" />}
 							</span>

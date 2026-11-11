@@ -1,12 +1,14 @@
 import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
-import { closeLayers, Slot, useCanWrite, useDrawer, useRoute, useUnshownLayers } from "../runtime/web.tsx";
+import { closeLayers, Slot, useCanWrite, useDrawer, useMessages, useRoute, useUnshownLayers } from "../runtime/web.tsx";
 import { useComposerState } from "./composer-state.tsx";
 import { useDragSize } from "./drag-size.ts";
 import { useDrawerSwipe } from "./drawer-swipe.ts";
+import { webMessages } from "./messages.ts";
 import { OwnerNotices } from "./OwnerNotices.tsx";
 import { useSidebarCollapsed } from "./sidebar.ts";
 
 export function AppLayout() {
+	const { t } = useMessages(webMessages);
 	const drawer = useDrawer(),
 		route = useRoute(),
 		collapsed = useSidebarCollapsed();
@@ -37,7 +39,7 @@ export function AppLayout() {
 				<button
 					type="button"
 					className="sidebar-resize"
-					aria-label="Drag to resize sidebar"
+					aria-label={t("resizeSidebar")}
 					tabIndex={-1}
 					onPointerDown={startResize}
 				/>
@@ -46,7 +48,7 @@ export function AppLayout() {
 				type="button"
 				className="drawer-scrim"
 				ref={swipe.scrim}
-				aria-label="Close sessions"
+				aria-label={t("closeSessions")}
 				onClick={closeLayers}
 				tabIndex={drawer ? 0 : -1}
 			/>
@@ -79,9 +81,9 @@ export function AppLayout() {
 					document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
 				}}
 			>
-				{draggingFiles && <div className="drop-overlay">Drop files to attach</div>}
+				{draggingFiles && <div className="drop-overlay">{t("dropFiles")}</div>}
 				<OwnerNotices />
-				<Slot name="main" fallback={<div className="hero">No chat plugin</div>} />
+				<Slot name="main" fallback={<div className="hero">{t("noChatPlugin")}</div>} />
 			</main>
 			<div id="side-dock" className="side-dock" />
 			<Slot name="workspace-panel" />

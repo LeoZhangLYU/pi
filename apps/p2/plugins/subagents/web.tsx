@@ -3,15 +3,18 @@ import {
 	conversationRoute,
 	Slots,
 	ToolActivities,
+	useMessages,
 	useNavigation,
 	useObject,
 	useReadable,
 	useRoute,
+	webMessages,
 } from "@p2/app/v1/web";
 import { Sessions } from "../sessions/contract.ts";
 import { subagentActivity } from "./activity.tsx";
 
 function ParentLink() {
+	const { t } = useMessages(webMessages);
 	const nav = useNavigation();
 	const route = useRoute();
 	const rows = useReadable(liveIn(useObject(Sessions, {}), "owner", "guest")?.sessions);
@@ -23,7 +26,7 @@ function ParentLink() {
 			className="row-button"
 			onClick={() => void nav.backOrPush(conversationRoute(route, route.session, main))}
 		>
-			Back to main conversation
+			{t("backToMainConversation")}
 		</button>
 	);
 }

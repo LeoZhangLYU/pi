@@ -2,7 +2,15 @@
 // HTTP servers that use OAuth. Sign in opens `/mcp/sign-in/<server>` in a new tab (it finds out where the browser runs);
 // while a sign-in waits, the final redirect URL can be pasted here, for a browser that cannot reach where it returns.
 
-import { BACKGROUND_CONTEXT, contribute, defineFacet, type HeldIn, locationText } from "@p2/app/v1";
+import {
+	BACKGROUND_CONTEXT,
+	contribute,
+	defineFacet,
+	type HeldIn,
+	locationText,
+	type MessagesOf,
+	type Translator,
+} from "@p2/app/v1";
 import {
 	ChevronIcon,
 	closeLayers,
@@ -11,6 +19,7 @@ import {
 	Sheet,
 	Slots,
 	useComposerState,
+	useMessages,
 	useObject,
 	useOptimisticCall,
 	useOwner,
@@ -19,8 +28,10 @@ import {
 } from "@p2/app/v1/web";
 import { useState } from "react";
 import { type Instance, Mcp, type SignIn, signInLink } from "./contract.ts";
+import { mcpMessages } from "./messages.ts";
 
 type OwnerView = HeldIn<typeof Mcp, "owner">;
+type McpTranslator = Translator<"p2.mcp", MessagesOf<typeof mcpMessages>>;
 
 /** A change of the instances while its call is in flight: a restart starts it, a sign-out leaves it signed out. */
 type InstanceGuess =
@@ -46,15 +57,16 @@ type Actions = {
 	readonly cancelSignIn: (id: string) => void;
 };
 
-const STATUS: Record<Instance["status"], string> = {
-	starting: "Starting",
-	connected: "Connected",
-	"sign-in": "Sign-in needed",
-	failed: "Failed",
-};
+const statusLabels = (t: McpTranslator): Record<Instance["status"], string> => ({
+	starting: t("starting"),
+	connected: t("connected"),
+	"sign-in": t("signInNeeded"),
+	failed: t("failedStatus"),
+});
 
 /** The sheet: configuration errors, then each server with its instances and sign-in. */
 function McpSheet({ onClose }: { onClose: () => void }) {
+	const { t } = useMessages(mcpMessages);
 	const view = useObject(Mcp, {}, { variant: "owner" });
 	const errors = useReadable(view?.errors) ?? [];
 	const { fail } = useComposerState();
@@ -73,17 +85,18 @@ function McpSheet({ onClose }: { onClose: () => void }) {
 		cancelSignIn: (id) => cancel(id, () => view.cancelSignIn({ id }, BACKGROUND_CONTEXT)),
 	};
 	return (
-		<Sheet title="MCP servers" onClose={onClose}>
+		<Sheet title={t("mcpServers")} onClose={onClose}>
 			<p className="muted small">
-				Servers of <span className="mono">mcp.json</span> run while sessions use them. Sign-in credentials are
-				stored on the server.
+				{t("introBefore")}
+				<span className="mono">mcp.json</span>
+				{t("introAfter")}
 			</p>
 			{errors.map((error) => (
 				<p key={error} className="notice error small">
 					{error}
 				</p>
 			))}
-			{view && servers.length === 0 && <p className="empty-note">No MCP server is running.</p>}
+			{view && servers.length === 0 && <p className="empty-note">{t("noServerRunning")}</p>}
 			{view && actions && (
 				<div className="list">
 					{servers.map((server) => (
@@ -116,6 +129,7 @@ function ServerEntry({
 	instances: readonly Instance[];
 	signIn: SignIn | undefined;
 }) {
+	const { t } = useMessages(mcpMessages);
 	const oauth = instances.some((instance) => instance.auth === "oauth");
 	const needsSignIn = instances.some((instance) => instance.status === "sign-in");
 	const connected = instances.some((instance) => instance.status === "connected");
@@ -125,20 +139,17 @@ function ServerEntry({
 			{instances.map((instance) => (
 				<div key={instance.id} className="stack">
 					<p className="small">
-						{STATUS[instance.status]}
+						{statusLabels(t)[instance.status]}
 						{instance.location && <span className="muted mono"> · {locationText(instance.location)}</span>}
-						{instance.runsOn !== "host" && <span className="muted"> · on {instance.runsOn.env}</span>}
+						{instance.runsOn !== "host" && <span className="muted">{t("onEnv", instance.runsOn.env)}</span>}
 						{instance.status === "connected" && (
-							<span className="muted">
-								{" "}
-								· {instance.tools.length} tool{instance.tools.length === 1 ? "" : "s"}
-							</span>
+							<span className="muted">{t("toolsCount", instance.tools.length)}</span>
 						)}
 					</p>
 					{instance.error && instance.status !== "sign-in" && <p className="error small">{instance.error}</p>}
 					<div className="inline-form">
 						<button type="button" className="text-action" onClick={() => actions.restart(instance.id)}>
-							Restart
+							{t("restart")}
 						</button>
 					</div>
 				</div>
@@ -148,9 +159,9 @@ function ServerEntry({
 			)}
 			{oauth && signIn?.status === "failed" && (
 				<div className="stack">
-					<p className="error small">{signIn.error ?? "The sign-in failed."}</p>
+					<p className="error small">{signIn.error ?? t("signInFailedDefault")}</p>
 					<button type="button" className="text-action" onClick={() => actions.cancelSignIn(signIn.id)}>
-						Dismiss
+						{t("dismiss")}
 					</button>
 				</div>
 			)}
@@ -158,13 +169,13 @@ function ServerEntry({
 				<div className="inline-form">
 					{needsSignIn || signIn !== undefined ? (
 						<a className="login-continue" href={signInLink(server)} target="_blank" rel="noreferrer">
-							{signIn?.status === "waiting" ? "Sign in again" : "Sign in"}
+							{signIn?.status === "waiting" ? t("signInAgain") : t("signIn")}
 							<ChevronIcon />
 						</a>
 					) : null}
 					{connected && (
 						<button type="button" className="text-action danger" onClick={() => actions.signOut(server)}>
-							Sign out
+							{t("signOut")}
 						</button>
 					)}
 				</div>
@@ -175,6 +186,7 @@ function ServerEntry({
 
 /** A sign-in waiting for the browser: paste the final redirect URL, or cancel. */
 function PendingSignIn({ view, signIn, onCancel }: { view: OwnerView; signIn: SignIn; onCancel: () => void }) {
+	const { t } = useMessages(mcpMessages);
 	const [value, setValue] = useState("");
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string>();
@@ -193,26 +205,26 @@ function PendingSignIn({ view, signIn, onCancel }: { view: OwnerView; signIn: Si
 			}}
 		>
 			<p className="muted small">
-				Waiting for the sign-in in the browser. If it ends on a page that does not load (
-				{signIn.via === "loopback" ? "a 127.0.0.1 address" : "p2's address"}), copy that page's full address from
-				the address bar and paste it here.
+				{t("pendingBefore")}
+				{signIn.via === "loopback" ? t("loopbackAddress") : t("p2Address")}
+				{t("pendingAfter")}
 			</p>
 			<input
 				className="input mono"
 				type="text"
 				autoComplete="off"
-				placeholder="Final redirect URL"
-				aria-label="Final redirect URL"
+				placeholder={t("finalRedirectUrl")}
+				aria-label={t("finalRedirectUrl")}
 				value={value}
 				onChange={(event) => setValue(event.target.value)}
 			/>
 			{error && <p className="error small">{error}</p>}
 			<div className="inline-form">
 				<button type="submit" className="button" disabled={sending || !value.trim()}>
-					Continue
+					{t("continue")}
 				</button>
 				<button type="button" className="text-action" onClick={onCancel}>
-					Cancel
+					{t("cancel")}
 				</button>
 			</div>
 		</form>
@@ -221,6 +233,7 @@ function PendingSignIn({ view, signIn, onCancel }: { view: OwnerView; signIn: Si
 
 /** The sidebar footer's MCP button: any authenticated owner. */
 function McpButton() {
+	const { t } = useMessages(mcpMessages);
 	const owner = useOwner();
 	const open = useSheet("mcp") !== undefined;
 	if (!owner) return null;
@@ -230,7 +243,7 @@ function McpButton() {
 				type="button"
 				className="foot-button"
 				onClick={() => openLayer({ kind: "sheet", name: "mcp" }, { fromDrawer: true })}
-				title="MCP servers"
+				title={t("mcpServers")}
 			>
 				MCP
 			</button>

@@ -28,6 +28,7 @@ export const sessionsMessages = defineMessages("p2.sessions", {
 		archiveFailed: "Archive failed",
 		copyingFiles: "Copying files…",
 		sessionOptions: "Session options",
+		more: "More",
 		onlyOwnerBranches: "Only the owner changes branches",
 	},
 	"zh-CN": {
@@ -55,6 +56,7 @@ export const sessionsMessages = defineMessages("p2.sessions", {
 		archiveFailed: "归档失败",
 		copyingFiles: "正在复制文件…",
 		sessionOptions: "Session 选项",
+		more: "更多",
 		onlyOwnerBranches: "只有所有者可以切换分支",
 	},
 });

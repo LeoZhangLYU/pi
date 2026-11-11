@@ -3,9 +3,10 @@
 // (`panel`). It is not modal: on wide screens the chat stays usable and sheets or viewers open above it.
 import { type ReactNode, useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { getNavigation, Sheet, useRoute, useScrollMemory } from "../runtime/web.tsx";
+import { getNavigation, Sheet, useMessages, useRoute, useScrollMemory } from "../runtime/web.tsx";
 import { useDragSize } from "./drag-size.ts";
 import { CloseIcon } from "./icons.tsx";
+import { webMessages } from "./messages.ts";
 import type { Route } from "./navigation.ts";
 
 /** Where the panel docks instead of being a sheet. */
@@ -116,6 +117,7 @@ function DockedPanel({
 	children: ReactNode;
 }) {
 	const panel = useRef<HTMLElement>(null);
+	const { t } = useMessages(webMessages);
 	const body = useRef<HTMLDivElement>(null);
 	useScrollMemory(body);
 	const width = useDragSize("p2-side-panel-width", "--side-panel-width");
@@ -140,7 +142,7 @@ function DockedPanel({
 			<button
 				type="button"
 				className="side-panel-resize"
-				aria-label="Drag to resize panel"
+				aria-label={t("resizePanel")}
 				tabIndex={-1}
 				onPointerDown={(event) => {
 					const element = panel.current;
@@ -154,7 +156,7 @@ function DockedPanel({
 			<header className="side-panel-head sheet-head">
 				<h2>{title}</h2>
 				{meta && <span className="side-panel-meta">{meta}</span>}
-				<button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+				<button type="button" className="icon-button" onClick={onClose} aria-label={t("close")}>
 					<CloseIcon />
 				</button>
 			</header>

@@ -1,4 +1,4 @@
-import { artifactUrls, Markdown, ViewerShell } from "@p2/app/v1/web";
+import { artifactUrls, Markdown, useMessages, ViewerShell, webMessages } from "@p2/app/v1/web";
 import { type Ref, useEffect, useRef, useState } from "react";
 import type { ArtifactInfo } from "./contract.ts";
 
@@ -40,22 +40,23 @@ function useFrameMessages(
 
 /** A text or Markdown artifact's content from its route: undefined while it loads, or the error. */
 function useArtifactText(url: string | undefined): { content?: string; error?: string } {
+	const { t } = useMessages(webMessages);
 	const [state, setState] = useState<{ url?: string; content?: string; error?: string }>({});
 	useEffect(() => {
 		if (!url) return;
 		const abort = new AbortController();
 		void fetch(url, { credentials: "same-origin", cache: "no-store", signal: abort.signal })
 			.then(async (response) => {
-				if (!response.ok) throw new Error(`Could not open artifact (${response.status})`);
+				if (!response.ok) throw new Error(t("couldNotOpenArtifact", response.status));
 				const content = await response.text();
 				setState({ url, content });
 			})
 			.catch((caught: unknown) => {
 				if (!abort.signal.aborted)
-					setState({ url, error: caught instanceof Error ? caught.message : "Could not open artifact" });
+					setState({ url, error: caught instanceof Error ? caught.message : t("couldNotPreviewGeneric") });
 			});
 		return () => abort.abort();
-	}, [url]);
+	}, [url, t]);
 	return state.url === url ? state : {};
 }
 
@@ -94,6 +95,7 @@ export function ArtifactPanel({
 	artifact: ArtifactInfo;
 	onClose: () => void;
 }) {
+	const { t } = useMessages(webMessages);
 	const { view: url, download: downloadUrl, filename } = artifactUrls(sessionId, artifact);
 	const document = artifact.type === "markdown" || artifact.type === "text";
 	const frame = useRef<HTMLIFrameElement>(null);
@@ -117,16 +119,16 @@ export function ArtifactPanel({
 	return (
 		<ViewerShell
 			title={artifact.title}
-			subtitle={`${artifact.type} · version ${artifact.version}`}
+			subtitle={`${artifact.type} · ${t("versionValue", artifact.version)}`}
 			content={document ? "document" : "preview"}
 			onClose={onClose}
 			actions={
 				<>
 					<a className="text-action" href={downloadUrl} download={filename}>
-						Download
+						{t("download")}
 					</a>
 					<a className="text-action" href={url} target="_blank" rel="noreferrer">
-						Open tab
+						{t("openTab")}
 					</a>
 				</>
 			}
@@ -135,12 +137,8 @@ export function ArtifactPanel({
 				diagnostics.length > 0 && (
 					<div className={`artifact-diagnostics ${problems ? "has-errors" : ""}`}>
 						<button type="button" onClick={() => setDiagnosticsOpen(!diagnosticsOpen)}>
-							<span>
-								{problems
-									? `${problems} preview issue${problems === 1 ? "" : "s"}`
-									: "Preview diagnostics ready"}
-							</span>
-							<span>{diagnosticsOpen ? "Hide" : "Show"}</span>
+							<span>{problems ? t("previewIssues", problems) : t("previewReady")}</span>
+							<span>{diagnosticsOpen ? t("hide") : t("show")}</span>
 						</button>
 						{diagnosticsOpen && (
 							<div>
@@ -188,6 +186,7 @@ const FRAME_HEIGHT = 150;
  * down to fit. Rendered for every viewer of the session (owner decision).
  */
 export function InlineArtifact({ sessionId, artifact }: { sessionId: string; artifact: ArtifactInfo }) {
+	const { t } = useMessages(webMessages);
 	const url = artifactUrls(sessionId, artifact).view;
 	const document = artifact.type === "markdown" || artifact.type === "text";
 	const text = useArtifactText(document ? url : undefined);
@@ -220,7 +219,7 @@ export function InlineArtifact({ sessionId, artifact }: { sessionId: string; art
 	return (
 		<div className={`inline-artifact ${artifact.type}`} data-artifact={`${artifact.name}:${artifact.version}`}>
 			{unavailable ? (
-				<div className="notice error">Artifact unavailable</div>
+				<div className="notice error">{t("artifactUnavailable")}</div>
 			) : document ? (
 				text.content === undefined ? (
 					<div className="spinner" />

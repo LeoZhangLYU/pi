@@ -14,6 +14,8 @@ import {
 	stringOf,
 	type ToolActivity,
 	type ToolView,
+	useMessages,
+	webMessages,
 } from "@p2/app/v1/web";
 import { useContext } from "react";
 
@@ -29,6 +31,7 @@ const commandLine = (tool: ToolView) =>
 		.join(" ");
 
 function TerminalDetail({ step }: { step: Step }) {
+	const { t } = useMessages(webMessages);
 	const { tool } = step;
 	const openTerminal = useContext(OpenTerminal);
 	const details = detailsOf(tool);
@@ -41,7 +44,8 @@ function TerminalDetail({ step }: { step: Step }) {
 			/>
 			{openTerminal && terminalId && tool.status === "done" && stringOf(tool.args.command) !== "kill-window" && (
 				<DetailLink onClick={() => openTerminal(terminalId)}>
-					Open terminal{typeof details.window === "number" ? ` ${details.window}` : ""}
+					{t("openTerminal")}
+					{typeof details.window === "number" ? ` ${details.window}` : ""}
 				</DetailLink>
 			)}
 		</>

@@ -1,10 +1,11 @@
 import { createContext, type ReactNode, useEffect, useRef, useState } from "react";
 import { type DownloadInfo, filePreview } from "../runtime/files.ts";
 import type { ArtifactInfo } from "../runtime/schemas.ts";
-import { useScrollMemory, useShownModal } from "../runtime/web.tsx";
+import { useMessages, useScrollMemory, useShownModal } from "../runtime/web.tsx";
 import { CodeBlock } from "./Code.tsx";
 import { CloseIcon, DownloadIcon } from "./icons.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { webMessages } from "./messages.ts";
 
 // One full-screen viewer for everything a conversation hands the user: versioned
 // artifacts and sent files today, workspace files later. Each content type keeps
@@ -90,6 +91,7 @@ export function ViewerShell({
 	children: ReactNode;
 }) {
 	const area = useRef<HTMLDivElement>(null);
+	const { t } = useMessages(webMessages);
 	useShownModal();
 	useScrollMemory(area);
 	useEffect(() => {
@@ -111,7 +113,7 @@ export function ViewerShell({
 						<span>{subtitle}</span>
 					</div>
 					{actions}
-					<button type="button" className="icon-button" onClick={onClose} aria-label="Close viewer">
+					<button type="button" className="icon-button" onClick={onClose} aria-label={t("closeViewer")}>
 						<CloseIcon />
 					</button>
 				</header>
@@ -126,6 +128,7 @@ export function ViewerShell({
 
 /** Conservative preview of a stored file: text, raster images and media only; never executes. */
 export function DownloadPreview({ url, name, size }: { url: string; name: string; size: number }) {
+	const { t } = useMessages(webMessages);
 	const preview = filePreview(name);
 	const markdown = /\.(md|markdown)$/i.test(name);
 	const [text, setText] = useState<string>();
@@ -137,17 +140,17 @@ export function DownloadPreview({ url, name, size }: { url: string; name: string
 		setError(undefined);
 		void fetch(url, { credentials: "same-origin", cache: "no-store", signal: abort.signal })
 			.then(async (response) => {
-				if (!response.ok) throw new Error(`Could not preview file (${response.status})`);
+				if (!response.ok) throw new Error(t("couldNotPreview", response.status));
 				setText(await response.text());
 			})
 			.catch((caught: unknown) => {
-				if (!abort.signal.aborted) setError(caught instanceof Error ? caught.message : "Could not preview file");
+				if (!abort.signal.aborted) setError(caught instanceof Error ? caught.message : t("couldNotPreviewGeneric"));
 			});
 		return () => abort.abort();
-	}, [preview?.kind, size, url]);
-	if (!preview) return <p className="notice">No preview for this file type. Download it instead.</p>;
+	}, [preview?.kind, size, url, t]);
+	if (!preview) return <p className="notice">{t("noPreview")}</p>;
 	if (preview.kind === "text") {
-		if (size > 1024 * 1024) return <p className="notice">Text preview is limited to 1 MiB. Download it instead.</p>;
+		if (size > 1024 * 1024) return <p className="notice">{t("previewTooLarge")}</p>;
 		if (error) return <p className="notice error">{error}</p>;
 		if (text === undefined) return <div className="spinner large" />;
 		return markdown ? <Markdown text={text} /> : <CodeBlock code={text} language={name} />;
@@ -173,6 +176,7 @@ export function FilePanel({
 	file: DownloadInfo;
 	onClose: () => void;
 }) {
+	const { t } = useMessages(webMessages);
 	const url = fileUrl(sessionId, file);
 	const kind = filePreview(file.name)?.kind;
 	return (
@@ -183,7 +187,7 @@ export function FilePanel({
 			onClose={onClose}
 			actions={
 				<a className="text-action" href={url} download={file.name}>
-					Download
+					{t("download")}
 				</a>
 			}
 		>

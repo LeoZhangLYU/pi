@@ -1,4 +1,4 @@
-import { BACKGROUND_CONTEXT, contribute, defineFacet } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT, contribute, defineFacet, Translations } from "@p2/app/v1";
 import {
 	CopyButton,
 	closeLayers,
@@ -6,6 +6,7 @@ import {
 	openLayer,
 	Sheet,
 	Slots,
+	useMessages,
 	useObject,
 	useOwner,
 	useReadable,
@@ -13,8 +14,10 @@ import {
 } from "@p2/app/v1/web";
 import { useEffect, useState } from "react";
 import { Devices } from "./contract.ts";
+import { devicesMessages } from "./messages.ts";
 
 function DevicesSheet() {
+	const { t } = useMessages(devicesMessages);
 	const service = useObject(Devices, {});
 	const canMint = useReadable(service?.canMint);
 	const [token, setToken] = useState<string>();
@@ -27,7 +30,7 @@ function DevicesSheet() {
 		setError(undefined);
 		void fetch(all ? "/owner/logout-all" : "/owner/logout", { method: "POST", credentials: "same-origin" })
 			.then(async (response) => {
-				if (!response.ok) throw new Error("Could not sign out. Try again.");
+				if (!response.ok) throw new Error(t("couldNotSignOut"));
 				// Conversations kept on this device for the owner go with the sign-in.
 				await forgetOwner();
 				location.replace("/owner");
@@ -49,26 +52,20 @@ function DevicesSheet() {
 					if (current) setToken(token);
 				})
 				.catch((reason: unknown) => {
-					if (current) setError(reason instanceof Error ? reason.message : "Could not generate a recovery token.");
+					if (current) setError(reason instanceof Error ? reason.message : t("couldNotGenerate"));
 				});
 		return () => {
 			current = false;
 		};
 	}, [service, canMint, generation]);
 	return (
-		<Sheet title="Devices" onClose={closeLayers}>
+		<Sheet title={t("devices")} onClose={closeLayers}>
 			<div className="stack">
-				<p className="small">
-					This token grants full owner access. Give it only to your own device, not to collaborators. Use it to
-					sign in another device, or to recover access if the password is lost.
-				</p>
-				<p className="muted small">
-					Open Pi's domain on the other device, paste this token into the sign-in page, and tap Sign in. It expires
-					after ten minutes and works once.
-				</p>
+				<p className="small">{t("tokenIntro")}</p>
+				<p className="muted small">{t("tokenHowTo")}</p>
 				{canMint === false ? (
 					<p className="error" role="alert">
-						Generate owner links on the host with npm run owner-link. Associated devices cannot mint more tokens.
+						{t("cannotMint")}
 					</p>
 				) : error ? (
 					<p className="error" role="alert">
@@ -77,7 +74,7 @@ function DevicesSheet() {
 				) : token ? (
 					<>
 						<label className="label" htmlFor="owner-token">
-							One-time recovery token
+							{t("oneTimeToken")}
 						</label>
 						<textarea
 							id="owner-token"
@@ -87,13 +84,13 @@ function DevicesSheet() {
 							value={token}
 							onFocus={(event) => event.target.select()}
 						/>
-						<CopyButton key={token} primary text={token} label="Copy token" />
+						<CopyButton key={token} primary text={token} label={t("copyToken")} />
 						<button type="button" className="text-action" onClick={() => setGeneration((value) => value + 1)}>
-							Generate a new token
+							{t("generateNewToken")}
 						</button>
 					</>
 				) : (
-					<output className="muted">Generating token…</output>
+					<output className="muted">{t("generating")}</output>
 				)}
 				{canMint === false && error && (
 					<p className="error" role="alert">
@@ -102,22 +99,18 @@ function DevicesSheet() {
 				)}
 				<div className="list">
 					<button type="button" className="text-action" disabled={signingOut} onClick={() => signOut(false)}>
-						Sign out on this device
+						{t("signOutThisDevice")}
 					</button>
 					{confirmAll ? (
 						<>
-							<p className="muted small">
-								This signs out every device and every browser on the host, including this one, and invalidates
-								outstanding owner links. TUIs on the host sign in again by themselves. Already-running agent
-								work is not stopped.
-							</p>
+							<p className="muted small">{t("signOutAllWarning")}</p>
 							<button
 								type="button"
 								className="text-action danger"
 								disabled={signingOut}
 								onClick={() => signOut(true)}
 							>
-								Confirm sign out all devices
+								{t("confirmSignOutAll")}
 							</button>
 							<button
 								type="button"
@@ -125,7 +118,7 @@ function DevicesSheet() {
 								disabled={signingOut}
 								onClick={() => setConfirmAll(false)}
 							>
-								Cancel
+								{t("cancel")}
 							</button>
 						</>
 					) : (
@@ -135,7 +128,7 @@ function DevicesSheet() {
 							disabled={signingOut}
 							onClick={() => setConfirmAll(true)}
 						>
-							Sign out all devices
+							{t("signOutAllDevices")}
 						</button>
 					)}
 				</div>
@@ -144,6 +137,7 @@ function DevicesSheet() {
 	);
 }
 function DevicesButton() {
+	const { t } = useMessages(devicesMessages);
 	const sheet = useSheet("devices");
 	if (!useOwner()) return null;
 	return (
@@ -151,10 +145,10 @@ function DevicesButton() {
 			<button
 				type="button"
 				className="foot-button"
-				title="Sign in another device"
+				title={t("signInAnotherDevice")}
 				onClick={() => openLayer({ kind: "sheet", name: "devices" }, { fromDrawer: true })}
 			>
-				Devices
+				{t("devices")}
 			</button>
 			{sheet && <DevicesSheet />}
 		</>
@@ -163,5 +157,6 @@ function DevicesButton() {
 export default defineFacet((host) => {
 	contribute(host, "p2.web-devices", (self) => {
 		self.contribute(Slots, { "sidebar-foot:devices": DevicesButton });
+		self.contribute(Translations, devicesMessages.translations);
 	});
 });

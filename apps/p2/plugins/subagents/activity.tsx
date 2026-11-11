@@ -16,7 +16,9 @@ import {
 	stringOf,
 	type ToolActivity,
 	type ToolView,
+	useMessages,
 	WorkingDirectory,
+	webMessages,
 } from "@p2/app/v1/web";
 import { useContext } from "react";
 
@@ -34,6 +36,7 @@ const VERBS: Record<string, string> = {
 const nameOf = (tool: ToolView) => stringOf(tool.args.name) || stringOf(detailsOf(tool).name);
 
 function SubagentDetail({ step }: { step: Step }) {
+	const { t } = useMessages(webMessages);
 	const { tool } = step;
 	const openConversation = useContext(OpenConversation);
 	const cwd = useContext(WorkingDirectory)?.replace(/\/+$/, "");
@@ -42,8 +45,8 @@ function SubagentDetail({ step }: { step: Step }) {
 	const target = typeof details.conversationId === "number" ? details.conversationId : undefined;
 	const config = [
 		details.model,
-		details.thinkingLevel && `thinking ${stringOf(details.thinkingLevel)}`,
-		Array.isArray(details.tools) && `tools ${details.tools.join(", ") || "none"}`,
+		details.thinkingLevel && t("thinkingValue", stringOf(details.thinkingLevel)),
+		Array.isArray(details.tools) && t("toolsValue", details.tools.join(", ") || t("none")),
 		typeof details.cwd === "string" &&
 			`cwd ${typeof details.env === "string" ? `${details.env}:${details.cwd}` : relativePath(cwd, details.cwd)}`,
 	]
@@ -51,13 +54,13 @@ function SubagentDetail({ step }: { step: Step }) {
 		.join(" · ");
 	return (
 		<>
-			<DetailSection label="Input">
+			<DetailSection label={t("input")}>
 				<DetailNote>{[action, nameOf(tool)].filter(Boolean).join(" · ")}</DetailNote>
 				{tool.args.message !== undefined && <DetailProse text={stringOf(tool.args.message)} />}
 				{config && <DetailNote testId="tool-config">{config}</DetailNote>}
 			</DetailSection>
 			{tool.output && (
-				<DetailSection label="Output">
+				<DetailSection label={t("output")}>
 					{action === "answer" && tool.status === "done" ? (
 						<DetailProse text={tool.output} />
 					) : (
@@ -66,7 +69,9 @@ function SubagentDetail({ step }: { step: Step }) {
 				</DetailSection>
 			)}
 			{target !== undefined && (
-				<DetailLink onClick={() => openConversation(target)}>Open {nameOf(tool) || "the conversation"}</DetailLink>
+				<DetailLink onClick={() => openConversation(target)}>
+					{t("open", nameOf(tool) || t("conversation"))}
+				</DetailLink>
 			)}
 		</>
 	);

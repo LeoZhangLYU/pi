@@ -4,10 +4,12 @@
 import { Button } from "@earendil-works/elanor-react";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { type ReactNode, useContext, useState } from "react";
+import { useMessages } from "../../runtime/web.tsx";
 import { CodeBlock } from "../Code.tsx";
 import { OpenWorkspaceFile, relativePath, ToolActivityContext, WorkingDirectory } from "../chat-context.ts";
 import { Timeline } from "../elanor-extra/timeline.tsx";
 import { Markdown } from "../Markdown.tsx";
+import { webMessages } from "../messages.ts";
 import { KindIcon, LabelText } from "./Label.tsx";
 import { type CallGroup, callStatus, groupCalls, parsedArgs, type Step } from "./model.ts";
 
@@ -18,21 +20,30 @@ export const DetailNote = ({ children, testId }: { children: ReactNode; testId?:
 	</p>
 );
 
-/** A labelled part of a detail ("Input", "Output"). */
-export const DetailSection = ({ label, children }: { label: string; children: ReactNode }) => (
-	<section className="detail-section" data-testid={`detail-${label.toLowerCase()}`}>
+/** A labelled part of a detail ("Input", "Output"); `testId` keeps the DOM id stable across languages. */
+export const DetailSection = ({ label, testId, children }: { label: string; testId?: string; children: ReactNode }) => (
+	<section className="detail-section" data-testid={`detail-${testId ?? label.toLowerCase()}`}>
 		<h4 className="detail-label">{label}</h4>
 		{children}
 	</section>
 );
 
 /** A call's detail: what went in, then what came out. */
-export const InputOutput = ({ input, output }: { input: ReactNode; output?: ReactNode }) => (
-	<>
-		<DetailSection label="Input">{input}</DetailSection>
-		{output ? <DetailSection label="Output">{output}</DetailSection> : null}
-	</>
-);
+export const InputOutput = ({ input, output }: { input: ReactNode; output?: ReactNode }) => {
+	const { t } = useMessages(webMessages);
+	return (
+		<>
+			<DetailSection label={t("input")} testId="input">
+				{input}
+			</DetailSection>
+			{output ? (
+				<DetailSection label={t("output")} testId="output">
+					{output}
+				</DetailSection>
+			) : null}
+		</>
+	);
+};
 
 /** A command in a terminal block: the prompt and the command. */
 export const CommandBlock = ({ command }: { command: string }) => (
@@ -51,8 +62,9 @@ export const CommandBlock = ({ command }: { command: string }) => (
  * red, no louder than that.
  */
 export function OutputBlock({ output, failed }: { output: string; failed?: boolean }) {
+	const { t } = useMessages(webMessages);
 	const text = output.trimEnd();
-	if (!text) return <DetailNote>No output</DetailNote>;
+	if (!text) return <DetailNote>{t("noOutput")}</DetailNote>;
 	return (
 		<div className="detail-terminal" data-failed={failed || undefined}>
 			<pre className="detail-output">{text}</pre>
@@ -115,6 +127,7 @@ export const DetailLink = ({
 
 /** A file a tool used, with a way into the workspace (at a line) when it is inside the working directory. */
 export function FilePath({ path, line, range }: { path: string; line?: number; range?: string }) {
+	const { t } = useMessages(webMessages);
 	const cwd = useContext(WorkingDirectory)?.replace(/\/+$/, "");
 	const openWorkspace = useContext(OpenWorkspaceFile);
 	const relative = relativePath(cwd, path);
@@ -127,7 +140,7 @@ export function FilePath({ path, line, range }: { path: string; line?: number; r
 			</span>
 			{openWorkspace && inside && (
 				<Button hierarchy="tertiary" data-testid="tool-link" onClick={() => openWorkspace(relative, line)}>
-					Open in workspace
+					{t("openInWorkspace")}
 				</Button>
 			)}
 		</div>
@@ -142,6 +155,7 @@ const NEWEST_CALLS = 8;
  * newest eight show, the rest behind "Show all".
  */
 export function NestedCalls({ step }: { step: Step }) {
+	const { t } = useMessages(webMessages);
 	const tools = useContext(ToolActivityContext);
 	const [all, setAll] = useState(false);
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -150,7 +164,7 @@ export function NestedCalls({ step }: { step: Step }) {
 	const groups = groupCalls(calls, tools, step.tool.name);
 	const from = all ? 0 : Math.max(0, groups.length - NEWEST_CALLS);
 	const failed = calls.filter((call) => call.status === "error" || call.status === "interrupted").length;
-	const count = `${calls.length} tool ${calls.length === 1 ? "call" : "calls"}${failed ? ` · ${failed} failed` : ""}`;
+	const count = t("toolCalls", calls.length, failed);
 	return (
 		<>
 			{groups.length > NEWEST_CALLS && (
@@ -161,7 +175,7 @@ export function NestedCalls({ step }: { step: Step }) {
 					aria-expanded={all}
 					onClick={() => setAll(!all)}
 				>
-					{all ? "Show newest calls" : `Show all ${count}`}
+					{all ? t("showNewestCalls") : t("showAllCalls", count)}
 				</button>
 			)}
 			<Timeline.Root data-testid="calls">
@@ -219,8 +233,10 @@ function GenericDetail({ step }: { step: Step }) {
 }
 
 /** Says when a restart cut a call short: it was not run again. */
-export const Interrupted = ({ step }: { step: Step }) =>
-	step.tool.status === "interrupted" ? <DetailNote>Interrupted by a restart, not run again.</DetailNote> : null;
+export const Interrupted = ({ step }: { step: Step }) => {
+	const { t } = useMessages(webMessages);
+	return step.tool.status === "interrupted" ? <DetailNote>{t("interruptedRestart")}</DetailNote> : null;
+};
 
 /** A call's detail: its tool's, or the generic one. */
 export function StepDetail({ step }: { step: Step }) {

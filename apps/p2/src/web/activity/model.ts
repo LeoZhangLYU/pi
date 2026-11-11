@@ -650,12 +650,17 @@ export function elapsed(ms: number): string {
 	return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
+/** A step's state words: how a running, interrupted or failed call says so. */
+export type StepStateWords = { readonly running: string; readonly interrupted: string; readonly failed: string };
+
+const ENGLISH_STEP_STATE: StepStateWords = { running: "● running", interrupted: "interrupted", failed: "failed" };
+
 /** A step's state for its row in the sheet: done with its time, how it failed, running. */
-export function stepState(step: Step, tools: ToolActivityTable): string {
+export function stepState(step: Step, tools: ToolActivityTable, state: StepStateWords = ENGLISH_STEP_STATE): string {
 	const { tool } = step;
-	if (step.status === "running") return "● running";
+	if (step.status === "running") return state.running;
 	if (step.status === "error")
-		return `✗ ${tool.status === "interrupted" ? "interrupted" : (tools.get(tool.name)?.failure?.(tool) ?? "failed")}`;
+		return `✗ ${tool.status === "interrupted" ? state.interrupted : (tools.get(tool.name)?.failure?.(tool) ?? state.failed)}`;
 	const ms = tool.durationMs;
 	if (ms === undefined) return "✓";
 	return `✓ ${ms < 1000 ? `${Math.round(ms)}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : elapsed(ms)}`;
@@ -664,23 +669,45 @@ export function stepState(step: Step, tools: ToolActivityTable): string {
 /** The summary's words for a tool without its own: "used web_fetch", "used web_fetch 3 times". */
 const usedTool = (name: string) => (count: number) => (count === 1 ? `used ${name}` : `used ${name} ${count} times`);
 
+/** The words `summary` joins: a fallback for tools without their own, "done", and the failure count, translated. */
+export type ActivityWords = {
+	readonly done: string;
+	readonly failed: (count: number) => string;
+	readonly usedTool: (name: string, count: number) => string;
+	/** A tool's own summary phrase (English in its contribution), translated when the language has words for it. */
+	readonly phrase?: (phrase: string) => string;
+};
+
+export const ENGLISH_ACTIVITY_WORDS: ActivityWords = {
+	done: "done",
+	failed: (count) => ` · ${count} failed`,
+	usedTool: (name, count) => usedTool(name)(count),
+};
+
 /**
  * One line for a finished run of calls: the tools' own words for what they did, counted, in the order they did it
  * ("Read 3 files, ran 2 commands"). `failures: false` leaves out the failures.
  */
-export function summary(steps: readonly Step[], tools: ToolActivityTable, { failures = true } = {}): string {
+export function summary(
+	steps: readonly Step[],
+	tools: ToolActivityTable,
+	{ failures = true, words = ENGLISH_ACTIVITY_WORDS }: { failures?: boolean; words?: ActivityWords } = {},
+): string {
 	// Keyed by the words' function (tools sharing it count together), or by the name of a tool without one.
 	const counts = new Map<unknown, { words: (count: number) => string; count: number }>();
 	for (const step of steps) {
 		const own = tools.get(step.tool.name)?.summary;
 		const key = own ?? step.tool.name;
-		const entry = counts.get(key) ?? { words: own ?? usedTool(step.tool.name), count: 0 };
+		const entry = counts.get(key) ?? { words: own ?? ((count) => words.usedTool(step.tool.name, count)), count: 0 };
 		entry.count++;
 		counts.set(key, entry);
 	}
-	const parts = [...counts.values()].map(({ words, count }) => words(count));
+	const parts = [...counts.values()].map(({ words: phrase, count }) => {
+		const text = phrase(count);
+		return words.phrase?.(text) ?? text;
+	});
 	const errors = failures ? steps.filter((step) => step.status === "error").length : 0;
-	return `${capitalized(parts.join(", ") || "done")}${errors ? ` · ${errors} failed` : ""}`;
+	return `${capitalized(parts.join(", ") || words.done)}${errors ? words.failed(errors) : ""}`;
 }
 
 /** A tool's arguments, parsed when a settled list kept them as JSON text (cut texts stay unparsed). */

@@ -2,11 +2,12 @@
 // second chip shows how the agent is mentioned (`@pi`); the owner taps it to rename the agent for this conversation
 // (what people type after `@`, and what voice mode listens for).
 
-import { BACKGROUND_CONTEXT, contribute, defineFacet } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT, contribute, defineFacet, Translations } from "@p2/app/v1";
 import {
 	Sheet,
 	Slots,
 	useComposerState,
+	useMessages,
 	useObject,
 	useOptimisticCall,
 	useReadable,
@@ -17,10 +18,8 @@ import { useEffect, useState } from "react";
 import { TranscriptEntries } from "../chat/contract.ts";
 import { ChatMode, DEFAULT_AGENT_NAME, mentionToken } from "./contract.ts";
 import { CHAT_ENTRY_DISPLAYS } from "./display.ts";
+import { chatModeMessages } from "./messages.ts";
 import "./style.css";
-
-const hint = (name: string) =>
-	`Chat mode: messages go to the people in this session, not to ${name}. Mention ${mentionToken(name)} (or say "${name}") to ask ${name}; it then reads the chat since its last answer.`;
 
 /** One word, as typed after `@` and spoken: letters, digits, `_` and `-`, starting with a letter (AgentNameSchema). */
 const VALID_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
@@ -33,6 +32,7 @@ type Shown = { readonly enabled: boolean; readonly name: string };
  * while the rename is in flight, and a refused rename puts the old one back with the error in the toast.
  */
 function NameSheet({ name, onSave, onClose }: { name: string; onSave: (name: string) => void; onClose: () => void }) {
+	const { t } = useMessages(chatModeMessages);
 	const [draft, setDraft] = useState(name);
 	const valid = VALID_NAME.test(draft.trim());
 	const save = () => {
@@ -42,7 +42,7 @@ function NameSheet({ name, onSave, onClose }: { name: string; onSave: (name: str
 		onClose();
 	};
 	return (
-		<Sheet title="Agent name" onClose={onClose}>
+		<Sheet title={t("agentName")} onClose={onClose}>
 			<form
 				className="stack"
 				onSubmit={(event) => {
@@ -51,7 +51,7 @@ function NameSheet({ name, onSave, onClose }: { name: string; onSave: (name: str
 				}}
 			>
 				<label className="field">
-					<span className="label">Name in this conversation</span>
+					<span className="label">{t("nameInConversation")}</span>
 					<input
 						className="input"
 						value={draft}
@@ -63,17 +63,14 @@ function NameSheet({ name, onSave, onClose }: { name: string; onSave: (name: str
 						onChange={(event) => setDraft(event.target.value)}
 					/>
 				</label>
-				<p className="muted small">
-					People mention it as {mentionToken(valid ? draft.trim() : name)}, and in voice mode its name anywhere in
-					what they say counts. One word: letters, digits, - and _.
-				</p>
+				<p className="muted small">{t("mentionHint", mentionToken(valid ? draft.trim() : name))}</p>
 				<div className="inline-form">
 					<button type="submit" className="button" disabled={!valid || draft.trim() === name}>
-						Save
+						{t("save")}
 					</button>
 					{name !== DEFAULT_AGENT_NAME && (
 						<button type="button" className="text-action" onClick={() => setDraft(DEFAULT_AGENT_NAME)}>
-							Reset to {DEFAULT_AGENT_NAME}
+							{t("resetTo", DEFAULT_AGENT_NAME)}
 						</button>
 					)}
 				</div>
@@ -84,6 +81,7 @@ function NameSheet({ name, onSave, onClose }: { name: string; onSave: (name: str
 
 /** Beside Steer in the composer: the owner's switch; for guests, a marker while chat mode is on. */
 function ChatModeChip() {
+	const { t } = useMessages(chatModeMessages);
 	const route = useRoute();
 	const { session } = route;
 	const mode = useObject(ChatMode, session ? { session, conversation: route.conversation ?? 1 } : undefined);
@@ -97,7 +95,7 @@ function ChatModeChip() {
 		fail,
 	);
 	const [renaming, setRenaming] = useState(false);
-	const label = enabled && waiting ? `Chat · ${waiting}` : "Chat";
+	const label = enabled && waiting ? t("chatWaiting", waiting) : t("chat");
 	// Replies belong to chat mode: the transcript offers them while it is on, and the composer offers the mention.
 	const replies = live && enabled;
 	useEffect(() => {
@@ -110,7 +108,7 @@ function ChatModeChip() {
 		return () => setMentionName(DEFAULT_AGENT_NAME);
 	}, [name, setMentionName]);
 	if (!mode || !live) return null;
-	const title = hint(name);
+	const title = t("modeHint", name);
 	if (mode.variant !== "owner")
 		return enabled ? (
 			<>
@@ -137,8 +135,8 @@ function ChatModeChip() {
 				<button
 					type="button"
 					className="chip chat-mode-name"
-					title={`Mentioned as ${mentionToken(name)}: rename`}
-					aria-label={`Agent name ${name}. Rename`}
+					title={t("mentionedAs", mentionToken(name))}
+					aria-label={t("agentNameRename", name)}
 					onClick={() => setRenaming(true)}
 				>
 					{mentionToken(name)}
@@ -159,5 +157,6 @@ export default defineFacet((host) => {
 	contribute(host, "p2.chat-mode-web", (self) => {
 		self.contribute(Slots, { "composer:chat-mode": ChatModeChip });
 		self.contribute(TranscriptEntries, CHAT_ENTRY_DISPLAYS);
+		self.contribute(Translations, chatModeMessages.translations);
 	});
 });

@@ -18,8 +18,10 @@ import {
 	Text,
 } from "@earendil-works/elanor-react";
 import { type ComponentProps, type ReactNode, useMemo } from "react";
+import { useMessages } from "../runtime/web.tsx";
 import { highlightCode } from "./Code.tsx";
 import type { MarkdownComponents } from "./Markdown.tsx";
+import { webMessages } from "./messages.ts";
 import "./elanor-markdown.css";
 
 /** GFM's column alignment as Elanor's logical one. */
@@ -27,11 +29,27 @@ const alignment = (align: unknown) => (align === "center" ? "center" : align ===
 
 /** A fenced code block: highlighted, with Copy. */
 function ElanorCodeBlock({ code, language }: { code: string; language?: string }) {
+	const { t } = useMessages(webMessages);
 	const content = useMemo(() => highlightCode(code, language), [code, language]);
 	return (
-		<CodeSnippet actions={<CopyButton value={code} aria-label="Copy code" />} data-language={language}>
+		<CodeSnippet actions={<CopyButton value={code} aria-label={t("copyCode")} />} data-language={language}>
 			{content}
 		</CodeSnippet>
+	);
+}
+
+// A task item's checkbox shows its state; it is not a control here.
+function TaskCheckbox({ checked }: { checked: boolean }) {
+	const { t } = useMessages(webMessages);
+	return (
+		<Checkbox.Root
+			className="markdown-checkbox"
+			checked={checked}
+			readOnly
+			aria-label={checked ? t("doneLabel") : t("notDone")}
+		>
+			<Checkbox.Indicator />
+		</Checkbox.Root>
 	);
 }
 
@@ -76,15 +94,5 @@ export const ELANOR_MARKDOWN: MarkdownComponents = {
 		<Table.Cell align={alignment(align)} {...props} />
 	),
 	codeBlock: ElanorCodeBlock,
-	// A task item's checkbox shows its state; it is not a control here.
-	checkbox: ({ checked }: { checked: boolean }) => (
-		<Checkbox.Root
-			className="markdown-checkbox"
-			checked={checked}
-			readOnly
-			aria-label={checked ? "Done" : "Not done"}
-		>
-			<Checkbox.Indicator />
-		</Checkbox.Root>
-	),
+	checkbox: TaskCheckbox,
 };

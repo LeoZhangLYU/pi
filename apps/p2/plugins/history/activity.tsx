@@ -18,8 +18,10 @@ import {
 	sentence,
 	stringOf,
 	type ToolActivity,
+	useMessages,
 } from "@p2/app/v1/web";
 import { useContext } from "react";
+import { historyMessages } from "./messages.ts";
 import "./activity.css";
 
 /** The entries a history tool found or read: each opens its message in the transcript, closing the sheet. */
@@ -62,6 +64,7 @@ function HistoryEntries({ rows, field }: { rows: unknown; field: "snippet" | "pr
 }
 
 function HistoryDetail({ step }: { step: Step }) {
+	const { t } = useMessages(historyMessages);
 	const { tool } = step;
 	const details = detailsOf(tool);
 	const search = tool.name === "history_search";
@@ -79,8 +82,8 @@ function HistoryDetail({ step }: { step: Step }) {
 				Array.isArray(rows) && rows.length > 0 ? (
 					<>
 						<HistoryEntries rows={rows} field={search ? "snippet" : "preview"} />
-						{details.more === true && <DetailNote>More matches</DetailNote>}
-						{details.truncated === true && <DetailNote>Cut at the output budget</DetailNote>}
+						{details.more === true && <DetailNote>{t("moreMatches")}</DetailNote>}
+						{details.truncated === true && <DetailNote>{t("cutAtBudget")}</DetailNote>}
 					</>
 				) : (
 					<OutputBlock output={tool.output} failed={step.status === "error"} />
@@ -151,10 +154,11 @@ const historyRead: ToolActivity = {
 };
 
 function HandoffDetail({ step }: { step: Step }) {
+	const { t } = useMessages(historyMessages);
 	return (
 		<>
 			<DetailProse text={stringOf(step.tool.args.text)} />
-			<DetailNote>New context started; earlier history stays searchable.</DetailNote>
+			<DetailNote>{t("newContext")}</DetailNote>
 		</>
 	);
 }

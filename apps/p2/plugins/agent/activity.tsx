@@ -11,17 +11,20 @@ import {
 	sentence,
 	stringOf,
 	type ToolActivity,
+	useMessages,
+	webMessages,
 } from "@p2/app/v1/web";
 import { useContext } from "react";
 
 /** A script's call of a one-shot agent: its conversation, once the agent has one. */
 function AgentLink({ call }: { call: NestedCall }) {
+	const { t } = useMessages(webMessages);
 	const agents = useContext(OneShotAgents);
 	const openConversation = useContext(OpenConversation);
 	const agent = agents.get(call.id);
 	return agent === undefined ? null : (
 		<DetailLink testId="nested-open" onClick={() => openConversation(agent)}>
-			Open the agent's conversation
+			{t("openAgentConversation")}
 		</DetailLink>
 	);
 }

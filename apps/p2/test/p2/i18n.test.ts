@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 import { test } from "node:test";
+import { chatMessages } from "../../plugins/chat/messages.ts";
+import { chatModeMessages } from "../../plugins/chat-mode/messages.ts";
+import { devicesMessages } from "../../plugins/devices/messages.ts";
+import { discordMessages } from "../../plugins/discord/messages.ts";
+import { envsMessages } from "../../plugins/envs/messages.ts";
+import { familiarMessages } from "../../plugins/familiar/messages.ts";
+import { historyMessages } from "../../plugins/history/messages.ts";
+import { loginMessages } from "../../plugins/login/messages.ts";
+import { logsMessages } from "../../plugins/logs/messages.ts";
 import { mcpMessages } from "../../plugins/mcp/messages.ts";
+import { portsMessages } from "../../plugins/ports/messages.ts";
+import { sessionsMessages } from "../../plugins/sessions/messages.ts";
 import { sharingMessages } from "../../plugins/sharing/messages.ts";
+import { voiceMessages } from "../../plugins/voice/messages.ts";
+import { workspaceMessages } from "../../plugins/workspace/messages.ts";
 import { coreMessages } from "../../src/runtime/core-messages.ts";
 import { acceptedLanguages, queryLanguage, requestLanguage } from "../../src/runtime/locale.ts";
 import { pageMessages } from "../../src/runtime/page-messages.ts";
@@ -42,6 +55,19 @@ test("every catalog has the same keys and value types in English and Chinese", (
 		["p2.web", webMessages],
 		["p2.sharing", sharingMessages],
 		["p2.mcp", mcpMessages],
+		["p2.chat", chatMessages],
+		["p2.chat-mode", chatModeMessages],
+		["p2.sessions", sessionsMessages],
+		["p2.envs", envsMessages],
+		["p2.familiar", familiarMessages],
+		["p2.workspace", workspaceMessages],
+		["p2.login", loginMessages],
+		["p2.ports", portsMessages],
+		["p2.devices", devicesMessages],
+		["p2.logs", logsMessages],
+		["p2.history", historyMessages],
+		["p2.voice", voiceMessages],
+		["p2.discord", discordMessages],
 	] as const) {
 		const catalogs = new Map(messages.translations.map(({ locale, messages: catalog }) => [locale, catalog]));
 		const en = catalogs.get("en");

@@ -1,6 +1,6 @@
 // The Familiar's entry at the top of the owner's drawer, above the folders: opens its session, making it on first use.
 // The drawer lists its session here only, not in its folder.
-import { BACKGROUND_CONTEXT, contribute, defineFacet, keptIn, liveIn } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT, contribute, defineFacet, keptIn, liveIn, Translations } from "@p2/app/v1";
 import {
 	navigate,
 	SessionDot,
@@ -8,6 +8,7 @@ import {
 	SparkIcon,
 	useComposerState,
 	useConnected,
+	useMessages,
 	useObject,
 	useOwner,
 	useReadable,
@@ -16,6 +17,7 @@ import {
 import { useContext, useEffect, useState } from "react";
 import { DrawerRowsContext } from "../sessions/contract.web.tsx";
 import { FAMILIAR_TITLE, Familiar } from "./contract.ts";
+import { familiarMessages } from "./messages.ts";
 import "./style.css";
 
 function FamiliarEntry() {
@@ -23,6 +25,7 @@ function FamiliarEntry() {
 }
 
 function OwnerEntry() {
+	const { t } = useMessages(familiarMessages);
 	const held = useObject(Familiar, {});
 	const familiar = liveIn(held, "owner");
 	// As the server last said: while the connection is down or coming back, its row stays out of its folder, as the
@@ -61,7 +64,7 @@ function OwnerEntry() {
 				<span className="session-title">{row?.title ?? FAMILIAR_TITLE}</span>
 				<span className="session-meta">
 					{row ? <SessionDot worker={row.worker} /> : null}
-					{opening ? "Opening…" : "Your sessions"}
+					{opening ? t("opening") : t("yourSessions")}
 				</span>
 			</button>
 		</div>
@@ -71,5 +74,6 @@ function OwnerEntry() {
 export default defineFacet((host) => {
 	contribute(host, "p2.web-familiar", (self) => {
 		self.contribute(Slots, { "drawer-head:familiar": FamiliarEntry });
+		self.contribute(Translations, familiarMessages.translations);
 	});
 });

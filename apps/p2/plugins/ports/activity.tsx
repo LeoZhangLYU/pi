@@ -11,7 +11,9 @@ import {
 	type ToolActivity,
 	ToolIcon,
 	type ToolView,
+	useMessages,
 } from "@p2/app/v1/web";
+import { portsMessages } from "./messages.ts";
 import "./activity.css";
 
 /** The addresses of a port a call opened: private, and public when it is public. Only Radius forward addresses. */
@@ -34,6 +36,7 @@ function forwardOf(tool: ToolView): { name: string; url?: string; publicUrl?: st
 }
 
 function PortLinks({ tool }: { tool: ToolView }) {
+	const { t } = useMessages(portsMessages);
 	const forward = forwardOf(tool);
 	if (!forward) return null;
 	return (
@@ -47,7 +50,7 @@ function PortLinks({ tool }: { tool: ToolView }) {
 					target="_blank"
 					rel="noopener noreferrer"
 				>
-					Open {forward.name}
+					{t("openName", forward.name)}
 				</a>
 			)}
 			{forward.publicUrl && (
@@ -58,7 +61,7 @@ function PortLinks({ tool }: { tool: ToolView }) {
 					target="_blank"
 					rel="noopener noreferrer"
 				>
-					Public link
+					{t("publicLink")}
 				</a>
 			)}
 		</div>

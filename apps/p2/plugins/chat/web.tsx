@@ -9,8 +9,10 @@ import {
 	type Held,
 	isChordError,
 	liveIn,
+	type MessagesOf,
 	serveKeyed,
 	Translations,
+	type Translator,
 	UI_LINGER,
 	whenLive,
 } from "@p2/app/v1";
@@ -120,6 +122,9 @@ import { type Child, conversationLocation, SubagentControl, Subagents } from "..
 import { SessionTree } from "../tree/contract.ts";
 import { Chat, ChatCosts, TranscriptEntries } from "./contract.ts";
 import { chatMessages } from "./messages.ts";
+
+type ChatTranslator = Translator<"p2.chat", MessagesOf<typeof chatMessages>>;
+
 import { type Outgoing, outboxOf } from "./outbox.ts";
 import { sessionStart } from "./session-start.ts";
 
@@ -133,12 +138,12 @@ class UploadError extends Error {
 }
 
 /** Uploads a file to the session (the files plugin's route); returns its upload ID. */
-async function upload(session: string, file: File): Promise<string> {
+async function upload(session: string, file: File, t: ChatTranslator): Promise<string> {
 	const query = new URLSearchParams({ session, name: file.name });
 	const response = await fetch(`/upload?${query}`, { method: "POST", body: file, credentials: "same-origin" });
 	const result = (await response.json().catch(() => ({}))) as { id?: string; error?: string };
 	if (!response.ok || !result.id)
-		throw new UploadError(`Upload of ${file.name} failed: ${result.error ?? response.status}`, response.status);
+		throw new UploadError(t("uploadFailed", file.name, result.error ?? String(response.status)), response.status);
 	return result.id;
 }
 
@@ -762,10 +767,10 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		if (listed && (!session || session.archivedAt !== null) && current.session === sessionId) {
 			// What this device kept of a session the server no longer has goes with it (an archived one stays).
 			if (!session) void forgetSession(sessionId);
-			toast(session ? "Session is archived" : "Session not found");
+			toast(session ? t("archivedToast") : t("notFoundToast"));
 			void nav.replace(conversationRoute(current, undefined), current);
 		}
-	}, [listed, session, nav, sessionId, toast]);
+	}, [listed, session, nav, sessionId, toast, t]);
 	// Who this browser is, as the server last said: kept while reconnecting (`useOwner`), so the composer stays.
 	const access = useObject(Access, {});
 	const liveGrant = useReadable(liveIn(access, "guest")?.grant);
@@ -1089,7 +1094,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 							file.uploaded = undefined;
 							file.session = session;
 						}
-						file.uploaded ??= await upload(session, file.file);
+						file.uploaded ??= await upload(session, file.file, t);
 						return file.uploaded;
 					}),
 				);
@@ -1118,7 +1123,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 			},
 		});
 		return () => outbox.connect(undefined);
-	}, [live, outbox, started, restore, setFiles, setReplyTo, setError]);
+	}, [live, outbox, started, restore, setFiles, setReplyTo, setError, t]);
 	// Leaving the page loses what the outbox has not delivered: the browser asks first.
 	useEffect(() => {
 		if (outgoing.every((message) => message.sent)) return;
@@ -1213,7 +1218,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	const failedMove = operations?.find(
 		(operation) => operation.phase === "failed" && operation.kind === "relocate" && operation.session === sessionId,
 	);
-	const failedMoveText = failedMove?.phase === "failed" ? `Move failed: ${failedMove.error}` : undefined;
+	const failedMoveText = failedMove?.phase === "failed" ? t("moveFailed", failedMove.error) : undefined;
 	useEffect(() => {
 		if (failedMoveText) toast(failedMoveText);
 	}, [failedMoveText, toast]);
@@ -1226,7 +1231,10 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	const modelControl = owner ? (
 		<ModelControl resources={resources} {...(choice ? { choice } : {})} />
 	) : (
-		<span className="model-control static">{grant?.name} · guest</span>
+		<span className="model-control static">
+			{grant?.name}
+			{t("guestTag")}
+		</span>
 	);
 	const footer = (
 		<SessionStats
@@ -1439,7 +1447,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 				<div className="scroller transcript" ref={follow.scroller}>
 					{failure && connected ? (
 						<div className="hero worker-start-error">
-							<h2>Session unavailable</h2>
+							<h2>{t("sessionUnavailable")}</h2>
 							<p className="error" role="alert">
 								{failure}
 							</p>
@@ -1455,11 +1463,11 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 											openLayer({ kind: "sheet", name: "logs", locator: `session:${sessionId}` })
 										}
 									>
-										Show logs
+										{t("showLogs")}
 									</button>
 								</div>
 							) : (
-								<p className="muted">Ask the owner to retry this session.</p>
+								<p className="muted">{t("askOwnerRetry")}</p>
 							)}
 						</div>
 					) : shown ? (
@@ -1507,7 +1515,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 							</SessionId.Provider>
 						) : (
 							<div className="hero small-hero">
-								<p className="muted">Send a message to start.</p>
+								<p className="muted">{t("sendToStart")}</p>
 							</div>
 						)
 					) : (
@@ -1522,6 +1530,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 }
 
 function NewSession() {
+	const { t } = useMessages(chatMessages);
 	const connected = useConnected();
 	const host = useHost();
 	const owner = useOwner();
@@ -1655,7 +1664,7 @@ function NewSession() {
 				: {
 						bar: (
 							<div className="subagent-bar">
-								<span>Connecting…</span>
+								<span>{t("connecting")}</span>
 							</div>
 						),
 					},
@@ -1697,7 +1706,7 @@ function NewSession() {
 						<div className="hero">
 							<div className="hero-title">
 								<PiLogo />
-								<h2>What should Pi do?</h2>
+								<h2>{t("whatShouldPiDo")}</h2>
 							</div>
 							<button
 								type="button"
@@ -1714,7 +1723,7 @@ function NewSession() {
 									className="button"
 									onClick={() => openLayer({ kind: "sheet", name: "providers" })}
 								>
-									Sign in to a provider
+									{t("signInToProvider")}
 								</button>
 							)}
 						</div>
@@ -1727,12 +1736,13 @@ function NewSession() {
 
 /** A guest's share ended: Pi Mobile clears the view and says so in its toast; nothing reconnects. */
 function ShareEnded() {
+	const { t } = useMessages(chatMessages);
 	const place = useChatScreen(undefined);
 	return (
 		<>
 			<TopBar />
 			<button type="button" className="toast">
-				This share has ended.
+				{t("shareEnded")}
 			</button>
 			{place(<div className="scroller" />)}
 		</>

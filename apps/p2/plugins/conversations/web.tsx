@@ -6,14 +6,17 @@ import {
 	ToolActivities,
 	useComposerState,
 	useConnected,
+	useMessages,
 	useObject,
 	useReadable,
+	webMessages,
 } from "@p2/app/v1/web";
 import type { ReactNode } from "react";
 import { Sessions } from "../sessions/contract.ts";
 import { conversationsActivity } from "./activity.tsx";
 
 function Attribution({ children }: { children?: ReactNode }) {
+	const { t } = useMessages(webMessages);
 	const sessions = useObject(Sessions, {});
 	const listed = useReadable(liveIn(sessions, "owner", "guest")?.sessions) ?? [];
 	const owner = liveIn(sessions, "owner");
@@ -23,7 +26,7 @@ function Attribution({ children }: { children?: ReactNode }) {
 	const open = (session: string): void => {
 		const current = listed.find((entry) => entry.id === session);
 		if (!current) {
-			setError("The source conversation is unavailable");
+			setError(t("sourceUnavailable"));
 			return;
 		}
 		if (current.archivedAt === null) navigate({ session });

@@ -1,10 +1,11 @@
-import { contribute, defineFacet, whenLive } from "@p2/app/v1";
+import { contribute, defineFacet, Translations, whenLive } from "@p2/app/v1";
 import {
 	closeLayers,
 	errorText,
 	openLayer,
 	Sheet,
 	Slots,
+	useMessages,
 	useNavigation,
 	useObject,
 	useOwner,
@@ -14,14 +15,15 @@ import {
 } from "@p2/app/v1/web";
 import { useEffect, useRef, useState } from "react";
 import { Logs } from "./contract.ts";
+import { logsMessages } from "./messages.ts";
 import "./style.css";
 
-function sourceLabel(source: string): string {
-	if (source.startsWith("session:")) return `Worker ${source.slice(8)}`;
-	return source === "dev" ? "Dev supervisor" : source === "terminals" ? "Terminal host" : "Server";
-}
-
 function LogsSheet({ source }: { source: string }) {
+	const { t } = useMessages(logsMessages);
+	const sourceLabel = (id: string): string => {
+		if (id.startsWith("session:")) return t("worker", id.slice(8));
+		return id === "dev" ? t("devSupervisor") : id === "terminals" ? t("terminalHost") : t("server");
+	};
 	const logs = useObject(Logs, { source });
 	const status = useStatus(logs);
 	const sources = useReadable(logs?.sources) ?? [];
@@ -49,10 +51,10 @@ function LogsSheet({ source }: { source: string }) {
 	}, [logs]);
 	const choices = [...new Set(["server", "terminals", "dev", source, ...sources.map((entry) => entry.id)])];
 	return (
-		<Sheet title="Logs" onClose={closeLayers} className="logs-sheet">
+		<Sheet title={t("logs")} onClose={closeLayers} className="logs-sheet">
 			<div className="logs-controls">
 				<label className="label" htmlFor="logs-source">
-					Source
+					{t("source")}
 				</label>
 				<select
 					id="logs-source"
@@ -76,46 +78,47 @@ function LogsSheet({ source }: { source: string }) {
 				</select>
 				<input
 					className="input"
-					aria-label="Filter logs"
-					placeholder="Filter logs"
+					aria-label={t("filterLogs")}
+					placeholder={t("filterLogs")}
 					value={filter}
 					onChange={(event) => setFilter(event.target.value)}
 				/>
 				<div className="logs-actions">
 					<label>
 						<input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} />{" "}
-						Follow tail
+						{t("followTail")}
 					</label>
 					<button
 						type="button"
 						className="text-action"
 						onClick={() => {
 							void (
-								navigator.clipboard?.writeText(text) ?? Promise.reject(new Error("Clipboard unavailable"))
+								navigator.clipboard?.writeText(text) ?? Promise.reject(new Error(t("clipboardUnavailable")))
 							).then(
-								() => setMessage("Copied"),
-								() => setMessage("Could not copy logs"),
+								() => setMessage(t("copied")),
+								() => setMessage(t("couldNotCopy")),
 							);
 						}}
 					>
-						Copy
+						{t("copy")}
 					</button>
 				</div>
 			</div>
 			{message && <output className="notice">{message}</output>}
-			<pre ref={area} className="logs-output" title="Log lines">
+			<pre ref={area} className="logs-output" title={t("logLines")}>
 				{text ||
 					(status === "live"
-						? "No log lines"
+						? t("noLogLines")
 						: status === "failed" || status === "ended"
-							? "Logs unavailable"
-							: "Loading logs…")}
+							? t("logsUnavailable")
+							: t("loadingLogs"))}
 			</pre>
 		</Sheet>
 	);
 }
 
 function LogsButton() {
+	const { t } = useMessages(logsMessages);
 	const sheet = useSheet("logs");
 	if (!useOwner()) return null;
 	return (
@@ -125,7 +128,7 @@ function LogsButton() {
 				className="foot-button"
 				onClick={() => openLayer({ kind: "sheet", name: "logs" }, { fromDrawer: true })}
 			>
-				Logs
+				{t("logs")}
 			</button>
 			{sheet && <LogsSheet source={sheet.locator ?? "server"} />}
 		</>
@@ -135,5 +138,6 @@ function LogsButton() {
 export default defineFacet((host) => {
 	contribute(host, "p2.web-logs", (self) => {
 		self.contribute(Slots, { "sidebar-foot:logs": LogsButton });
+		self.contribute(Translations, logsMessages.translations);
 	});
 });

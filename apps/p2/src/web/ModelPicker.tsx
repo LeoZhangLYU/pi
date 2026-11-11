@@ -2,8 +2,9 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { useState } from "react";
 import type { ResourceSnapshot } from "../../plugins/models/contract.ts";
-import { Sheet } from "../runtime/web.tsx";
+import { Sheet, useMessages } from "../runtime/web.tsx";
 import { CheckIcon, SearchIcon } from "./icons.tsx";
+import { webMessages } from "./messages.ts";
 
 export type ModelChoice = { model: ModelRef; thinkingLevel: ModelThinkingLevel };
 type Summary = ResourceSnapshot["models"][number];
@@ -32,9 +33,10 @@ export function ThinkingControl({
 	value: ModelThinkingLevel;
 	onChange: (level: ModelThinkingLevel) => void;
 }) {
-	if (levels.length <= 1) return <p className="muted small">This model has no adjustable thinking.</p>;
+	const { t } = useMessages(webMessages);
+	if (levels.length <= 1) return <p className="muted small">{t("noAdjustableThinking")}</p>;
 	return (
-		<fieldset className="segments" aria-label="Thinking level">
+		<fieldset className="segments" aria-label={t("thinkingLevel")}>
 			{levels.map((level) => (
 				<button
 					type="button"
@@ -79,6 +81,7 @@ export function ModelPicker({
 	onDefault: (choice: ModelChoice) => void;
 	onClose: () => void;
 }) {
+	const { t } = useMessages(webMessages);
 	const [query, setQuery] = useState("");
 	const providerName = new Map(resources?.providers.map((provider) => [provider.id, provider.name]));
 	const matches = matchingModels(resources, query);
@@ -103,21 +106,21 @@ export function ModelPicker({
 		});
 	};
 	return (
-		<Sheet title="Model" onClose={onClose}>
+		<Sheet title={t("modelTitle")} onClose={onClose}>
 			<div className="sheet-sticky">
 				{value && (
 					<div className="field">
-						<span className="label">Thinking</span>
+						<span className="label">{t("thinkingLabel")}</span>
 						<ThinkingControl
 							levels={levels}
 							value={value.thinkingLevel}
 							onChange={(thinkingLevel) => onChange({ ...value, thinkingLevel })}
 						/>
 						{isDefault ? (
-							<p className="model-default muted small">Default for new sessions</p>
+							<p className="model-default muted small">{t("defaultForNewSessions")}</p>
 						) : (
 							<button type="button" className="model-default text-action" onClick={() => onDefault(value)}>
-								Make default for new sessions
+								{t("makeDefault")}
 							</button>
 						)}
 					</div>
@@ -127,8 +130,8 @@ export function ModelPicker({
 					<input
 						value={query}
 						onChange={(event) => setQuery(event.target.value)}
-						placeholder="Search signed-in models"
-						aria-label="Search models"
+						placeholder={t("searchModels")}
+						aria-label={t("searchModelsLabel")}
 					/>
 				</label>
 			</div>
@@ -157,7 +160,7 @@ export function ModelPicker({
 						})}
 					</section>
 				))}
-				{!groups.size && <p className="empty-note">No models match. Only signed-in providers are listed.</p>}
+				{!groups.size && <p className="empty-note">{t("noModelsMatch")}</p>}
 			</div>
 		</Sheet>
 	);

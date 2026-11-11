@@ -65,6 +65,7 @@ const usePageVisible = () => useSyncExternalStore(subscribeVisibility, () => doc
  * opens (through a portal, so the hidden menu does not hide it).
  */
 function FooterMenu() {
+	const { t } = useMessages(sessionsMessages);
 	const [open, setOpen] = useState(false);
 	const menu = useRef<HTMLDivElement>(null);
 	useEffect(() => {
@@ -91,7 +92,7 @@ function FooterMenu() {
 				aria-expanded={open}
 				onClick={() => setOpen(!open)}
 			>
-				More
+				{t("more")}
 				<span className="foot-menu-chevron">
 					<ChevronIcon size={14} />
 				</span>

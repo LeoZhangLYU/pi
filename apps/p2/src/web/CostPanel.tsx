@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Sheet } from "../runtime/web.tsx";
+import { Sheet, useMessages } from "../runtime/web.tsx";
+import { webMessages } from "./messages.ts";
 import type { AssistantCost } from "./transcript.ts";
 
 function preciseCost(value: number): string {
@@ -23,6 +24,7 @@ export function CostPanel({
 	load: () => Promise<readonly (Omit<AssistantCost, "cacheHit"> & { cacheHit?: number })[]>;
 	onClose: () => void;
 }) {
+	const { t } = useMessages(webMessages);
 	const [loaded, setLoaded] = useState<{ costs: AssistantCost[] } | { error: string }>();
 	// biome-ignore lint/correctness/useExhaustiveDependencies: fetched once per opening, not on every render's new `load`.
 	useEffect(() => {
@@ -42,31 +44,29 @@ export function CostPanel({
 	const rows = useRef(new Map<string, HTMLTableRowElement>());
 	const [selected, setSelected] = useState<string>();
 	return (
-		<Sheet title="Cost" onClose={onClose} className="cost-sheet">
-			<p className="muted small">
-				Viewed conversation · committed assistant messages. The session footer can also include subagents and tools.
-			</p>
+		<Sheet title={t("cost")} onClose={onClose} className="cost-sheet">
+			<p className="muted small">{t("costIntro")}</p>
 			{!loaded ? (
-				<p className="muted">Loading…</p>
+				<p className="muted">{t("loading")}</p>
 			) : "error" in loaded ? (
 				<p className="error">{loaded.error}</p>
 			) : costs.length ? (
 				<>
 					<div className="cost-summary">
-						<span>{costs.length} responses</span>
+						<span>{t("responsesCount", costs.length)}</span>
 						<strong>{preciseCost(total)}</strong>
 					</div>
 					{/* Two charts on one shared x axis instead of tabs or a dual y axis: a cost
 					    spike sits directly above its cache hit rate, and each chart keeps its own unit. */}
-					<figure className="cost-chart" aria-label="Assistant response costs in US dollars and cache hit rates">
-						<figcaption>Cost (USD)</figcaption>
+					<figure className="cost-chart" aria-label={t("costChartLabel")}>
+						<figcaption>{t("costUsd")}</figcaption>
 						<div className="cost-chart-body">
 							<div className="cost-y-axis" aria-hidden="true">
 								<span>{axisCost(maximum)}</span>
 								<span>{axisCost(maximum / 2)}</span>
 								<span>$0</span>
 							</div>
-							<span className="cost-chart-caption">Cache hit rate</span>
+							<span className="cost-chart-caption">{t("cacheHitRate")}</span>
 							<div className="cost-y-axis cache-y-axis" aria-hidden="true">
 								<span>100%</span>
 								<span>50%</span>
@@ -81,7 +81,12 @@ export function CostPanel({
 												type="button"
 												className={`cost-column ${selected === entry.entryId ? "selected" : ""}`}
 												key={entry.entryId}
-												title={`${index + 1}: ${preciseCost(entry.cost)} · cache hit rate ${percent(entry.cacheHit)}`}
+												title={t(
+													"costBarTitle",
+													index + 1,
+													preciseCost(entry.cost),
+													percent(entry.cacheHit),
+												)}
 												onClick={() => {
 													setSelected(entry.entryId);
 													rows.current
@@ -114,11 +119,11 @@ export function CostPanel({
 							<thead>
 								<tr>
 									<th>#</th>
-									<th>Timestamp</th>
-									<th>Model</th>
-									<th>Result</th>
-									<th title="Cache hit rate: cache read / (input + cache read + cache write)">Cache</th>
-									<th>Cost</th>
+									<th>{t("timestamp")}</th>
+									<th>{t("model")}</th>
+									<th>{t("result")}</th>
+									<th title={t("cacheTitle")}>{t("cache")}</th>
+									<th>{t("cost")}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -144,7 +149,7 @@ export function CostPanel({
 					</div>
 				</>
 			) : (
-				<p className="empty-note">No committed assistant cost data in this conversation.</p>
+				<p className="empty-note">{t("noCostData")}</p>
 			)}
 		</Sheet>
 	);

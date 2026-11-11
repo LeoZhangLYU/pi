@@ -1,7 +1,7 @@
 // The Providers sheet (any owner): sign in to model providers, refresh their catalogs, sign out.
 
 import type { AuthEvent } from "@earendil-works/pi-ai";
-import { BACKGROUND_CONTEXT, contribute, defineFacet } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT, contribute, defineFacet, Translations } from "@p2/app/v1";
 import {
 	CheckIcon,
 	ChevronIcon,
@@ -12,6 +12,7 @@ import {
 	Slots,
 	useComposerState,
 	useHost,
+	useMessages,
 	useNavigation,
 	useObject,
 	useOptimisticCall,
@@ -22,6 +23,7 @@ import {
 } from "@p2/app/v1/web";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type LoginState, ProviderLogin } from "./contract.ts";
+import { loginMessages } from "./messages.ts";
 
 /** Links from providers open only over http(s). */
 function Link({ url, label }: { url: string; label: string }) {
@@ -40,24 +42,25 @@ function Link({ url, label }: { url: string; label: string }) {
 }
 
 function Notice({ event }: { event: AuthEvent }): ReactNode {
+	const { t } = useMessages(loginMessages);
 	switch (event.type) {
 		case "auth_url":
 			return (
 				<div className="login-step">
-					<Link url={event.url} label="Continue in browser" />
+					<Link url={event.url} label={t("continueInBrowser")} />
 					{event.instructions && <p className="muted small">{event.instructions}</p>}
 				</div>
 			);
 		case "device_code":
 			return (
 				<div className="login-step">
-					<p className="muted small">Enter this code on the verification page</p>
+					<p className="muted small">{t("enterCodeOnPage")}</p>
 					<div className="code-box">{event.userCode}</div>
 					{/* A provider may ask clients not to offer opening the page; its address is still needed. */}
 					{event.openBrowserOnConfirm === false ? (
 						<p className="muted small">{event.verificationUri}</p>
 					) : (
-						<Link url={event.verificationUri} label="Open verification page" />
+						<Link url={event.verificationUri} label={t("openVerificationPage")} />
 					)}
 				</div>
 			);
@@ -68,7 +71,7 @@ function Notice({ event }: { event: AuthEvent }): ReactNode {
 				<div className="login-step">
 					<p>{event.message}</p>
 					{event.links?.map((link) => (
-						<Link key={link.url} url={link.url} label={link.label ?? "More information"} />
+						<Link key={link.url} url={link.url} label={link.label ?? t("moreInformation")} />
 					))}
 				</div>
 			);
@@ -77,6 +80,7 @@ function Notice({ event }: { event: AuthEvent }): ReactNode {
 
 /** The provider's question; answering it shows the flow working at once (the next prompt or progress follows). */
 function PromptForm({ state, onAnswer }: { state: LoginState; onAnswer: (promptId: string, value: string) => void }) {
+	const { t } = useMessages(loginMessages);
 	const prompt = state.prompt;
 	const [value, setValue] = useState("");
 	if (!prompt) return null;
@@ -109,13 +113,7 @@ function PromptForm({ state, onAnswer }: { state: LoginState; onAnswer: (promptI
 			<label className="label" htmlFor="login-value">
 				{prompt.message}
 			</label>
-			{prompt.type === "manual_code" && (
-				<p className="muted small">
-					Complete sign-in in the provider tab, then paste the authorization code or final redirect URL below. If
-					you land on an unreachable localhost page, copy its full address from the address bar and paste it here;
-					that page does not need to load.
-				</p>
-			)}
+			{prompt.type === "manual_code" && <p className="muted small">{t("manualCodeHint")}</p>}
 			<input
 				id="login-value"
 				className="input"
@@ -126,15 +124,36 @@ function PromptForm({ state, onAnswer }: { state: LoginState; onAnswer: (promptI
 				onChange={(event) => setValue(event.target.value)}
 			/>
 			<button type="submit" className="login-continue">
-				<span>Continue</span>
+				<span>{t("continue")}</span>
 				<ChevronIcon />
 			</button>
 		</form>
 	);
 }
 
+/** One provider in the list: its name and, once signed in, how (a subscription or an API key). */
+function ProviderRow({
+	entry,
+	onOpen,
+}: {
+	entry: { id: string; name: string; signedIn: "oauth" | "api_key" | null };
+	onOpen: (id: string) => void;
+}) {
+	const { t } = useMessages(loginMessages);
+	return (
+		<button type="button" className="row-button" onClick={() => onOpen(entry.id)}>
+			<span>{entry.name}</span>
+			{entry.signedIn && (
+				<small className="row-value">{entry.signedIn === "oauth" ? t("subscription") : t("apiKey")}</small>
+			)}
+			<ChevronIcon />
+		</button>
+	);
+}
+
 /** The provider list, one provider's actions, or the running login. Closing the sheet cancels an unfinished one. */
 function ProvidersSheet({ onClose }: { onClose: () => void }) {
+	const { t } = useMessages(loginMessages);
 	const login = useObject(ProviderLogin, {});
 	// Provider errors go to the app's toast, as in Pi Mobile.
 	const { fail } = useComposerState();
@@ -213,7 +232,7 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 						)}
 						{state.status === "success" && (
 							<p className="success">
-								<CheckIcon /> {state.message ?? "Signed in."}
+								<CheckIcon /> {state.message ?? t("signedInDefault")}
 							</p>
 						)}
 						{state.status !== "working" && state.status !== "success" && (
@@ -226,16 +245,16 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 								// A start not answered yet has no attempt to cancel.
 								disabled={!state.attemptId}
 								onClick={() =>
-									guessLogin({ ...state, status: "cancelled", prompt: null, message: "Cancelled." }, () =>
+									guessLogin({ ...state, status: "cancelled", prompt: null, message: t("cancelled") }, () =>
 										login.cancel({ attemptId: state.attemptId }, BACKGROUND_CONTEXT),
 									)
 								}
 							>
-								Cancel
+								{t("cancel")}
 							</button>
 						) : (
 							<button type="button" className="text-action" onClick={back}>
-								Done
+								{t("done")}
 							</button>
 						)}
 					</div>
@@ -244,12 +263,12 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 		return (
 			<Sheet title={provider.name} onClose={onClose} onBack={back} className="login-sheet">
 				<div className="provider-detail">
-					<p className="muted small">
+					<p className="small">
 						{provider.signedIn
-							? `Signed in with ${provider.signedIn === "oauth" ? "a subscription" : "an API key"}.`
-							: "Not signed in. Environment keys may still apply."}{" "}
-						<span>Credentials are stored on the server.</span>
+							? t("signedInWith", provider.signedIn === "oauth" ? "subscription" : "key")
+							: t("notSignedIn")}
 					</p>
+					<p className="muted small">{provider.signedIn ? t("credentialsStored") : t("envKeysNote")}</p>
 					<div className="login-actions">
 						{provider.loginMethods.map((method) => (
 							<button
@@ -285,18 +304,13 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 									login
 										.refresh({ providerId: provider.id }, BACKGROUND_CONTEXT)
 										.then(({ models }) =>
-											setResult(
-												models
-													? `${models} model${models === 1 ? "" : "s"} available.`
-													: "Catalog updated; no models reported.",
-											),
+											setResult(models ? t("modelsAvailable", models) : t("catalogUpdatedNoModels")),
 										)
 										.catch(fail)
 										.finally(() => setBusy(false));
 								}}
 							>
-								<span>{busy ? "Updating model catalog…" : "Update model catalog"}</span>
-								{!busy && <ChevronIcon />}
+								<span>{busy ? t("updatingCatalog") : t("updateCatalog")}</span>
 							</button>
 						)}
 						{provider.signedIn && (
@@ -307,7 +321,7 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 									signOut(provider.id, () => login.logout({ providerId: provider.id }, BACKGROUND_CONTEXT))
 								}
 							>
-								<span>Sign out</span>
+								<span>{t("signOut")}</span>
 							</button>
 						)}
 					</div>
@@ -317,47 +331,53 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 		);
 	}
 	const terms = query.toLowerCase();
-	const listed = providers
-		.filter((entry) => `${entry.name} ${entry.id}`.toLowerCase().includes(terms))
-		.sort((a, b) => Number(Boolean(b.signedIn)) - Number(Boolean(a.signedIn)) || a.name.localeCompare(b.name));
+	const openProvider = (id: string) => {
+		setResult(undefined);
+		// The provider screen replaces the list's layer (one step), as in Pi Mobile: Back closes onto the entry before
+		// it, which shows the list.
+		const top = route.layers.at(-1);
+		if (top?.kind !== "sheet" || top.name !== "providers") return;
+		void nav.push({
+			...route,
+			layers: [...route.layers.slice(0, -1), { kind: "sheet", name: "providers", locator: id }],
+		});
+	};
+	const matching = providers.filter((entry) => `${entry.name} ${entry.id}`.toLowerCase().includes(terms));
+	const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+	const signedIn = matching.filter((entry) => entry.signedIn).sort(byName);
+	const others = matching.filter((entry) => !entry.signedIn).sort(byName);
 	return (
-		<Sheet title="Providers" onClose={onClose} className="login-sheet">
+		<Sheet title={t("providers")} onClose={onClose} className="login-sheet">
 			<div className="sheet-sticky">
 				<label className="search">
 					<SearchIcon />
 					<input
 						value={query}
 						onChange={(event) => setQuery(event.target.value)}
-						placeholder="Search providers"
-						aria-label="Search providers"
+						placeholder={t("searchProviders")}
+						aria-label={t("searchProviders")}
 					/>
 				</label>
 			</div>
 			<div className="list">
-				{listed.map((entry) => (
-					<button
-						type="button"
-						key={entry.id}
-						className="row-button"
-						onClick={() => {
-							setResult(undefined);
-							// The provider screen replaces the list's layer (one step), as in Pi Mobile: Back closes onto
-							// the entry before it, which shows the list.
-							const top = route.layers.at(-1);
-							if (top?.kind !== "sheet" || top.name !== "providers") return;
-							void nav.push({
-								...route,
-								layers: [...route.layers.slice(0, -1), { kind: "sheet", name: "providers", locator: entry.id }],
-							});
-						}}
-					>
-						<span>{entry.name}</span>
-						{entry.signedIn && <small className="row-value">Signed in</small>}
-						<ChevronIcon />
-					</button>
-				))}
-				{known && !listed.length && (
-					<p className="empty-note">{query ? "No provider matches." : "No providers available."}</p>
+				{signedIn.length > 0 && (
+					<>
+						<span className="label">{t("signedInGroup")}</span>
+						{signedIn.map((entry) => (
+							<ProviderRow key={entry.id} entry={entry} onOpen={openProvider} />
+						))}
+					</>
+				)}
+				{others.length > 0 && (
+					<>
+						<span className="label">{t("otherProviders")}</span>
+						{others.map((entry) => (
+							<ProviderRow key={entry.id} entry={entry} onOpen={openProvider} />
+						))}
+					</>
+				)}
+				{known && !matching.length && (
+					<p className="empty-note">{query ? t("noProviderMatches") : t("noProvidersAvailable")}</p>
 				)}
 			</div>
 		</Sheet>
@@ -366,6 +386,7 @@ function ProvidersSheet({ onClose }: { onClose: () => void }) {
 
 /** The sidebar footer's Providers button: any authenticated owner. */
 function ProvidersButton() {
+	const { t } = useMessages(loginMessages);
 	const owner = useOwner();
 	const open = useSheet("providers") !== undefined;
 	if (!owner) return null;
@@ -376,7 +397,7 @@ function ProvidersButton() {
 				className="foot-button"
 				onClick={() => openLayer({ kind: "sheet", name: "providers" }, { fromDrawer: true })}
 			>
-				Providers
+				{t("providers")}
 			</button>
 			{open && <ProvidersSheet onClose={closeLayers} />}
 		</>
@@ -386,5 +407,6 @@ function ProvidersButton() {
 export default defineFacet((host) => {
 	contribute(host, "p2.web-login", (self) => {
 		self.contribute(Slots, { "sidebar-foot:providers": ProvidersButton });
+		self.contribute(Translations, loginMessages.translations);
 	});
 });

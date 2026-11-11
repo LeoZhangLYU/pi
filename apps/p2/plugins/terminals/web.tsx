@@ -1,5 +1,15 @@
 import { contribute, defineFacet } from "@p2/app/v1";
-import { Slots, TerminalIcon, ToolActivities, useNavigation, useObject, useOwner, useRoute } from "@p2/app/v1/web";
+import {
+	Slots,
+	TerminalIcon,
+	ToolActivities,
+	useMessages,
+	useNavigation,
+	useObject,
+	useOwner,
+	useRoute,
+	webMessages,
+} from "@p2/app/v1/web";
 import { useState } from "react";
 import { terminalActivity } from "./activity.tsx";
 import { Terminals } from "./contract.ts";
@@ -69,6 +79,7 @@ function Surface({ bottom }: { bottom: boolean }) {
 }
 
 function TerminalButton() {
+	const { t } = useMessages(webMessages);
 	const nav = useNavigation();
 	const route = useRoute();
 	if (!useOwner() || !route.session) return null;
@@ -77,7 +88,7 @@ function TerminalButton() {
 		<button
 			type="button"
 			className={`icon-button workspace-toggle ${open ? "on" : ""}`}
-			aria-label="Terminal"
+			aria-label={t("terminal")}
 			aria-pressed={open}
 			onClick={() => {
 				if (route.terminal !== undefined)

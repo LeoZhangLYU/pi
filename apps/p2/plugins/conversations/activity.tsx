@@ -11,19 +11,22 @@ import {
 	sentence,
 	stringOf,
 	type ToolActivity,
+	useMessages,
+	webMessages,
 } from "@p2/app/v1/web";
 
 function ConversationsDetail({ step }: { step: Step }) {
+	const { t } = useMessages(webMessages);
 	const { tool } = step;
 	const action = stringOf(tool.args.action);
 	return (
 		<>
-			<DetailSection label="Input">
+			<DetailSection label={t("input")}>
 				<DetailNote>{[action, stringOf(tool.args.to)].filter(Boolean).join(" · ")}</DetailNote>
 				{tool.args.message !== undefined && <DetailProse text={stringOf(tool.args.message)} />}
 			</DetailSection>
 			{tool.output && (
-				<DetailSection label="Output">
+				<DetailSection label={t("output")}>
 					{action === "answer" && tool.status === "done" ? (
 						<DetailProse text={tool.output} />
 					) : (

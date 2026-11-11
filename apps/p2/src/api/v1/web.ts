@@ -18,6 +18,7 @@ export * from "../../web/icons.tsx";
 export * from "../../web/language.ts";
 export * from "../../web/Markdown.tsx";
 export * from "../../web/ModelPicker.tsx";
+export * from "../../web/messages.ts";
 export * from "../../web/navigation.ts";
 export * from "../../web/new-session.tsx";
 export * from "../../web/PiLogo.tsx";

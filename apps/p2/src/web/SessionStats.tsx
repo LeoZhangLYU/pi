@@ -1,7 +1,9 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ReactNode } from "react";
+import { useMessages } from "../runtime/web.tsx";
 import { ContextUsage } from "./Chat.tsx";
 import { UsersIcon } from "./icons.tsx";
+import { webMessages } from "./messages.ts";
 import { cacheHitRate } from "./transcript.ts";
 export function cost(value: number): string {
 	return value >= 1 ? `$${value.toFixed(2)}` : value >= 0.01 ? `$${value.toFixed(3)}` : `$${value.toFixed(4)}`;
@@ -9,17 +11,14 @@ export function cost(value: number): string {
 
 /** Cache hit share of the latest assistant response, independent of session-wide spend. */
 export function UsageLine({ usage }: { usage?: Usage }) {
+	const { t } = useMessages(webMessages);
 	const hit = usage ? cacheHitRate(usage) : undefined;
 	return (
 		<span
 			className="usage"
 			role="img"
-			aria-label={`Cache hit rate: ${hit === undefined ? "unavailable" : `${Math.round(hit * 100)} percent`}`}
-			title={
-				usage
-					? `Cache hit rate of latest assistant response: input ${usage.input} · cache read ${usage.cacheRead} · cache write ${usage.cacheWrite}`
-					: "No assistant response in this conversation yet"
-			}
+			aria-label={t("cacheRate", hit === undefined ? undefined : Math.round(hit * 100))}
+			title={usage ? t("cacheRateTitle", usage.input, usage.cacheRead, usage.cacheWrite) : t("noAssistantResponse")}
 		>
 			chr {hit === undefined ? "—" : `${Math.round(hit * 100)}%`}
 		</span>
@@ -45,6 +44,7 @@ export function SessionStats({
 	onClients?: () => void;
 	controls?: ReactNode;
 }) {
+	const { t } = useMessages(webMessages);
 	return (
 		<div className="session-usage">
 			{controls && <div className="session-controls">{controls}</div>}
@@ -53,8 +53,8 @@ export function SessionStats({
 					<button
 						type="button"
 						className="usage footer-action client-count"
-						aria-label={`${clients} ${clients === 1 ? "browser" : "browsers"} viewing this session; share`}
-						title="Browsers viewing this session, including subagent views. Open sharing."
+						aria-label={t("viewersAria", clients, true)}
+						title={t("viewersTitleShare")}
 						onClick={onClients}
 					>
 						<UsersIcon />
@@ -64,8 +64,8 @@ export function SessionStats({
 					<span
 						className="usage client-count"
 						role="img"
-						aria-label={`${clients} ${clients === 1 ? "browser" : "browsers"} viewing this session`}
-						title="Browsers viewing this session, including subagent views"
+						aria-label={t("viewersAria", clients, false)}
+						title={t("viewersTitle")}
 					>
 						<UsersIcon />
 						{clients}
@@ -80,13 +80,13 @@ export function SessionStats({
 							<button
 								type="button"
 								className="usage footer-action cost-link"
-								title="Open response cost details; session total includes subagents and tools"
+								title={t("costDetailsTitle")}
 								onClick={onCost}
 							>
 								{cost(usage.cost.total)}
 							</button>
 						) : (
-							<span className="usage" title="Session total cost: all conversations, subagents and tools">
+							<span className="usage" title={t("sessionCostTitle")}>
 								{cost(usage.cost.total)}
 							</span>
 						)}

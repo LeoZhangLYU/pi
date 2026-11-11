@@ -9,8 +9,10 @@ import {
 	Markdown,
 	patchLines,
 	textLines,
+	useMessages,
 } from "@p2/app/v1/web";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { workspaceMessages } from "./messages.ts";
 import type { WorkspaceResult } from "./protocol.ts";
 
 export type FileView = "changes" | "file" | "preview";
@@ -129,6 +131,7 @@ export function WorkspaceFile({
 	/** Send one comment on its own; absent when the viewer cannot send. */
 	onSendOne?: (comment: ReviewComment) => void;
 }) {
+	const { t } = useMessages(workspaceMessages);
 	const slash = path.lastIndexOf("/");
 	const name = path.slice(slash + 1);
 	const preview = filePreview(name);
@@ -220,18 +223,18 @@ export function WorkspaceFile({
 			<textarea
 				value={value.text}
 				onChange={(event) => onEditor({ ...value, text: event.target.value })}
-				placeholder="Comment for the agent…"
-				aria-label="Comment"
+				placeholder={t("commentPlaceholder")}
+				aria-label={t("comment")}
 				rows={2}
 				// biome-ignore lint/a11y/noAutofocus: opened by an explicit tap.
 				autoFocus
 			/>
 			<span className="line-comment-actions">
 				<button type="button" className="text-action" onClick={() => onEditor(undefined)}>
-					Cancel
+					{t("cancel")}
 				</button>
 				<button type="button" className="text-action" disabled={!value.text.trim()} onClick={save}>
-					{value.id ? "Save" : "Add comment"}
+					{value.id ? t("save") : t("addComment")}
 				</button>
 			</span>
 		</span>
@@ -253,13 +256,14 @@ export function WorkspaceFile({
 						>
 							{outdated(comment, lines) && (
 								<span className="line-comment-outdated">
-									Outdated: line {comment.end} was <code>{comment.quote}</code>
+									{t("outdatedBefore", comment.end)}
+									<code>{comment.quote}</code>
 								</span>
 							)}
 							<button
 								type="button"
 								className="line-comment-text"
-								title="Edit comment"
+								title={t("editComment")}
 								onClick={() =>
 									onEditor({
 										path,
@@ -275,13 +279,13 @@ export function WorkspaceFile({
 							</button>
 							{onSendOne && (
 								<button type="button" className="text-action" onClick={() => onSendOne(comment)}>
-									Send
+									{t("send")}
 								</button>
 							)}
 							<button
 								type="button"
 								className="icon-button"
-								aria-label="Delete comment"
+								aria-label={t("deleteComment")}
 								onClick={() => onComments(comments.filter((entry) => entry.id !== comment.id))}
 							>
 								<CloseIcon />
@@ -315,10 +319,10 @@ export function WorkspaceFile({
 			);
 		content = <div className="workspace-media">{content}</div>;
 	} else if (view === "file" && file?.binary) {
-		content = <p className="notice workspace-note">Binary file, {size(file.size)}. Download it to open.</p>;
+		content = <p className="notice workspace-note">{t("binaryFile", size(file.size))}</p>;
 	} else if (!lines) content = <div className="spinner large" />;
 	else if (!lines.length || (view === "changes" && !diff?.patch))
-		content = <p className="notice workspace-note">No changes.</p>;
+		content = <p className="notice workspace-note">{t("noChanges")}</p>;
 	else
 		content = (
 			<>
@@ -337,12 +341,10 @@ export function WorkspaceFile({
 					onLine={commentable ? pick : undefined}
 					after={after}
 				/>
-				{view === "changes" && diff?.truncated && <p className="notice workspace-note">Diff truncated.</p>}
-				{view === "file" && diff?.truncated && (
-					<p className="notice workspace-note">Too large to show changes inline.</p>
-				)}
+				{view === "changes" && diff?.truncated && <p className="notice workspace-note">{t("diffTruncated")}</p>}
+				{view === "file" && diff?.truncated && <p className="notice workspace-note">{t("tooLargeForChanges")}</p>}
 				{view === "file" && file?.truncated && (
-					<p className="notice workspace-note">Showing the first 1 MiB of {size(file.size)}.</p>
+					<p className="notice workspace-note">{t("showingFirstMiB", size(file.size))}</p>
 				)}
 			</>
 		);
@@ -352,11 +354,11 @@ export function WorkspaceFile({
 			<div className="workspace-bars">
 				<div className="workspace-bar">
 					{closable ? (
-						<button type="button" className="icon-button" onClick={onBack} aria-label="Close file">
+						<button type="button" className="icon-button" onClick={onBack} aria-label={t("closeFile")}>
 							<CloseIcon />
 						</button>
 					) : (
-						<button type="button" className="icon-button back" onClick={onBack} aria-label="Back">
+						<button type="button" className="icon-button back" onClick={onBack} aria-label={t("back")}>
 							<ChevronIcon size={18} />
 						</button>
 					)}
@@ -376,7 +378,7 @@ export function WorkspaceFile({
 						<span className="segments workspace-views">
 							{views.map((entry) => (
 								<button key={entry} type="button" aria-pressed={view === entry} onClick={() => onView(entry)}>
-									{{ changes: "Changes", file: "File", preview: "Preview" }[entry]}
+									{{ changes: t("changes"), file: t("file"), preview: t("preview") }[entry]}
 								</button>
 							))}
 						</span>
@@ -387,13 +389,18 @@ export function WorkspaceFile({
 							<button
 								type="button"
 								className="icon-button"
-								aria-label="Previous comment"
+								aria-label={t("previousComment")}
 								onClick={() => jump(-1)}
 							>
 								<DownIcon />
 							</button>
 							<span>{current < 0 ? mine.length : `${current + 1}/${mine.length}`}</span>
-							<button type="button" className="icon-button" aria-label="Next comment" onClick={() => jump(1)}>
+							<button
+								type="button"
+								className="icon-button"
+								aria-label={t("nextComment")}
+								onClick={() => jump(1)}
+							>
 								<DownIcon />
 							</button>
 						</span>
@@ -405,13 +412,13 @@ export function WorkspaceFile({
 							aria-pressed={wrap}
 							onClick={onWrap}
 						>
-							Wrap
+							{t("wrap")}
 						</button>
 					)}
 				</div>
 			</div>
 			{commentable && !comments.length && !open && lines?.length ? (
-				<p className="workspace-hint">Tap line numbers to comment.</p>
+				<p className="workspace-hint">{t("tapLineNumbers")}</p>
 			) : null}
 			{content}
 		</div>

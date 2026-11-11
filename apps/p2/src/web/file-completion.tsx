@@ -21,7 +21,8 @@ import {
 	shouldTriggerFileCompletion,
 } from "../runtime/completion.ts";
 import { FileIndex } from "../runtime/file-index.ts";
-import { useObject, useStatus } from "../runtime/web.tsx";
+import { useMessages, useObject, useStatus } from "../runtime/web.tsx";
+import { webMessages } from "./messages.ts";
 
 const DEBOUNCE_MS = 80;
 /** The FileIndex reference (it leases the workspace watch) outlives a blur this long. */
@@ -48,6 +49,7 @@ export function useFileCompletion(
 	/** `mention`: the agent's name while chat mode is on, offered first as `@name`. */
 	options: { mention: string | undefined },
 ): FileCompletion {
+	const { t } = useMessages(webMessages);
 	const [focused, setFocused] = useState(false);
 	const [held, setHeld] = useState(false);
 	useEffect(() => {
@@ -89,7 +91,7 @@ export function useFileCompletion(
 			}
 			const mention: CompletionItem[] = mentionItems(rawPrefix, options.mention);
 			if (outOfScope(rawPrefix)) {
-				setPopover({ items: mention, prefix: at, selected: 0, hint: "Completion covers the session directory" });
+				setPopover({ items: mention, prefix: at, selected: 0, hint: t("completionCoversSession") });
 				return true;
 			}
 			timer.current = setTimeout(() => {
@@ -108,7 +110,7 @@ export function useFileCompletion(
 										items,
 										prefix: at,
 										selected: 0,
-										...(result.truncated ? { hint: "Partial index: the directory is very large" } : {}),
+										...(result.truncated ? { hint: t("partialIndex") } : {}),
 									}
 								: undefined,
 						);
@@ -126,7 +128,7 @@ export function useFileCompletion(
 		const prefix = extractPathPrefix(before, true) ?? "";
 		const { rawPrefix, isAtPrefix, isQuotedPrefix } = parsePathPrefix(prefix);
 		if (outOfScope(rawPrefix)) {
-			setPopover({ items: [], prefix, selected: 0, hint: "Completion covers the session directory" });
+			setPopover({ items: [], prefix, selected: 0, hint: t("completionCoversSession") });
 			return true;
 		}
 		if (!live) return false;
@@ -229,10 +231,11 @@ export function useFileCompletion(
 
 /** The popover above the textarea; pointer selection works too (mousedown keeps the textarea focused). */
 export function FileCompletionPopover({ completion }: { completion: FileCompletion }) {
+	const { t } = useMessages(webMessages);
 	const popover = completion.popover;
 	if (!popover) return null;
 	return (
-		<div className="file-completion" role="listbox" aria-label="File completion">
+		<div className="file-completion" role="listbox" aria-label={t("fileCompletion")}>
 			{popover.items.map((item, index) => (
 				<div
 					key={`${item.value}-${index}`}
