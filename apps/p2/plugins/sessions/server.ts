@@ -91,7 +91,7 @@ const CATALOG_ACCEPTS: AcceptsTable<typeof Catalog> = {
 const SAME_ARGS = { args: <T>(old: T) => old };
 
 /**
- * Older `Sessions` consumers (a page or TUI loaded before a deploy, a worker not restarted yet) read rows mapped
+ * Older `Sessions` consumers (a page loaded before a deploy, a worker not restarted yet) read rows mapped
  * back; v4's `treeSelf` labels are text, which the current version takes as it is. None of them sees `operations`.
  */
 const SESSIONS_ACCEPTS: AcceptsTable<typeof Sessions> = {

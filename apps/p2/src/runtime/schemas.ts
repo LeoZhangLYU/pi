@@ -35,7 +35,7 @@ export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhig
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 /**
  * A string enum (pi-ai's `StringEnum` shape), validated wherever a thinking level is set. Its static type stays
- * `string`, so callers that hold a level as a string (pickers, the TUI) need no casts; the value is checked at the call.
+ * `string`, so callers that hold a level as a string (pickers) need no casts; the value is checked at the call.
  */
 export const ThinkingLevelSchema = unsafe<string>({ type: "string", enum: [...THINKING_LEVELS] });
 export const isThinkingLevel = (value: unknown): value is ThinkingLevel =>

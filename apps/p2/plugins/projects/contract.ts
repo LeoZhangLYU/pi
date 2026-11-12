@@ -1,6 +1,6 @@
 // Projects: one codebase's places on several machines (`projects.json`), which sessions belong to which project, and
 // the helpers that find a project's place on a machine and a directory's subpath below a place. Browser-safe: the
-// sessions TUI uses them.
+// conversations tool uses them.
 import { arr, nul, obj, type Static, str, union } from "@earendil-works/pi-schema";
 import { LOCAL, local, method, record, remote, serverHost } from "@p2/app/v1";
 
@@ -37,7 +37,7 @@ export const ProjectService = local("p2.project-service", {
 
 /**
  * The owner's projects, the last read's failure, this device's name in place labels (the server's hostname) and the
- * sessions' projects by session ID; `assign` is the TUI's project rows starting a session.
+ * sessions' projects by session ID; `assign` records the project of a session the conversations tool creates.
  */
 export const Projects = remote("p2.projects", {
 	version: 1,

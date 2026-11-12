@@ -13,8 +13,7 @@
 		"radius:login": "node --import ./src/source.ts plugins/radius/login.ts",
 		"check": "node ../../scripts/biome-check.mjs && tsc --noEmit",
 		"format": "node ../../scripts/biome-check.mjs --write",
-		"test": "node --import ./src/source.ts --test --test-concurrency=1 test/**/*.test.ts",
-		"tui": "node --import ./src/source.ts src/hosts/tui.ts"
+		"test": "node --import ./src/source.ts --test --test-concurrency=1 test/**/*.test.ts"
 	},
 	"engines": {
 		"node": ">=22.19.0"
@@ -32,9 +31,7 @@
 		"@earendil-works/pi-mcp": "1.5.1",
 		"@earendil-works/pi-schema": "1.5.1",
 		"@earendil-works/pi-tui": "1.5.1",
-		"diff": "8.0.4",
 		"esbuild": "0.28.2",
-		"grok-mermaid": "0.2.3",
 		"lowlight": "3.3.0",
 		"marked": "18.0.14",
 		"proper-lockfile": "4.1.2",

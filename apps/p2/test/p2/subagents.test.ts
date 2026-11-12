@@ -322,6 +322,35 @@ describe("subagents with code mode (fake provider)", () => {
 				texts(view).includes(`<sender kind="subagent" name="${name}"/>`) &&
 				!(view?.docs["pi.live"] as { run?: unknown } | undefined)?.run,
 		);
+	/** The prompt sections in effect at the end of the conversation: its system messages replayed in order. */
+	const sections = (view: ConversationView | null | undefined): Record<string, string> => {
+		const current: Record<string, string> = {};
+		for (const entry of view?.entries ?? [])
+			for (const message of entry.model ?? []) {
+				if (message.role !== "system") continue;
+				for (const [key, value] of Object.entries(message.sections ?? {})) {
+					if (value === null) delete current[key];
+					else current[key] = value;
+				}
+			}
+		return current;
+	};
+	/** Sends probes until the worker applied the settings file (its observer is asynchronous). */
+	const settle = async (ready: (view: ConversationView) => boolean): Promise<ConversationView> => {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const count = chat.view.value?.entries.length ?? 0;
+			await chat.send({ text: `probe ${attempt}`, requestId: `codemode-${++sent}` }, BACKGROUND_CONTEXT);
+			const view = await until(
+				chat.view,
+				(value) =>
+					(value?.entries.length ?? 0) > count + 1 &&
+					!(value?.docs["pi.live"] as { run?: unknown } | undefined)?.run,
+			);
+			if (ready(view!)) return view!;
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+		throw new Error("the worker never applied the settings change");
+	};
 	const results = (view: ConversationView | null | undefined) =>
 		(view?.entries ?? [])
 			.flatMap((entry) => entry.model ?? [])
@@ -449,14 +478,9 @@ describe("subagents with code mode (fake provider)", () => {
 
 	it("leaves code mode out while the codemode setting is off, and refuses choosing it", async () => {
 		await writeFile(join(fixture.dataDir, "settings.json"), JSON.stringify({ codemode: false }));
-		// The worker applies the settings file asynchronously: spawn (a new name each time) until it refuses.
-		let refused: ToolResultMessage | undefined;
-		for (let attempt = 0; attempt < 20 && !refused?.isError; attempt++) {
-			if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 200));
-			refused = await subagent({ action: "spawn", name: `off-${attempt}`, message: "x", tools: ["codemode"] });
-			if (!refused.isError) await reported(`off-${attempt}`);
-		}
-		assert.equal(refused?.isError, true);
+		await settle((view) => sections(view).codemode === undefined);
+		const refused = await subagent({ action: "spawn", name: "off", message: "x", tools: ["codemode"] });
+		assert.equal(refused.isError, true);
 		assert.match(text(refused), /^Unknown tools: codemode\. Choose from your own tools: /);
 		const plain = await subagent({ action: "spawn", name: "plain", message: "x" });
 		const given = (plain.details as { tools?: string[] }).tools ?? [];

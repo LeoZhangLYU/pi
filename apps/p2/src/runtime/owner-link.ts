@@ -1,5 +1,5 @@
 // Owner links (`/owner#<token>`) and the origins they are for: minted by the owner-link CLI and the server's startup
-// line, checked by the TUI launcher.
+// line.
 import { localOwnerSignIn } from "./local-owner.ts";
 
 /**
@@ -29,7 +29,7 @@ export async function mintOwnerLink(server: URL, dataDir: string, base: URL): Pr
 	return link;
 }
 
-/** Shared by the shell CLI and TUI; never allow credentials or an invitation in a path/query. */
+/** Shared by the shell CLI; never allow credentials or an invitation in a path/query. */
 export function ownerOrigin(value: string): URL {
 	let url: URL;
 	try {

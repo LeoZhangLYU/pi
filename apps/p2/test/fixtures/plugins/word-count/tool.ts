@@ -1,5 +1,5 @@
 // The `word_count` tool: what the model sees (name, description, parameters) and what it does. Nothing here says how
-// a call looks: that is the web and TUI facets' business.
+// a call looks: that is the web facet's business.
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
 

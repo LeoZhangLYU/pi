@@ -1,5 +1,5 @@
 // Owner notices (browser-safe): errors and results the server reports to the owner (refused reloads, failed workers),
-// served by the logs plugin and shown by every owner page and TUI.
+// served by the logs plugin and shown by every owner page.
 
 import { method, remote } from "@earendil-works/chord";
 import { arr, num, obj, str } from "@earendil-works/pi-schema";

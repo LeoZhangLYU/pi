@@ -1,4 +1,4 @@
-// A viewed conversation's transcript (src/web/history.ts), shared by the web and the TUI chat view: Durable's
+// A viewed conversation's transcript (src/web/history.ts): Durable's
 // `ConversationTranscript` over the window `Chat.view` holds, earlier pages and gaps through `Chat.entries`, a
 // transcript kept on the device, and what is kept of it.
 import assert from "node:assert/strict";

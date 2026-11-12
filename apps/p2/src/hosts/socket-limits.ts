@@ -1,4 +1,4 @@
-// Per-connection limits of browser and TUI Chord sockets (`/chord`), as Pi Mobile's (apps/mobile/src/server/app.ts).
+// Per-connection limits of browser Chord sockets (`/chord`), as Pi Mobile's (apps/mobile/src/server/app.ts).
 
 import type { WebSocketLike } from "@earendil-works/chord";
 import type { WebSocket } from "ws";

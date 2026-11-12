@@ -81,10 +81,10 @@ export const TEST = BACKGROUND_CONTEXT;
 /** What `clientHost` connects over: a WebSocket to a p2 server's `/chord` (`ws`'s or the global one). */
 export type ClientSocket = NodeWebSocket | WebSocket;
 
-/** A local owner session at a p2 server: its port, and the cookie pair the owner's browser or TUI sends there. */
+/** A local owner session at a p2 server: its port, and the cookie pair the owner's browser sends there. */
 export type LocalOwner = { readonly port: number; readonly cookie: string };
 
-/** Signs in to `server` as its local owner, as the TUI on its host does (with the owner key of its data directory). */
+/** Signs in to `server` as its local owner, as a client on its host does (with the owner key of its data directory). */
 export async function localOwner(server: Pick<P2Server, "port" | "dataDir">): Promise<LocalOwner> {
 	const signIn = await localOwnerSignIn(new URL(`http://127.0.0.1:${server.port}`), server.dataDir);
 	if (signIn.kind === "unavailable") throw new Error(signIn.message);

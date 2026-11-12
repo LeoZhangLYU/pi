@@ -1,5 +1,5 @@
 // p2's plugin API, version 1 (`@p2/app/v1`): what every facet kind may import (browser-safe). Plugins import p2 and
-// Chord v2 only through this API and its per-kind modules (`/node`, `/server`, `/worker`, `/tui`, `/web`), never through
+// Chord v2 only through this API and its per-kind modules (`/node`, `/server`, `/worker`, `/web`), never through
 // relative paths into `src`: a plugin is built and reloaded on its own, and the API is the code its host provides.
 
 export {

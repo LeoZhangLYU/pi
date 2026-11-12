@@ -1,6 +1,6 @@
 // p2's plugins on Chord v2's plugin component: plugin directories under plugins/, each facet of kind `server` or
 // `worker` built on its own against p2's plugin API (`@p2/app/v1`) and the packages a facet shares with its host,
-// and evaluated with this process's instances of them (host-packages.ts). TUI and web facets stay in p2's own bundles
+// and evaluated with this process's instances of them (host-packages.ts). Web facets stay in p2's own bundle
 // (bundles.ts).
 import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +14,7 @@ import * as apiServer from "../api/v1/server.ts";
 import { SHARED_PACKAGES, WORKER_PACKAGES } from "./host-packages.ts";
 
 export type PluginName = string;
-export type FacetKind = "server" | "worker" | "web" | "tui";
+export type FacetKind = "server" | "worker" | "web";
 /** Facet files of one plugin (absolute paths). */
 export type PluginFacets = Readonly<Partial<Record<FacetKind, string>>>;
 export type PluginListing = ReadonlyMap<PluginName, PluginFacets>;
@@ -22,7 +22,7 @@ export type PluginListing = ReadonlyMap<PluginName, PluginFacets>;
 export const PLUGINS_DIRECTORY = fileURLToPath(new URL("../../plugins/", import.meta.url));
 /** p2's base code: a change asks for a restart (`plugins.state.base`). */
 export const BASE_DIRECTORY = fileURLToPath(new URL("../", import.meta.url));
-const FACET_KINDS = ["server", "worker", "web", "tui"] as const;
+const FACET_KINDS = ["server", "worker", "web"] as const;
 
 /** p2's plugin API: one version so far. */
 export const API = { name: "@p2/app", versions: ["v1"] } as const;
@@ -108,7 +108,7 @@ function selectedCopy(selection: readonly string[]): string {
 		filter: (path) => {
 			const [name, file, ...rest] = path.slice(PLUGINS_DIRECTORY.length).split("/");
 			if (name === undefined || selection.includes(name) || rest.length || file === undefined) return true;
-			return !/^(server|worker|web|tui)\.tsx?$/.test(file);
+			return !/^(server|worker|web)\.tsx?$/.test(file);
 		},
 	});
 	return directory;

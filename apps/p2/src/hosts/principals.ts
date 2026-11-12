@@ -46,7 +46,7 @@ const FRAMES: ReadonlySet<string> = new Set(["iframe", "frame", "embed", "object
  * Whether a browser sent this request for another site (Fetch Metadata): a cross-site or same-site (another local port)
  * page, link, form, fetch or WebSocket, or a frame or embed another site holds. Such a request never gets the loopback
  * owner: a page anywhere could otherwise frame the owner UI (clickjacking) or drive it. Requests without the headers
- * (the TUI, scripts, older browsers) are unaffected; the page's CSP `frame-ancestors` still refuses framing there.
+ * (scripts, older browsers) are unaffected; the page's CSP `frame-ancestors` still refuses framing there.
  */
 export function foreignBrowserRequest(request: IncomingMessage): boolean {
 	const site = request.headers["sec-fetch-site"];

@@ -287,8 +287,8 @@ const SessionsV5 = evolve(SessionsV4, (e) =>
 
 /**
  * Sessions as a principal sees them. The owner lists and manages all; a worker sees and renames only its own session
- * (its principal names it). The provider still serves 3, 4 and 5 (its `accepts`): pages and TUIs loaded before a deploy
- * keep working.
+ * (its principal names it). The provider still serves 3, 4 and 5 (its `accepts`): pages loaded before a deploy keep
+ * working.
  *
  * 6, client-chosen IDs and lifecycle operations as jobs: `create` takes the new session's `id`, `clone` and `fork` the
  * copy's (`copy`), so a page navigates at once. `clone`, `fork`, `relocate` and `archive` answer once their effect is

@@ -115,9 +115,13 @@ type Hosted = {
 	info: TerminalInfo;
 	vt: VtTerminal;
 	pty?: RemoteTerminal;
+	/** Whether the program produced output; until then, input is held as typed ahead. */
+	ready: boolean;
+	/** Flushes held input even when the program stays silent. */
+	readyTimer?: NodeJS.Timeout;
 	/** The colors of its latest viewer, which answer the program's color queries. */
 	theme: TerminalTheme;
-	/** Input that arrived before the program started. */
+	/** Input that arrived before the program was ready for it. */
 	pending: Uint8Array[];
 	pendingBytes: number;
 	clients: Set<Client>;
@@ -311,6 +315,7 @@ function create(request: Opening, theme: TerminalTheme): { hosted: Hosted; start
 	const hosted: Hosted = {
 		info,
 		vt,
+		ready: false,
 		theme,
 		pending: [],
 		pendingBytes: 0,
@@ -347,6 +352,11 @@ function create(request: Opening, theme: TerminalTheme): { hosted: Hosted; start
 					// Output racing a close: the headless terminal is already freed.
 					if (!terminals.has(id)) return;
 					vt.write(bytes);
+					// A shell's first output is its prompt: input typed ahead is written then, not before.
+					if (!hosted.ready) {
+						hosted.ready = true;
+						flushPending(hosted);
+					}
 					hosted.ring.append(bytes);
 					for (const viewer of hosted.clients) output(viewer, bytes);
 					const title = vt.title();
@@ -361,8 +371,12 @@ function create(request: Opening, theme: TerminalTheme): { hosted: Hosted; start
 			// Closed meanwhile: the program must not outlive its terminal.
 			if (!terminals.has(id)) pty.close();
 			if (info.cols !== request.cols || info.rows !== request.rows) pty.resize(info.cols, info.rows);
-			for (const bytes of hosted.pending.splice(0)) pty.write(bytes);
-			hosted.pendingBytes = 0;
+			if (hosted.ready) flushPending(hosted);
+			else if (terminals.has(id))
+				hosted.readyTimer = setTimeout(() => {
+					hosted.ready = true;
+					flushPending(hosted);
+				}, READY_FALLBACK_MS);
 			pty.exited.then(
 				(code) => end({ code }),
 				(error: unknown) => end({ error: error instanceof Error ? error.message : String(error) }),
@@ -379,9 +393,9 @@ function poke(hosted: Hosted): void {
 	for (const waiter of hosted.waiters) waiter();
 }
 
-/** Input for the program; held until it started. False when too much is held already. */
+/** Input for the program; held until it is ready. False when too much is held already. */
 function input(hosted: Hosted, bytes: Uint8Array): boolean {
-	if (hosted.pty) {
+	if (hosted.pty && hosted.ready) {
 		hosted.pty.write(bytes);
 		return true;
 	}
@@ -391,9 +405,27 @@ function input(hosted: Hosted, bytes: Uint8Array): boolean {
 	return true;
 }
 
+/** Writes input held for a program that is now ready: its first output arrived, or the fallback timer fired. */
+function flushPending(hosted: Hosted): void {
+	if (!hosted.ready || !hosted.pty || terminals.get(hosted.info.id) !== hosted) return;
+	if (hosted.readyTimer) {
+		clearTimeout(hosted.readyTimer);
+		hosted.readyTimer = undefined;
+	}
+	for (const bytes of hosted.pending.splice(0)) hosted.pty.write(bytes);
+	hosted.pendingBytes = 0;
+}
+
+/** How long input waits for a first output before it is written anyway (a program that prints nothing). */
+const READY_FALLBACK_MS = 250;
+
 function close(hosted: Hosted): void {
 	if (terminals.get(hosted.info.id) !== hosted) return;
 	terminals.delete(hosted.info.id);
+	if (hosted.readyTimer) {
+		clearTimeout(hosted.readyTimer);
+		hosted.readyTimer = undefined;
+	}
 	hosted.pty?.close();
 	for (const client of hosted.clients) {
 		send(client, { type: "closed", terminalId: hosted.info.id });
@@ -612,7 +644,7 @@ async function openForAgent(request: Extract<HostCall, { op: "open" }>): Promise
 		},
 		DEFAULT_THEME,
 	);
-	// The shell reads it once it is ready, as typed ahead.
+	// Typed into the shell once its first output (the prompt) arrives, not before.
 	if (request.command) input(hosted, new TextEncoder().encode(`${request.command}\r`));
 	await started;
 	const failed = hosted.info.exited?.error;

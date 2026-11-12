@@ -78,7 +78,7 @@ test("load hooks hash actual project/workspace sources; only loaded content chan
 	loadedModules.set("server", modules);
 	// What the dev status reports as restart files (devControl): changed loaded modules, relative to the app.
 	const restartFiles = () => loadedModules.changed().map((file) => relative(project, file));
-	await writeFile(join(project, "src/hosts/tui-new.ts"), "// unloaded");
+	await writeFile(join(project, "src/hosts/extra-new.ts"), "// unloaded");
 	await writeFile(plugin, "export const value = 4;\n");
 	assert.deepEqual(restartFiles(), []);
 	const original = await readFile(runtime);

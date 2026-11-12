@@ -1,4 +1,4 @@
-// A viewed conversation's transcript on a client (web and TUI): Durable's `ConversationTranscript` over the window the
+// A viewed conversation's transcript on the web: Durable's `ConversationTranscript` over the window the
 // conversation's `Chat.view` holds. Every value of the view is merged in, so entries that leave the window stay; older
 // entries and the entries of a gap page in through `Chat.entries`. One store per host and conversation, kept a while
 // after nobody views it, so switching back finds its pages loaded.
@@ -218,7 +218,7 @@ export class TranscriptStore {
 	}
 }
 
-/** Transcript stores of a host (a page, a TUI) by conversation (`session#conversation`), the most recently used last. */
+/** Transcript stores of a page by conversation (`session#conversation`), the most recently used last. */
 const hosts = new WeakMap<object, Map<string, TranscriptStore>>();
 /** How many conversations keep their pages while nobody views them. */
 const RETAINED = 4;
@@ -272,7 +272,7 @@ export function keptWindow(view: TranscriptView, maxBytes: number): Conversation
 }
 
 /**
- * A transcript store's pages as a native watchable (for followers that take one, such as the TUI's `follow`): each
+ * A transcript store's pages as a native watchable (for followers that take one): each
  * watch follows the view while it lives.
  */
 export function pagesWatchable(store: TranscriptStore): NativeWatchable<Pages | undefined> {

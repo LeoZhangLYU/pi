@@ -72,7 +72,7 @@ describe("web host", () => {
 			{ "Sec-Fetch-Site": "same-site", "Sec-Fetch-Dest": "iframe" },
 			{ "Sec-Fetch-Site": "same-site", "Sec-Fetch-Dest": "empty" },
 		]) {
-			for (const path of ["/", (await webBundle(port, owner())).script, "/__p2_web", "/__p2_tui", "/__p2_dev"]) {
+			for (const path of ["/", (await webBundle(port, owner())).script, "/__p2_web", "/__p2_dev"]) {
 				const response = await get(port, path, owner(headers));
 				assert.ok(response.status === 401 || response.status === 403, `${path} ${JSON.stringify(headers)}`);
 				assert.match(String(response.headers["content-security-policy"]), /frame-ancestors 'none'$/);

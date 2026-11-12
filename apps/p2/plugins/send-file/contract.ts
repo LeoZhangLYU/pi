@@ -5,7 +5,7 @@ import { method, param, remote, sessionHost } from "@p2/app/v1";
 export const MAX_SENT_PREVIEW = 256 * 1024;
 
 /**
- * A sent file's text preview for clients that cannot use the `/download` route (the TUI's worker has no cookie). Same
+ * A sent file's text preview for clients without the owner cookie that the `/download` route needs. Same
  * authority as the route: anyone who may view the session. `text` is null for binary files (a NUL byte or invalid
  * UTF-8 in the first `MAX_SENT_PREVIEW` bytes).
  */

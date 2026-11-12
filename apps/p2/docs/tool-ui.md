@@ -1,11 +1,11 @@
 # A tool's UI: how a plugin shows its tool
 
-For plugin authors. A plugin that gives the agent a tool also decides how the tool's calls look, in the web chat
-and in the TUI. p2's core knows no tool by name: everything here is a registration of the plugin that owns the tool,
+For plugin authors. A plugin that gives the agent a tool also decides how the tool's calls look in the web chat.
+p2's core knows no tool by name: everything here is a registration of the plugin that owns the tool,
 keyed by the tool's name. A tool without any registration still shows, with the generic look described below.
 
 Paths are relative to `apps/p2`. Plugins import p2 only through `@p2/app/v1` and its per-kind modules
-(`/worker`, `/web`, `/tui`); see `docs/handoff.md` and Chord's plugin guide (`packages/chord/docs/
+(`/worker`, `/web`); see `docs/handoff.md` and Chord's plugin guide (`packages/chord/docs/
 plugin-authoring.md`) for plugins in general, `.pi/skills/p2-ui.md` for p2's UI rules.
 
 ## The parts
@@ -14,7 +14,6 @@ plugin-authoring.md`) for plugins in general, `.pi/skills/p2-ui.md` for p2's UI 
 | --- | --- | --- | --- |
 | worker | `tool.ts`, `worker.ts` | the tool in `Extensions` | what the model sees and what a call does |
 | web | `activity.tsx`, `web.tsx` | a `ToolActivity` in `ToolActivities` | how a call looks in the chat |
-| TUI | `tui.ts` | `ToolRenderers` in `TuiToolRenderers` | how a call looks in the terminal |
 
 The tool definition carries no display fields: no label, icon, verb or renderer. What a call looks like is decided
 from three things only: the call's arguments, its result's text, and its result's `details` (see
@@ -25,8 +24,7 @@ from three things only: the call's arguments, its result's text, and its result'
 A complete plugin, `plugins/word-count/`: a tool that counts the words and lines of a text. Its files are below as
 they are in `test/fixtures/plugins/word-count/`, which `test/p2/tool-ui-example.test.ts` checks (this document shows
 them verbatim), runs and renders: the tool counts, the wheel's summary reads "Counted words in 2 texts", the step
-list shows each call's text and state (✗ "empty text" for the failed one), a step opens the tool's own detail, and
-the TUI draws its card.
+list shows each call's text and state (✗ "empty text" for the failed one), and a step opens the tool's own detail.
 
 A plugin is a directory with a `package.json` and its facet files; p2 finds it by listing `plugins/*`, there is no
 manifest.
@@ -48,7 +46,7 @@ failed call whose output is the error's message.
 
 ```ts plugins/word-count/tool.ts
 // The `word_count` tool: what the model sees (name, description, parameters) and what it does. Nothing here says how
-// a call looks: that is the web and TUI facets' business.
+// a call looks: that is the web facet's business.
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { obj, str } from "@earendil-works/pi-schema";
 
@@ -242,61 +240,12 @@ slots while it runs (with depth, status, running output). If the tool keeps a fi
 mode's internal tools to their script names. Its `Detail` shows them with `NestedCalls`; `repeated` words a group
 of identical calls in a row.
 
-### The terminal (TUI)
-
-`tui.ts` registers pi's renderer contract for the tool in `TuiToolRenderers` (`src/tui/tools/types.ts`), keyed by
-the tool's name.
-
-```ts plugins/word-count/tui.ts
-// The TUI facet: the tool's card in the terminal transcript.
-import { Text } from "@earendil-works/pi-tui";
-import { contribute, defineFacet } from "@p2/app/v1";
-import { getTextOutput, lineText, record, str, type ToolRenderers, TuiToolRenderers } from "@p2/app/v1/tui";
-
-export const wordCountRenderers: ToolRenderers = {
-	renderCall: (args, theme) =>
-		new Text(
-			`${theme.fg("toolTitle", theme.bold("word_count"))} ${theme.fg("muted", lineText(str(args.text) ?? ""))}`,
-			0,
-			0,
-		),
-	renderResult: (result, _options, theme, context) => {
-		const details = record(result.details);
-		const counts =
-			typeof details?.words === "number" ? `${details.words} words, ${details.lines} lines` : getTextOutput(result);
-		return new Text(theme.fg(context.isError ? "error" : "toolOutput", counts), 0, 0);
-	},
-};
-
-export default defineFacet((host) => {
-	contribute(host, "p2.tui-word-count", (self) => {
-		self.contribute(TuiToolRenderers, { word_count: wordCountRenderers });
-	});
-});
-```
-
-| Field | Gets | Draws | Without it |
-| --- | --- | --- | --- |
-| `renderCall` | the arguments, the theme, the context | the card's head | the tool's name and its arguments (pi's generic card) |
-| `renderResult` | the result (`content`, `details`), `{ expanded, isPartial }`, the theme, the context | the card's body | the output's first 10 lines, all when expanded |
-| `renderShell` | — | `"self"`: the renderer draws its own frame; `"default"`: in the card's box | the box |
-| `nestedCalls` | the `ToolView` | the calls this call made, for `context.calls` | `tool.calls` |
-
-The context (`ToolRenderContext`) has `cwd`, `expanded` (Ctrl+O), `isPartial`, `isError`, `durationMs`, `calls`,
-`state` (the card's own state across renders), `lastComponent` (to update instead of rebuilding) and `invalidate()`.
-Helpers come from `@p2/app/v1/tui`: `str`, `num`, `record`, `getTextOutput`, `lineText`, `safeText`,
-`shortenPath`, `moreLinesHint`, `renderDiff`, `VisualLinePreview`, `Theme` (`Theme.language(path)` for highlighting),
-and `createShellRenderers(prompt)`, the card of a tool that runs `args.command` (bash and PowerShell use it).
-Resolvers (`TuiToolRendererResolvers`) wrap every tool's renderers: `plugins/quiet-tools` draws one line per call
-until expanded, from the tool's first string argument unless it knows the tool; a resolver keeps the registered
-`nestedCalls`.
-
 ### Details: what the UI reads
 
 A result has two parts: `output`, the text the model reads, and `details`, JSON the model never sees. Put into
 `details` what the UI needs and should not parse out of text: counts, a diff (`edit`), a file's identity
-(`send_file`), an artifact's version (`artifact`), the list of a script's calls (`codemode`). Both UIs get it as
-`tool.details` (web) and `result.details` (TUI); read it defensively (`detailsOf`, `record`), it is whatever the tool
+(`send_file`), an artifact's version (`artifact`), the list of a script's calls (`codemode`). The web UI gets it as
+`tool.details` on the call; read it defensively (`detailsOf`, `record`), it is whatever the tool
 wrote, also in old transcripts. A running call has no `details` yet (`tool.status` is `pending` or `running`); a
 failed one usually has none. Arguments come as the model wrote them (`tool.args`), validated against `parameters`
 before `execute` ran.
@@ -314,9 +263,7 @@ Briefly; each is a keyed registry a facet contributes to (`docs/plugin-hooks.md`
   renders `Sheet` while `useSheet(name)` is its own (`.pi/skills/p2-ui.md`, Back navigation).
 - **Viewers**: `OpenViewer` with a `ViewerItem` (an artifact, a file) from a `Result` or `Detail`.
 - **Transcript entries** (`TranscriptEntries`, the chat plugin's contract): what a plugin adds to the display of its
-  entry kind's messages (the message it answers, a note), in the chat and the TUI.
-- **TUI**: `TuiCommands` (slash commands), `TuiSlots` (status lines, footer parts), `TuiEntryRenderers`,
-  `TuiSettingFields` (`/settings` rows).
+  entry kind's messages (the message it answers, a note), in the chat.
 
 ## Testing a tool's UI
 
@@ -332,7 +279,4 @@ Briefly; each is a keyed registry a facet contributes to (`docs/plugin-hooks.md`
   `plugins/models/fake.ts` that makes the faux model call your tool (`SCRIPTED`, or a pattern like
   `artifact <json>`), send it through the `Chat` contract and wait for the result, then open the session in the
   browser (`test/p2/ui-inline-artifacts.test.ts`).
-- **The TUI** (Node 26): draw a transcript with `transcriptComponent(transcript, false, expanded, { renderers })`
-  from `src/tui/messages.ts` and match the stripped lines; add your renderers to `PLUGIN_TUI_RENDERERS` in
-  `test/fixtures/tui-tools.ts`.
 - Browser tests run with `CHROMIUM_BIN` set (`.pi/skills/p2-ui.md`, Tests).

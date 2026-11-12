@@ -28,7 +28,6 @@ import {
 import { radiusStatusText } from "../../plugins/radius/server.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { Terminals } from "../../plugins/terminals/contract.ts";
-import { radiusTransport } from "../../src/hosts/tui-radius.ts";
 import { Access } from "../../src/runtime/access.ts";
 import { clientHost, holdIn, http, localOwner, poll, until } from "./helpers.ts";
 import { radiusFixture as fixture, OWNER, PUBLIC_ORIGIN } from "./radius-fixture.ts";
@@ -375,79 +374,6 @@ test(
 		await poll(() =>
 			f.radius.controls.some(
 				(message) => message.type === "connection_close" && message.connection_id === id && message.code === 1011,
-			),
-		);
-	},
-);
-
-test(
-	"Radius client channels: the owner's TUI launcher reaches the server, one Radius connection per request",
-	{ timeout: 30_000 },
-	async (t) => {
-		const content = randomBytes(3 * 1024 * 1024);
-		const f = await fixture(t, content, { channels: true });
-		const transport = radiusTransport(
-			{ gateway: f.radius.gateway, access: async () => "fixture-token" },
-			randomUUID(),
-		);
-		const signal = AbortSignal.timeout(20_000);
-		const probe = await transport.request("/probe", { signal });
-		assert.equal(probe.status, 200);
-		// The owner by Radius alone, framed by no shell; until a browser opened the brain, its origin is a placeholder.
-		const access = (await probe.json()) as { principal: unknown; origin: unknown };
-		assert.deepEqual(access.principal, { kind: "owner", access: "relay" });
-		assert.deepEqual(access.origin, { origin: "https://radius.invalid", remote: true, port: f.server.port });
-		assert.equal(transport.origin, "https://radius.invalid");
-		// Bodies larger than one message, both ways; a request body may stream.
-		assert(Buffer.from(await (await transport.request("/body", { signal })).arrayBuffer()).equals(content));
-		const upload = randomBytes(1024 * 1024);
-		const echo = await transport.request("/echo", {
-			method: "POST",
-			body: (async function* () {
-				yield upload.subarray(0, 1000);
-				yield upload.subarray(1000);
-			})(),
-			signal,
-		});
-		assert(Buffer.from(await echo.arrayBuffer()).equals(upload));
-		// Only the device itself mints owner links.
-		assert.equal((await transport.request("/owner-token", { signal })).status, 403);
-		// Once the owner opened the brain in a browser, clients get its Radius origin.
-		assert.equal((await f.radius.response(f.open("/probe"))).status, 200);
-		await (await transport.request("/probe", { signal })).arrayBuffer();
-		assert.equal(transport.origin, PUBLIC_ORIGIN);
-	},
-);
-
-test(
-	"Radius client channels admit only the owner, and only through channel sockets",
-	{ timeout: 30_000 },
-	async (t) => {
-		const f = await fixture(t, undefined, { channels: true });
-		const stranger = radiusTransport(
-			{ gateway: f.radius.gateway, access: async () => "stranger-token" },
-			randomUUID(),
-		);
-		assert.equal((await stranger.request("/probe", { signal: AbortSignal.timeout(10_000) })).status, 403);
-		const refused = await new Promise<number>((resolve) =>
-			stranger.socket("/chord", { open: () => {}, message: () => {}, refused: resolve, close: () => {} }),
-		);
-		assert.equal(refused, 403);
-		// A request that is not one is refused on the channel.
-		const id = randomUUID();
-		f.radius.send({ version: 2, type: "connection_open", connection_id: id, kind: "ws", principal: OWNER });
-		const channel = await f.radius.channel(id);
-		const closed = new Promise<number>((resolve) => channel.once("close", resolve));
-		channel.send(JSON.stringify({ type: "http", method: "GET", path: "//elsewhere.example/", headers: {} }));
-		assert.equal(await closed, 1008);
-		// Relays before channel sockets do not carry them.
-		const old = await fixture(t);
-		const oldId = randomUUID();
-		old.radius.send({ version: 2, type: "connection_open", connection_id: oldId, kind: "ws", principal: OWNER });
-		await poll(() =>
-			old.radius.controls.some(
-				(message) =>
-					message.type === "connection_close" && message.connection_id === oldId && message.code === 1008,
 			),
 		);
 	},

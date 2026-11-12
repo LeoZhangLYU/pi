@@ -1,4 +1,4 @@
-// Local owner sign-in: how a client on the p2 host (the TUI, `npm run owner-link`, scripts) proves that it runs as the
+// Local owner sign-in: how a client on the p2 host (`npm run owner-link`, scripts) proves that it runs as the
 // server's user. Reading the private `<data>/owner-key` (0600, in the 0700 data directory) is the proof, but the key
 // never leaves the client: it asks the server for a one-time challenge and answers with an HMAC of the challenge and the
 // port. Whatever listens on that port learns nothing it could use elsewhere: a squatter on 8788 cannot pass the answer to

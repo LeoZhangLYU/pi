@@ -216,7 +216,11 @@ test(
 		await t.test("archiving the session closes its terminals", async () => {
 			await sessions.archive({ id: session.id }, BACKGROUND_CONTEXT);
 			const service = (await fixture.server.host.registry(TerminalServices, BACKGROUND_CONTEXT)).value!.service;
-			assert.deepEqual(await service.call({ op: "list", sessionId: session.id }), { kind: "list", windows: [] });
+			// Closing the session's terminals is asynchronous: the archive returns before the host has closed them.
+			await poll(async () => {
+				const list = await service.call({ op: "list", sessionId: session.id });
+				return list.kind === "list" && list.windows.length === 0;
+			});
 			await poll(() => listed().length === 0);
 		});
 

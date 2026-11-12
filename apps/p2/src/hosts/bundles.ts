@@ -1,20 +1,19 @@
-// Downloaded code: the TUI and the web UI are each one esbuild build of the selected plugins' facets, named by content.
+// Downloaded code: the web UI is one esbuild build of the selected plugins' web facets, named by content.
 // Browser code compiles with one set of options (`browser`), shared with test component fixtures.
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type BuildOptions, build, type Loader, type Plugin } from "esbuild";
-import { type FacetKind, listPlugins } from "./plugins.ts";
-import { MAX_TUI_BUNDLE } from "./tui-sandbox.ts";
+import { listPlugins } from "./plugins.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const pluginsDirectory = join(root, "plugins");
 
-/** The selected plugins' facet files of one kind, alphabetical by plugin (the load order). */
-function facetFiles(kind: FacetKind, plugins: readonly string[], directory: string): [name: string, file: string][] {
+/** The selected plugins' web facet files, alphabetical by plugin (the load order). */
+function facetFiles(plugins: readonly string[], directory: string): [name: string, file: string][] {
 	return [...listPlugins(directory)].flatMap(([name, facets]) => {
-		const file = facets[kind];
+		const file = facets.web;
 		return plugins.includes(name) && file ? [[name, file] as [string, string]] : [];
 	});
 }
@@ -72,55 +71,6 @@ function captureBundleInputs(): { readonly plugin: Plugin; readonly inputs: () =
 	};
 }
 
-export type TuiBundle = { version: string; source: string; inputs: readonly BundleInput[] };
-export type TuiManifest = { version: string; bundle: string };
-
-/** Where the launcher downloads the TUI bundle: only the current version is served. */
-export const tuiManifest = (bundle: TuiBundle): TuiManifest => ({
-	version: bundle.version,
-	bundle: `/__p2_tui/${bundle.version}.mjs`,
-});
-
-/** Every loaded plugin's TUI facet. Built ONLY on the server; no plugin file names or source resolver reach the launcher. */
-export async function buildTuiBundle(plugins: readonly string[], directory = pluginsDirectory): Promise<TuiBundle> {
-	const entries = facetFiles("tui", plugins, directory);
-	const captured = captureBundleInputs();
-	const entry = [
-		`import { setupTui } from ${JSON.stringify(join(root, "src/hosts/tui-worker-runtime.ts"))};`,
-		...entries.map(([, file], index) => `import facet${index} from ${JSON.stringify(file)};`),
-		`export default bridge => setupTui(bridge, [${entries.map(([name], index) => `{name:${JSON.stringify(name)},facet:facet${index}}`).join(",")}]);`,
-	].join("\n");
-	const result = await build({
-		...common,
-		stdin: { contents: entry, resolveDir: root, sourcefile: "p2-tui-entry.ts", loader: "ts" },
-		plugins: [
-			{
-				name: "tui-no-native-local-access",
-				setup(builder) {
-					builder.onLoad({ filter: /[/\\]native-platform\.(ts|js)$/ }, () => ({
-						contents:
-							"export const getNativePlatformHelper=()=>undefined; export const getNativeClipboard=()=>undefined;",
-						loader: "js",
-					}));
-				},
-			},
-			captured.plugin,
-		],
-		platform: "node",
-		target: "node26",
-		// Readable function and class names in the stack the launcher prints when the sandbox crashes (~4% size).
-		keepNames: true,
-		sourcemap: false,
-	});
-	const source = result.outputFiles[0]!.text;
-	if (Buffer.byteLength(source) > MAX_TUI_BUNDLE) throw new Error("TUI bundle exceeds 8 MiB");
-	return {
-		source,
-		version: createHash("sha256").update(source).digest("hex"),
-		inputs: captured.inputs(),
-	};
-}
-
 /** Options of all browser code: the web bundle and anything compiled like it (test component fixtures). */
 const browser = {
 	...common,
@@ -160,7 +110,7 @@ export async function buildBrowserScript(entry: string): Promise<string> {
 
 /** Where the page loads the web bundle's files from. */
 export const WEB_BUNDLE_PATH = "/__p2_web/";
-/** The largest web bundle a build may produce, source maps excluded: JavaScript, CSS and assets (the TUI's cap). */
+/** The largest web bundle a build may produce, source maps excluded: JavaScript, CSS and assets. */
 export const MAX_WEB_BUNDLE = 8 * 1024 * 1024;
 
 export type WebManifest = { readonly version: string; readonly script: string; readonly style: string | null };
@@ -189,7 +139,7 @@ const TYPES: Readonly<Record<string, string>> = {
  * can cache it forever, and an unchanged build has the same names (and version) on any machine.
  */
 export async function buildWebBundle(plugins: readonly string[], directory = pluginsDirectory): Promise<WebBundle> {
-	const entries = facetFiles("web", plugins, directory);
+	const entries = facetFiles(plugins, directory);
 	const captured = captureBundleInputs();
 	// Imports relative to the app root: the entry's text reaches the source map, whose content names the files, so an
 	// absolute path would give every checkout location its own names.

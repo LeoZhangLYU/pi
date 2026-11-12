@@ -10,7 +10,7 @@ const schema = obj({
 	defaultModel: opt(obj({ provider: str({ minLength: 1 }), modelId: str({ minLength: 1 }) })),
 	thinkingLevel: opt(StringEnum(thinkingLevels)),
 	/**
-	 * p2 addition (pi's `enabledModels`): model patterns for the TUI's scoped model cycling, in order. Each is
+	 * p2 addition (pi's `enabledModels`): model patterns for scoped model cycling, in order. Each is
 	 * `provider/modelId` or `modelId`, a `*`/`?` glob over either, with an optional `:thinkingLevel`.
 	 */
 	enabledModels: opt(arr(str({ minLength: 1, maxLength: 300 }), { maxItems: 500 })),

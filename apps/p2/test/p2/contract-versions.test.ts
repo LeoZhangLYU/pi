@@ -1,4 +1,4 @@
-// Pages, TUIs and plugins built before a deploy keep working: the providers of `Sessions`, `SessionTree` and `Catalog`
+// Pages and plugins built before a deploy keep working: the providers of `Sessions`, `SessionTree` and `Catalog`
 // still bind the versions released before `/tree` and its branch labels, through their `accepts`, and map the current
 // state and results back. The old contracts below are copied verbatim from the releases that bundled them
 // (`Sessions` v3 and `Catalog` v2 from 0a730c8a7, `Sessions` v4, `Catalog` v3 and `SessionTree` v1 from e88525506,

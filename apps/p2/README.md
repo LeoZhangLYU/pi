@@ -6,8 +6,8 @@
 > and it will be replaced. Do not build on it or run it for anything you depend on.
 
 A self-hosted Pi Durable UI built from independent [Chord](../../packages/chord) plugins. Owners have full agent and
-shell control on that server and its workers; this is not server-side filesystem isolation. Downloaded TUI facets run in a
-locked-down worker on the visitor's machine.
+shell control on that server and its workers; this is not server-side filesystem isolation. The Web UI is the only
+client.
 
 ## Run
 
@@ -44,11 +44,11 @@ whoever has the owner password or can read the server's private data directory (
   link from `npm run owner-link -- http://127.0.0.1:$PORT`. Paste the token at `/owner`, or open the link. Redeemed on
   loopback, it gives a local owner session (`access: "local"`): it may mint owner links and use loopback provider
   sign-ins. Use it when the password is lost.
-- **TUI, `npm run owner-link`, `scripts/verify-sessions.ts`:** they sign in by themselves with the owner key of the data
+- **`npm run owner-link`, `scripts/verify-sessions.ts`:** they sign in by themselves with the owner key of the data
   directory (`P2_DATA_DIR`, default `~/.pi/p2`), which must be the running server's: run them as the server's user,
-  with its `P2_DATA_DIR`. Otherwise they say which directory did not match (the TUI then asks for an owner link). The
-  key never leaves the client: the server sends a one-time challenge, and the client answers with an HMAC of it and the
-  server's port, so whatever listens on that port (another user's process while p2 is down) cannot replay the answer.
+  with its `P2_DATA_DIR`. Otherwise they say which directory did not match. The key never leaves the client: the
+  server sends a one-time challenge, and the client answers with an HMAC of it and the server's port, so whatever
+  listens on that port (another user's process while p2 is down) cannot replay the answer.
 - **Radius** authenticates its relayed requests itself and needs none of this.
 
 Changing the password (another `npm run set-password` or `P2_PASSWORD` write) regenerates the account's session
@@ -138,86 +138,6 @@ Remove `basic_auth` and the old secret injection. Do not rewrite the public Host
 front end actually uses HTTPS; p2 treats allowed public hosts as HTTPS origins. Restart p2 to apply runtime/auth
 changes, then reload the proxy and mint a fresh owner link. Do not run competing servers against the same data dir.
 
-## TUI sign-in
-
-The TUI launcher requires **Node >=26.5.1**; the server still supports Node 22.19+. On slayer use Node 26.11.1:
-`PATH="$HOME/node-v26.11.1-linux-x64/bin:$PATH" LD_LIBRARY_PATH="$HOME/node26-lib" npm run tui`
-(or invoke `~/.local/bin/node26 --import ./src/source.ts src/hosts/tui.ts`).
-
-```sh
-npm run tui                          # local owner on http://127.0.0.1:$PORT (8788 when unset)
-npm run tui -- https://your-domain    # prompts for an owner link if no valid cookie is saved
-npm run tui -- https://your-domain --owner-link 'https://your-domain/owner#<token>'
-npm run tui -- --radius               # through Radius: your only online server, or --radius <server-id>
-```
-
-With `--radius` the TUI reaches a server signed in with `npm run radius:login`, from anywhere and without a tunnel or
-owner link. The first run signs the TUI in to Radius by device code (saved in `~/.pi/p2-tui/radius.json`); Radius
-admits only the server's owner. For now each request is its own Radius connection, so a new server bundle shows up
-within 10 seconds rather than one (see [p2 notes](docs/p2-notes.md#tui-through-radius)).
-
-On loopback the TUI signs in as the local owner with the data directory's owner key (see [Signing in on this
-machine](#signing-in-on-this-machine)), without a link prompt, and saves nothing. Without a readable key, or against
-a server with another data directory, it says why and asks for an owner link; a proxy marker cannot use local
-sign-in. For remote URLs (HTTPS required), get an owner link on the host, then pass `--owner-link` or paste it at the prompt.
-The TUI stores only its cookie per origin in `~/.pi/p2-tui/config.json` (0600, directory 0700;
-`P2_TUI_CONFIG_DIR` overrides it). It never stores the consumed invitation. `P2_TUI_OWNER_LINK` is an optional
-alternative to an argument. Links must match the selected origin and put the token in the fragment only.
-Expired/revoked credentials prompt again on the next launch. Basic-auth flags, environment and saved passwords
-are no longer used. If an active remote TUI is revoked, restart it and sign in with a fresh link.
-
-### TUI isolation
-
-The server esbuilds one self-contained ESM containing pi-tui, the Chord client, the runtime and its selected
-`plugins/*/tui.ts` facets, only when their TUI dependencies are already selected (they never expand backend selection).
-The launcher fetches the authenticated `/__p2_tui` manifest and hash-addressed bundle;
-it never discovers or imports TUI facets from the visitor's checkout. Successful plugin reloads rebuild the bundle.
-A changed hash starts a fresh worker; only after readiness does the launcher swap, restore UI state and terminate
-the old worker. `/reload` requests a fresh worker too. Network drops reconnect to the same server.
-
-The unrestricted launcher alone owns terminal input/resize, WebSocket, sign-in and local cookie storage. A plain
-Worker runs with `execArgv: ["--permission"]`, `env: {}` and V8 resource limits. Its trusted bootstrap drops
-`fs.read`, `fs.write`, `worker`, `net`, `child`, `addon`, `wasi` and `inspector` **before** importing the bundle
-from an in-memory data URL. Worker stdout/stderr are captured and discarded. Heap snapshots/object queries,
-worker environment-data/BroadcastChannel access, parentPort exposure and process-signaling/report controls are also
-disabled. The entire worker fs/fs-promises function facade is closed: inherited numeric descriptors must not read
-stdin or bypass stdout/stderr capture. Permission drops still protect JSON/require/file module loading.
-Keybindings, theme and display settings are the visitor's own: the launcher reads pi's `~/.pi/agent/keybindings.json`,
-`settings.json` and `themes/*.json` plus `~/.pi/p2-tui/prefs.json`, validates a whitelisted subset and posts it to the
-worker as data (no paths, env or commands); the server's `TuiPreferences` (`<P2_DATA_DIR>/tui.json`) only supplies
-defaults below them and never privileged bindings. The worker never reads files. Clipboard writes, opening URLs, downloads,
-the external editor and Ctrl+Z are launcher actions under a grant (the visitor's own key, or a confirmation in a
-launcher-drawn screen showing the exact data); server code cannot pick a visitor path, read the clipboard or open a
-browser by itself.
-
-All worker output passes a tight 64 KiB/frame terminal filter: printable text, CR/LF/tab, SGR, cursor/erase,
-cursor visibility, synchronized output, bracketed paste, pi-tui's alternate screen and scroll region. OSC
-(including clipboard/title/hyperlinks), DCS, APC/PM/SOS, kitty graphics, C1 controls, unknown modes and incomplete
-escapes are stripped. Chord frames are relayed unchanged over the launcher's fixed-origin connection.
-
-**Accepted risk: denial of service.** Malicious server code may crash or exhaust its TUI process. V8 limits bound
-heap, not every native/ArrayBuffer allocation; a launcher watchdog samples process RSS and ArrayBuffers every
-100 ms and terminates the worker above 512 MiB RSS or 128 MiB main-thread ArrayBuffers. RSS covers all threads;
-ArrayBuffer accounting is thread-local. Sampling is not a hard OS quota: rapid allocations/native work can beat
-it, and memory exhaustion can affect the host. Node/runtime vulnerabilities remain out of scope; keep Node patched.
-There is no OS sandbox. The intended authority boundary denies machine reads/writes, network, child processes,
-inherited environment and terminal escapes; a connected server retains full authority over its own workers.
-
-### Owner testing on slayer
-
-From `/home/badlogic/pi-private/apps/p2` (no server restart needed):
-
-```sh
-~/.local/bin/node26 --import ./src/source.ts src/hosts/tui.ts
-# Loopback http://127.0.0.1:8788: local owner by the data directory's owner key, no prompt.
-
-npm run owner-link -- https://p2.mariozechner.at
-~/.local/bin/node26 --import ./src/source.ts src/hosts/tui.ts https://p2.mariozechner.at
-# Paste the private printed link at the prompt. Ctrl+D exits.
-```
-
-Do not publish the owner link or paste it into logs. A valid saved remote cookie skips the prompt on later launches.
-
 ## Configuration
 
 Edit `<P2_DATA_DIR>/settings.json` as a file; there is no Settings editor UI. Valid changes hot-reload without a
@@ -239,30 +159,13 @@ A project is one codebase in several places, one per environment. `<P2_DATA_DIR>
 
 Object order is display order; array order is preference. A place without `env` is this device; `path` is absolute or
 starts with `~` (that machine's home); a project has at most one place per environment. p2 watches the file: valid edits
-apply at once, an invalid one keeps the last valid projects and shows why. Projects are owner-only and, for now, TUI-only:
+apply at once, an invalid one keeps the last valid projects and shows why. Projects are owner-only. The Web UI has no
+project picker; the `conversations` tool lists projects and can create a session in one:
 
-- A session belongs to a project only when it was started from the project's row (below), or copied (`/clone`,
-  `/fork`) from a session that does. Its folder does not matter: "+ New session" never puts a session in a project,
-  and `/cd` and `/move` keep its project. p2 stores this itself (not in projects.json).
-- With an empty search the session selector is grouped: each project's row, then its sessions below it (newest first,
-  subagent conversations nested in the threaded sort), then **Other** with **+ New session** and the sessions of no
-  project. A session whose project was removed from projects.json shows under Other, dimmed, with the old name in
-  parentheses; it groups again once the project is back. The grouped list always shows every session (Tab does nothing
-  there). A search is flat: typed in the grouped list it searches every session, and Tab narrows it to the current
-  folder; the archived sessions and a list without projects are flat with Tab's scope (current folder or all) as before.
-- A project's row checks each place in the background when the selector opens (`pi   mac ✓   david-pi …`; this
-  device shows as the server's hostname): `…` checking, `✓` reachable, `?` the machine answered but has no such
-  folder, `✗` the machine is unreachable or no such environment is configured. Under the selected project a line says
-  why for each place that is not usable (`mac: no folder ~/projects/x · gpu: no such environment`). Enter starts a
-  session in the project at the first reachable place; left/right pick another place first.
-- `/move <env>` moves the viewed session to its project's place on another environment (`local` or the hostname for
-  this device), after the same confirmation as `/cd`. `/move` alone opens a picker of all the project's places, the
-  session's own one marked `•` current and the others checked when it opens (same marks and reasons as the project
-  rows); the cursor starts on the first other reachable place. Enter moves to a `✓` place (the others cannot be chosen;
-  the current one just closes the picker), Escape cancels. When the session is below its project's place on its current
-  machine, it keeps the subfolder (`.../pi/apps/p2` to `.../pi/apps/p2`) if the target has it, else it goes to the
-  target place itself with a notice; that is read from the paths alone, so `/move` works while the session's machine is
-  unreachable.
+- A session belongs to a project only when it was created there, or copied (`/clone`, `/fork`) from a session that
+  does. Its folder does not matter: a new session from the Web never puts it in a project, and moving it keeps its
+  project. p2 stores this itself (not in projects.json).
+- A session whose project was removed from projects.json keeps the old name and groups again once the project is back.
 
 `cacheWarming` (`"idle"` by default, `"streaming"` or `"off"`) keeps prompt caches warm as pi does: before the cache
 entry of a conversation's last request expires (5 minutes for Anthropic and Claude on Radius), p2 sends the request

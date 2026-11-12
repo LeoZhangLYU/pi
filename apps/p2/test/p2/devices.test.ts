@@ -274,7 +274,6 @@ test("loopback without a credential is nobody: pages ask to sign in, owner route
 	assert.equal((await http(port, "/s/anything")).status, 401);
 	assert.equal((await http(port, "/owner/check")).status, 401);
 	assert.equal((await http(port, "/__p2_dev")).status, 403);
-	assert.equal((await http(port, "/__p2_tui")).status, 401);
 	assert.equal((await http(port, "/health")).status, 200, "readiness stays unauthenticated");
 	const socket = new WebSocket(`ws://127.0.0.1:${port}/chord`);
 	const refused = await new Promise<number>((resolve) => {

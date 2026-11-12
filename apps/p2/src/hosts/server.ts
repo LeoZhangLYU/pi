@@ -44,14 +44,7 @@ import {
 	WorkerInitValues,
 } from "../runtime/server.ts";
 import { WorkerBoundary, type WorkerInit } from "../runtime/worker.ts";
-import {
-	type BundleInput,
-	buildTuiBundle,
-	buildWebBundle,
-	type TuiBundle,
-	tuiManifest,
-	type WebBundle,
-} from "./bundles.ts";
+import { type BundleInput, buildWebBundle, type WebBundle } from "./bundles.ts";
 import { devControl } from "./dev.ts";
 import { readDevCommand, sendDevCommand, serveDevChannel } from "./dev-channel.ts";
 import { LoadedModules, loadedModuleHashes, loadedPluginFiles } from "./dev-modules.ts";
@@ -66,7 +59,6 @@ import {
 } from "./principals.ts";
 import { SessionWorkers } from "./session-workers.ts";
 import { limitedSocket, MAX_CLIENT_FRAME } from "./socket-limits.ts";
-import { tuiPreferencesFacet } from "./tui-preferences.ts";
 import { createWeb, isPublicFile } from "./web.ts";
 
 /** The p2 app directory (`apps/p2`), told to facets as `Server.info.app` and `WorkerInit.app`. */
@@ -80,8 +72,6 @@ export type ServerOptions = {
 	readonly fake?: boolean;
 	/** Serve the web UI (default true). */
 	readonly web?: boolean;
-	/** Server-side TUI source directory override for disposable test facets. Never sent to the launcher. */
-	readonly tuiDirectory?: string;
 	/** Mark backend/runtime changes dirty and enable explicit dev controls (default P2_DEV=1). */
 	readonly dev?: boolean;
 	/** Idle time before a session worker stops (default 5 minutes). */
@@ -241,49 +231,22 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 	// Capture before plugin resources open (e.g. provider SDK startup), not only after the logs facet activates.
 	const stopLogs = captureProcessLogs("server");
 	const serveWeb = options.web ?? true;
-	/** Source files of the last built bundles, by bundle (dev watcher: which plugin saves affect downloaded code). */
-	const bundleInputs = new Map<"tui" | "web", readonly string[]>();
 	/**
-	 * Records a bundle's source files. Plugin files mark their plugin dirty when saved (`loadedFiles` below); in dev mode
-	 * the others (browser and TUI runtime code) are compared by content like the server's own modules, so a save asks
-	 * for a restart, or the next reload, which rebuilds both bundles.
+	 * Records the web bundle's source files. Plugin files mark their plugin dirty when saved (`loadedFiles` below); in
+	 * dev mode the others (browser runtime code) are compared by content like the server's own modules, so a save asks
+	 * for a restart, or the next reload, which rebuilds the bundle.
 	 */
-	const recordInputs = (bundle: "tui" | "web", inputs: readonly BundleInput[]): void => {
-		bundleInputs.set(
-			bundle,
-			inputs.map(({ file }) => file),
-		);
+	const recordInputs = (inputs: readonly BundleInput[]): void => {
 		if (!devModules) return;
-		const plugin = (file: string) =>
-			file.startsWith(PLUGINS_DIRECTORY) ||
-			(options.tuiDirectory !== undefined && file.startsWith(options.tuiDirectory));
 		devModules.set(
-			`${bundle}-bundle`,
-			inputs.filter(({ file }) => !plugin(file)),
+			"web-bundle",
+			inputs.filter(({ file }) => !file.startsWith(PLUGINS_DIRECTORY)),
 		);
 	};
 	/** Records a built bundle only once it is current (after a successful reload commit). */
-	const adoptTui = (bundle: TuiBundle): void => recordInputs("tui", bundle.inputs);
-	const adoptWeb = (bundle: WebBundle): void => recordInputs("web", bundle.inputs);
-	// Both bundles build once, on first use, and again only when a plugin reload commits. A late lazy build may not
+	const adoptWeb = (bundle: WebBundle): void => recordInputs(bundle.inputs);
+	// The bundle builds once, on first use, and again only when a plugin reload commits. A late lazy build may not
 	// overwrite the input baseline installed by a newer reload.
-	let tuiBundle: Promise<TuiBundle> | undefined;
-	const getTuiBundle = (): Promise<TuiBundle> => {
-		if (tuiBundle) return tuiBundle;
-		let current!: Promise<TuiBundle>;
-		current = buildTuiBundle(plugins, options.tuiDirectory).then(
-			(bundle) => {
-				if (tuiBundle === current) adoptTui(bundle);
-				return bundle;
-			},
-			(error: unknown) => {
-				if (tuiBundle === current) tuiBundle = undefined;
-				throw error;
-			},
-		);
-		tuiBundle = current;
-		return current;
-	};
 	let webBundle: Promise<WebBundle> | undefined;
 	const retainedWebBundles: { readonly bundle: Promise<WebBundle>; readonly expires: number }[] = [];
 	const getWebBundle = (): Promise<WebBundle> => {
@@ -341,7 +304,6 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 							root: (fn, context) => host.root(fn, context),
 						}),
 					},
-					{ name: "@p2/tui-preferences", facet: tuiPreferencesFacet(dataDir) },
 					// The server's files (the kit's `Files`): `<data>/server/files/`.
 					{ name: "chord.app.files", facet: filesFacet(hostFiles(serverDirectory(dataDir))) },
 					...(options.facets ?? []),
@@ -364,8 +326,8 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 
 	let reloading = false;
 	/**
-	 * Builds `requested` (and plugins added since), then rolls them out to the server and every running worker; the TUI
-	 * and web bundles are rebuilt first (a failed build keeps the old code and bundles). A plugin whose build or
+	 * Builds `requested` (and plugins added since), then rolls them out to the server and every running worker; the web
+	 * bundle is rebuilt first (a failed build keeps the old code and bundle). A plugin whose build or
 	 * evaluation fails keeps its old code (an added one stays out), reported in the result.
 	 */
 	const performReload = async (
@@ -396,7 +358,6 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 				);
 			processLogs.append("server", "event", `Reloading plugins: ${requested.join(", ")}`);
 			// Prepare downloaded code before the backend commit; publish only a successfully committed selection.
-			const nextTuiBundle = await buildTuiBundle(next, options.tuiDirectory);
 			const nextWebBundle = serveWeb ? await buildWebBundle(next) : undefined;
 			const result = await chordPlugins.rollout(
 				[chordPlugins.step("server", host), workers.workers.step("workers")],
@@ -404,8 +365,6 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 				BACKGROUND_CONTEXT,
 			);
 			plugins = next;
-			tuiBundle = Promise.resolve(nextTuiBundle);
-			adoptTui(nextTuiBundle);
 			if (nextWebBundle) {
 				if (webBundle) {
 					retainedWebBundles.unshift({ bundle: webBundle, expires: Date.now() + WEB_BUNDLE_GRACE_MS });
@@ -528,7 +487,7 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 	 * or WebSocket of a foreign page can read or drive p2 with the owner's cookie. Only a top-level
 	 * navigation to an app page authenticates, so links into p2 open it normally. Radius-relayed requests are
 	 * authenticated per channel by Radius (and framed by its shell), not by browser cookies; requests without Fetch
-	 * Metadata (the TUI, scripts) are unaffected.
+	 * Metadata (scripts, older browsers) are unaffected.
 	 */
 	const resolveAccess = async (request: IncomingMessage, ctx: Ctx): Promise<RequestAccess | undefined> => {
 		const access = await credentialAccess(request, ctx);
@@ -602,25 +561,6 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 					} else {
 						sendJson(response, 200, watcher ? { ...watcher.status(), hasLogs: plugins.includes("logs") } : null);
 					}
-					return;
-				}
-				if (path === "/__p2_tui" || /^\/__p2_tui\/[a-f0-9]{64}\.mjs$/.test(path)) {
-					if (isOwner(principal) && (request.method === "GET" || request.method === "HEAD")) {
-						const bundle = await getTuiBundle();
-						const tui = tuiManifest(bundle);
-						if (path !== "/__p2_tui" && path !== tui.bundle) {
-							response.writeHead(404);
-							response.end();
-							return;
-						}
-						const manifest = path === "/__p2_tui";
-						response.writeHead(200, {
-							"Content-Type": manifest ? "application/json" : "text/javascript; charset=utf-8",
-						});
-						response.end(request.method === "HEAD" ? undefined : manifest ? JSON.stringify(tui) : bundle.source);
-						return;
-					}
-					signIn(request, response, 401, signInStateFor((await host.registry(SignInStates, ctx)).value) ?? {});
 					return;
 				}
 				const route = findRoute((await host.registry(Routes, ctx)).value, request.method ?? "GET", path);

@@ -16,9 +16,7 @@ import {
 	type RunFailure,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
-import { transcriptComponent } from "../../src/tui/messages.ts";
 import { buildTranscript } from "../../src/web/transcript.ts";
 import { wholeView } from "../fixtures/whole-view.ts";
 import { Browser, browserTests } from "./browser.ts";
@@ -300,31 +298,3 @@ test(
 		}
 	},
 );
-
-test("p2 TUI shows the persistent compaction error once and removes it when Durable clears it", () => {
-	const base = compactionView();
-	const detail = "Compaction failed: Summarization failed: 400 prompt is too long";
-	const live = base.docs["pi.live"] as LiveState;
-	const runFailure: RunFailure = { taskId: 21 as RunFailure["taskId"], inputs: [], reason: "model_error", detail };
-	const view = { ...base, docs: { "pi.live": { ...live, runFailure } } };
-	const plain = transcriptComponent(buildTranscript(wholeView(view)), false, false)
-		.render(200)
-		.map(stripTerminalSequences)
-		.join("\n");
-	assert.equal(plain.split(detail).length - 1, 1);
-	assert(!plain.includes("The model could not answer this input."));
-	const cleared = transcriptComponent(buildTranscript(wholeView({ ...base, docs: { "pi.live": {} } })), false, false)
-		.render(200)
-		.map(stripTerminalSequences)
-		.join("\n");
-	assert(!cleared.includes("Compaction failed:"));
-	const restarts = transcriptComponent(
-		buildTranscript(wholeView(runFailureView("restart_limit", "The generation was interrupted 5 times"))),
-		false,
-		false,
-	)
-		.render(200)
-		.map(stripTerminalSequences)
-		.join("\n");
-	assert(restarts.includes("The run was stopped after repeated restarts."));
-});

@@ -1,17 +1,14 @@
 // Code mode's calls (copied from Pi Mobile): nested calls live from pi.live.nestedTools, grouped by the model's call
 // with depth from the parentCallId chain, settled from the result's details.calls; in the browser (the script's step
-// in its turn's activity sheet) and in the TUI's card.
+// in its turn's activity sheet).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationView, EntryId, LiveState } from "@earendil-works/pi-durable";
 import type { CodemodeToolDetails } from "@earendil-works/pi-durable/codemode";
-import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { scriptCalls } from "../../plugins/codemode/nested.ts";
-import { transcriptComponent } from "../../src/tui/messages.ts";
 import { buildTranscript, type ToolView } from "../../src/web/transcript.ts";
-import { PLUGIN_TUI_RENDERERS } from "../fixtures/tui-tools.ts";
 import { wholeView } from "../fixtures/whole-view.ts";
 import { Browser, browserTests } from "./browser.ts";
 import { startFixture } from "./helpers.ts";
@@ -192,30 +189,6 @@ test("settled calls come from the result's details.calls", () => {
 	const entry = broken.entries[1]!;
 	(entry.model![0] as ToolResultMessage).details = { calls: [{ id: "x" }] };
 	assert.equal(codemode(broken)?.calls, undefined);
-});
-
-test("TUI shows pi's code mode card: the script, the newest nested calls by depth, then the output", () => {
-	const render = (view: ConversationView, expanded = false) =>
-		transcriptComponent(buildTranscript(wholeView(view)), false, expanded, { renderers: PLUGIN_TUI_RENDERERS })
-			.render(120)
-			.map((line) => stripTerminalSequences(line).trimEnd())
-			.join("\n");
-	const live = render(running());
-	assert.match(live, /codemode\n +\/\/ read every file/);
-	// pi's renderer: the newest eight rows with status, name, JSON arguments, duration; earlier ones behind a hint.
-	assert.match(live, /2 earlier calls/);
-	assert.doesNotMatch(live, /subagent/);
-	assert.match(live, /✗ read .*f3\.ts.* 40ms\n +ENOENT: f3\.ts/);
-	assert.match(live, /… bash .*npm test.*\n +running tests/);
-	const all = render(running(), true);
-	assert.match(all, /✓ subagent .* 1\.5s\n {3,}✓ read .*\/work\/inner\.ts/);
-	assert.match(all, /return files\.length;/);
-	const done = render(settled());
-	assert.match(
-		done,
-		/✓ read \{"path":"a\.ts"\} 12ms\n +✗ read \{"path":"b\.ts"\} 3ms\n +ENOENT: b\.ts\n +⊘ bash \{"command":"npm te\.\.\./,
-	);
-	assert.match(done, /done\n +2/);
 });
 
 test(

@@ -11,7 +11,7 @@ export type { DevStatus } from "../runtime/dev-protocol.ts";
 
 /**
  * The dev state over `plugins.state` (dirty plugins, from Chord's watcher: a facet's file, a file one of its facets
- * read, or a web/TUI file in its directory; plugins added or removed) and `loadedModules` (server modules whose
+ * read, or a web file in its directory; plugins added or removed) and `loadedModules` (server modules whose
  * content changed: restart). `reload(names)` applies the named (default: dirty) plugins through the app's `reload`.
  */
 export function devControl<T>(options: {

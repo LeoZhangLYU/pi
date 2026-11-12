@@ -1,19 +1,14 @@
 // The example of docs/tool-ui.md (a `word_count` tool, test/fixtures/plugins/word-count): the document shows the
 // fixture's files as they are, the tool works, and its contributions draw it in the chat (the wheel's summary, the step
-// list, the detail) and in the TUI's card.
+// list, the detail).
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationView, EntryId, ToolExecutionApi } from "@earendil-works/pi-durable";
-import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
-import { transcriptComponent } from "../../src/tui/messages.ts";
-import { buildTranscript } from "../../src/web/transcript.ts";
 import { type WordCountDetails, wordCountExtension } from "../fixtures/plugins/word-count/tool.ts";
-import { wordCountRenderers } from "../fixtures/plugins/word-count/tui.ts";
-import { wholeView } from "../fixtures/whole-view.ts";
 import { Browser, browserTests } from "./browser.ts";
 import { startFixture } from "./helpers.ts";
 
@@ -99,18 +94,6 @@ test("the tool counts; an empty text fails", async () => {
 	assert.deepEqual(done.details, { words: 9, lines: 2 });
 	assert.equal(done.isError, false);
 	assert.equal((await result("w2", " ")).isError, true);
-});
-
-test("TUI: the tool's card shows its text, then its counts", async () => {
-	const lines = transcriptComponent(buildTranscript(wholeView(await view())), false, false, {
-		renderers: new Map([["word_count", wordCountRenderers]]),
-	})
-		.render(100)
-		.map((line) => stripTerminalSequences(line).trimEnd())
-		.join("\n");
-	assert.match(lines, /word_count The quick brown fox/);
-	assert.match(lines, /9 words, 2 lines/);
-	assert.match(lines, /Nothing to count: the text is empty\./);
 });
 
 test(

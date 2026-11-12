@@ -15,7 +15,7 @@ export const ArtifactList = remote("p2.artifact-list", {
 export const MAX_ARTIFACT_PREVIEW = 512 * 1024;
 
 /**
- * An artifact's content for clients that cannot use the `/artifact` route (the TUI's worker has no cookie): text and
+ * An artifact's content for clients without the owner cookie that the `/artifact` route needs: text and
  * Markdown are shown inline, HTML and SVG as source. Same authority as the route: anyone who may view the session.
  * At most `MAX_ARTIFACT_PREVIEW` characters; `truncated` says there is more.
  */

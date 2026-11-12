@@ -10,7 +10,7 @@ import { buildFacet, discoverPlugins } from "@earendil-works/chord/plugins";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { APP } from "./helpers.ts";
 
-const KINDS = ["server", "worker", "tui", "web"] as const;
+const KINDS = ["server", "worker", "web"] as const;
 
 /** The packages a facet shares with its host as instances (never bundled), besides the API. */
 const SHARED = [
@@ -45,7 +45,6 @@ const SHARED = [
 const API: Record<(typeof KINDS)[number], readonly string[]> = {
 	server: ["@p2/app/v1", "@p2/app/v1/node", "@p2/app/v1/server"],
 	worker: ["@p2/app/v1", "@p2/app/v1/node", "@p2/app/v1/worker"],
-	tui: ["@p2/app/v1", "@p2/app/v1/tui"],
 	web: ["@p2/app/v1", "@p2/app/v1/web", "react", "react/jsx-runtime", "react-dom", "react-dom/client"],
 };
 
@@ -59,7 +58,7 @@ test("every plugin directory is a package named after it", async () => {
 	for (const plugin of plugins) assert.equal(plugin.name, relative(join(APP, "plugins"), plugin.dir));
 });
 
-test("every server, worker, TUI and web facet builds against the plugin API alone", async () => {
+test("every server, worker and web facet builds against the plugin API alone", async () => {
 	const { plugins } = await discoverPlugins(
 		[{ path: join(APP, "plugins"), required: true }],
 		{ kinds: [...KINDS] },

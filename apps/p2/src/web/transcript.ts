@@ -529,7 +529,7 @@ export function buildTranscript(
 			compactionFailureItems.set(compactionFailure, item);
 		}
 		// State-derived, not a retained entry: it persists while idle and disappears when Durable clears it.
-		// Both the browser and p2 TUI render failure items in their existing error-notice style.
+		// The browser renders failure items in its existing error-notice style.
 		items.push(item);
 	}
 	// Why the last run ended without an answer, until the next run starts; a blocking compaction failure is shown once.
