@@ -93,7 +93,7 @@ export interface TuiCommandRunner {
 	};
 }
 
-export type TuiRole = "owner" | "guest";
+export type TuiRole = "owner";
 export interface TuiPrefsView {
 	/** The effective theme setting (a name, "light/dark" pair, or undefined for the system theme). */
 	readonly themeSetting: string | undefined;
@@ -118,7 +118,7 @@ export interface TuiContext extends RenderContext {
 	readonly theme: ThemeRef;
 	readonly keys: TuiKeys;
 	readonly hints: TuiHints;
-	/** Guest-local display preferences (validated data from the launcher over server defaults). */
+	/** Local display preferences (validated data from the launcher over server defaults). */
 	readonly settings: TuiSettings;
 	readonly role: TuiRole | undefined;
 	/** The viewed session and conversation, and the session's main conversation (1, or its current `/tree` branch). */

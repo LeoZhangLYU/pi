@@ -1,6 +1,6 @@
 // The location tools: an agent lists the environments it may work on and their directories, and moves itself. Every main
 // agent has them, and the subagents and one-shot agents it gives them to. Only turns the owner started may use them (their
-// `origin: "owner"`): guests can neither discover environments nor move agents.
+// `origin: "owner"`).
 
 import {
 	type ConversationId,

@@ -1,23 +1,9 @@
 // Voice mode (worker): the owner's switch and voice, kept in a Durable document, and the prompt section voice mode
-// turns on. A read/write guest's microphone switch is not written there: the document is the owner's, and a guest
-// turning its microphone off must not turn voice mode off for anyone else. It counts while the guest's object lives
-// (objects are per grant; leaving, a revoked grant or the linger time ends it): the prompt section is on while the
-// owner's switch or any guest's is, since that guest talks by voice too.
+// turns on.
 
 import { type ConversationId, defineDoc, defineExtension, section } from "@earendil-works/pi-durable";
-import { bool, obj, type Static } from "@earendil-works/pi-schema";
-import {
-	type Ctx,
-	canSend,
-	contribute,
-	defineFacet,
-	defineState,
-	deriveTyped,
-	forbidden,
-	invalid,
-	isOwner,
-	principalKey,
-} from "@p2/app/v1";
+import type { Static } from "@earendil-works/pi-schema";
+import { type Ctx, canSend, contribute, defineFacet, deriveTyped, forbidden, invalid } from "@p2/app/v1";
 import { durableContext } from "@p2/app/v1/node";
 import { agentConversation, Extensions, harnessOf } from "@p2/app/v1/worker";
 import { type VoiceChoiceSchema, VoiceMode } from "./contract.ts";
@@ -55,17 +41,6 @@ export const VOICE_PROMPT = [
 	"stopped or it is going wrong, stop it with subagent stop.",
 ].join(" ");
 
-/** The guests whose voice mode is on, per conversation of this worker (by principal key). Not durable on purpose. */
-const guestVoices = new Map<string, Set<string>>();
-
-function setGuestVoice(conversation: string, guest: string, on: boolean): void {
-	const guests = guestVoices.get(conversation) ?? new Set<string>();
-	if (on) guests.add(guest);
-	else guests.delete(guest);
-	if (guests.size > 0) guestVoices.set(conversation, guests);
-	else guestVoices.delete(conversation);
-}
-
 /** A language's English name ("German" for "de"), for the prompt; the tag itself where the runtime has none. */
 export function languageName(language: string): string {
 	try {
@@ -88,18 +63,9 @@ export const voiceExtension = defineExtension({
 		section("voice", async (input, context) => {
 			const holder = await agentConversation(input.read, input.conversationId, context);
 			const doc = await input.read.snapshot(VoiceModeDoc, holder, context);
-			return guestVoices.has(String(input.conversationId)) || doc?.enabled
-				? voicePrompt(doc?.voice?.language)
-				: undefined;
+			return doc?.enabled ? voicePrompt(doc?.voice?.language) : undefined;
 		}),
 	],
-});
-
-/** A read/write guest's own microphone switch (the owner's is the document's). */
-const GuestSwitch = defineState("p2.voice-mode.guest", {
-	schema: obj({ enabled: bool() }),
-	version: 1,
-	initial: () => ({ enabled: false }),
 });
 
 export default defineFacet((host) => {
@@ -129,7 +95,6 @@ export default defineFacet((host) => {
 				}, durableContext(ctx));
 				return durable.observeDoc(VoiceModeDoc, holder, observer, ctx);
 			});
-			const owner = isOwner(principal);
 			const commit = async (ctx: Ctx, change: (doc: { enabled: boolean; voice: VoiceChoice | null }) => void) => {
 				const durable = await harness().durable.conversation(id, durableContext(ctx));
 				if (!durable) throw invalid("args", `Unknown conversation ${conversation}`);
@@ -137,31 +102,6 @@ export default defineFacet((host) => {
 				return null;
 			};
 			const voice = deriveTyped(self, [doc], ([value]) => value.voice);
-			if (!owner) {
-				// A read/write guest: its own microphone switch, counted while this object lives.
-				const key = principalKey(principal);
-				const guestSwitch = self.state(GuestSwitch);
-				self.open(
-					async () => key,
-					() => setGuestVoice(String(id), key, false),
-				);
-				return {
-					variant: "participant",
-					members: {
-						enabled: self.derive([guestSwitch], ([value]) => value.enabled),
-						voice,
-						set: async ({ enabled: on }, ctx) => {
-							if (on && !(await harness().durable.conversation(id, durableContext(ctx))))
-								throw invalid("args", `Unknown conversation ${conversation}`);
-							setGuestVoice(String(id), key, on);
-							await guestSwitch.change((draft) => {
-								draft.enabled = on;
-							}, ctx);
-							return null;
-						},
-					},
-				};
-			}
 			return {
 				variant: "owner",
 				members: {

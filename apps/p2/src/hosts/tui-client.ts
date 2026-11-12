@@ -67,7 +67,7 @@ export async function startTuiClient(options: {
 	/** The visitor's mouse policy (launcher-only preference): which mouse modes worker output may enable. */
 	mouse?: MousePolicy;
 	/** Who the launcher was admitted as: the TUI starts with that role, so owner views hold before `Access` answers. */
-	role?: "owner" | "guest";
+	role?: "owner";
 	url: URL;
 	/** The visitor's validated local preferences (section 4.2) and their change feed; sent to every worker as data. */
 	preferences?: {

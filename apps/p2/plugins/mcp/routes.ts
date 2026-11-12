@@ -111,7 +111,7 @@ async function callback(
 	}
 }
 
-/** Guests and people without a sign-in get no sign-in. */
+/** People without a sign-in get no sign-in. */
 function refuse(request: IncomingMessage, response: ServerResponse, anonymous: boolean): void {
 	const { language, t } = translator(request);
 	sendPage(response, anonymous ? 401 : 403, resultPage(language, t("notSignedInTitle"), t("ownerOnly")));

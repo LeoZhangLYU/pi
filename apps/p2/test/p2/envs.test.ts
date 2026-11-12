@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ConversationView } from "@earendil-works/pi-durable";
 import { localDaemon } from "@earendil-works/pi-env";
-import { BACKGROUND_CONTEXT, statusOf, whenLive } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT, statusOf } from "@p2/app/v1";
 import { WebSocket } from "ws";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { envId, envRevision, loadEnvs, parseEnvs, saveEnv, validateEnv } from "../../plugins/envs/config.ts";
@@ -16,7 +16,6 @@ import { Envs, environmentPath } from "../../plugins/envs/contract.ts";
 import { remoteSession, sshOptions } from "../../plugins/envs/remote-env.ts";
 import { EnvStore } from "../../plugins/envs/store.ts";
 import { Catalog, Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { SessionStatus } from "../../plugins/status/contract.ts";
 import { Subagents } from "../../plugins/subagents/contract.ts";
 import { Terminals } from "../../plugins/terminals/contract.ts";
@@ -24,7 +23,7 @@ import { terminalDaemon } from "../../plugins/terminals/daemon.ts";
 import type { TerminalEvent } from "../../plugins/terminals/protocol.ts";
 import { Workspace } from "../../plugins/workspace/contract.ts";
 import { Hosts } from "../../src/runtime/server.ts";
-import { expectChord, failureOf, holdIn, poll, startFixture, until } from "./helpers.ts";
+import { failureOf, holdIn, poll, startFixture, until } from "./helpers.ts";
 
 const config = { type: "ssh" as const, host: "box" };
 function which(program: string): string | undefined {
@@ -123,18 +122,6 @@ test(
 		);
 		await writeFile(join(fixture.dataDir, "envs.json"), "{}");
 		await until(envs.failure, (error) => error === null);
-		const guest = fixture
-			.as({
-				kind: "guest",
-				id: "guest",
-				name: "Unverified",
-				home: "unknown",
-				sessions: { unknown: "full" },
-				revision: 1,
-			})
-			.hold(Envs, {}, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(guest), "forbidden");
-		guest.release();
 		// Remote owners manage keys too (Pi Mobile's rule): generate, then read the public key back.
 		const tunnelOwner = fixture.as({ kind: "owner", access: "relay" }).hold(Envs, {}, BACKGROUND_CONTEXT);
 		const generated = await tunnelOwner.generateKey({ name: "remote-key" }, BACKGROUND_CONTEXT);
@@ -211,7 +198,7 @@ async function waitForPort(port: number): Promise<void> {
 }
 
 test(
-	"remote sessions use SSH for directories/tools/uploads/prompt resources, trust host keys and confirm shares",
+	"remote sessions use SSH for directories/tools/uploads/prompt resources, trust host keys",
 	{
 		timeout: 180000,
 		skip: !sshd
@@ -372,10 +359,6 @@ test(
 		assert.match(environments, /- box: ssh .*@127\.0\.0\.1:\d+ · tested ok .* · you are here/);
 		assert.doesNotMatch(environments, /identity|BEGIN/);
 		await assert.rejects(envs.delete({ name: "box" }, BACKGROUND_CONTEXT), /still use/);
-		const sharing = owner.hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-		await assert.rejects(sharing.link({ mode: "full" }, BACKGROUND_CONTEXT), /Confirm first/);
-		await sharing.link({ mode: "full", remoteConfirmed: true }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
 		const terminals = owner.hold(Terminals, { session: session.id, view: crypto.randomUUID() }, BACKGROUND_CONTEXT);
 		const { token } = await terminals.channel({}, BACKGROUND_CONTEXT);
 		const socket = new WebSocket(`ws://127.0.0.1:${fixture.server.port}/terminal?${new URLSearchParams({ token })}`);

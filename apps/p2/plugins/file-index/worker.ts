@@ -117,7 +117,7 @@ export default defineFacet((host) => {
 	);
 
 	host.serve(FileIndex, ({ session, conversation }, principal, self) => {
-		// Participants only, as the workspace (canSend): view-only guests get no file names.
+		// Participants only, as the workspace (canSend): readers get no file names.
 		if (!canSend(principal, session)) throw forbidden("participants only");
 		const cache = self.get(FileIndexCache, { conversation });
 		return {

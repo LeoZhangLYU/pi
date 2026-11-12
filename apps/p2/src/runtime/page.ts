@@ -1,4 +1,4 @@
-// Server-rendered pages (join, owner sign-in, ended share, UI-less server) use the
+// Server-rendered pages (owner sign-in, UI-less server) use the
 // app's visual language: the tokens of src/web/style.css, thin separators, an
 // underlined input, one outline button and the canonical colored Pi logo.
 // Without a script they follow the system scheme; with a nonce they also apply

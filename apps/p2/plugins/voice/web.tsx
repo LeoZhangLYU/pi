@@ -3,8 +3,7 @@
 // speech while an answer is read, else turns voice mode off. An error is a dot on the orb (its text in the orb's label
 // and in the settings). The settings are the owner's, in the sidebar's footer: the Voice sheet (engine, voice, speed,
 // kept in the conversation; this browser's last choice for conversations without one), with voice mode's state on top.
-// A read/write guest talks (its transcripts are its own messages) but hears nothing yet: the answers are read aloud only
-// in the owner's browser. View-only guests have no voice mode. Only when the server has a speech service (voice.json).
+// Only when the server has a speech service (voice.json).
 
 import {
 	BACKGROUND_CONTEXT,
@@ -82,7 +81,7 @@ const useStored = () => useSyncExternalStore(stored.subscribe, () => stored.valu
 const PAUSE_KEY = "p2.voice.pause";
 /**
  * This person's "Pause before sending": seconds of silence that end an utterance (localStorage). Personal, unlike the
- * voice: the owner and each guest set their own.
+ * voice: the owner sets it.
  */
 const pause = {
 	value: ((): number => {
@@ -184,28 +183,19 @@ function MicIcon({ muted = false, size = 18 }: { muted?: boolean; size?: number 
 	);
 }
 
-/**
- * Whether this browser may use voice mode in the open session: the owner, or a guest with full access to it (a
- * view-only guest only reads).
- */
+/** Whether this browser may use voice mode in the open session: the owner (the only person p2 admits). */
 function useTalker(): { owner: boolean; talker: boolean } {
 	return { owner: useOwner(), talker: useCanWrite(useRoute().session) };
 }
 
-/** The voice mode switch of a conversation (the owner's variant or a guest's) and its shared voice. */
+/** The voice mode switch of a conversation and its shared voice. */
 function useVoiceMode(input: { session: string; conversation: number } | undefined) {
 	const mode = useObject(VoiceMode, input);
 	const ownerMode = liveIn(mode, "owner");
-	const guestMode = liveIn(mode, "participant");
-	const voice = useReadable(ownerMode?.voice ?? guestMode?.voice) ?? undefined;
+	const voice = useReadable(ownerMode?.voice) ?? undefined;
 	const set = useMemo(
-		() =>
-			ownerMode
-				? (enabled: boolean) => ownerMode.set({ enabled }, BACKGROUND_CONTEXT)
-				: guestMode
-					? (enabled: boolean) => guestMode.set({ enabled }, BACKGROUND_CONTEXT)
-					: undefined,
-		[ownerMode, guestMode],
+		() => (ownerMode ? (enabled: boolean) => ownerMode.set({ enabled }, BACKGROUND_CONTEXT) : undefined),
+		[ownerMode],
 	);
 	return { ownerMode, voice: voice ?? undefined, set };
 }
@@ -277,7 +267,6 @@ function VoiceChip() {
 	chatRef.current = chat;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the engine reads the new reference through chatRef.
 	useEffect(() => engine?.rebind(), [engine, chat]);
-	// A guest's switch lives with its object, which a suspended voice mode let go: on again once it is back.
 	useEffect(() => {
 		if (!owner && key && remembered.has(key)) void setMode?.(true).catch(() => {});
 	}, [setMode, owner, key]);
@@ -382,8 +371,7 @@ function VoiceChip() {
 }
 
 /**
- * The Voice sheet, laid out as the model picker: state, pause and speed on top, each engine's voices under its name. A
- * guest's has the state and its own pause only (the voice is the owner's).
+ * The Voice sheet, laid out as the model picker: state, pause and speed on top, each engine's voices under its name.
  */
 function VoiceSheet({ config, owner, onClose }: { config: VoiceConfig; owner: boolean; onClose: () => void }) {
 	const { t } = useMessages(voiceMessages);
@@ -567,8 +555,7 @@ function VoiceSheet({ config, owner, onClose }: { config: VoiceConfig; owner: bo
 }
 
 /**
- * The sidebar footer's entry to the Voice sheet, when the server has a speech service: the owner's whole sheet, a
- * read/write guest's own pause.
+ * The sidebar footer's entry to the Voice sheet, when the server has a speech service.
  */
 function VoiceButton() {
 	const { t } = useMessages(voiceMessages);

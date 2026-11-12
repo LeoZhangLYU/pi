@@ -1,4 +1,4 @@
-// Server-side TUI defaults (p2-tui-port.md section 4.2). Guest-local preferences from the launcher override them;
+// Server-side TUI defaults (p2-tui-port.md section 4.2). Local preferences from the launcher override them;
 // privileged-action bindings never come from the server. Browser/worker-safe: types and schemas only.
 
 import { method, remote } from "@earendil-works/chord";
@@ -74,7 +74,7 @@ export function pluginSetting(settings: TuiSettings | undefined, field: TuiSetti
 
 export const TuiPreferencesSchema = obj({
 	keybindings: record(union([str(), arr(str())])),
-	/** pi theme setting: a built-in name, "system" or a "light/dark" pair. Custom theme files are guest-local. */
+	/** pi theme setting: a built-in name, "system" or a "light/dark" pair. Custom theme files are local. */
 	theme: opt(str()),
 	settings: TuiSettingsSchema,
 });

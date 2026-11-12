@@ -5,25 +5,12 @@ import "../../web/elanor.css";
 import "../../web/style.css";
 import { translationsFacet, type WebSocketLike, webSocketLink } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Access } from "../../runtime/access.ts";
 import { createHost, type Facet, hostErrorText, newerPeerProtocol } from "../../runtime/chord.ts";
 import { SERVER } from "../../runtime/principals.ts";
-import { whenLive } from "../../runtime/refs.ts";
-import { HostContext, Slot, setConnected, setShareEnded, webCoreFacet } from "../../runtime/web.tsx";
+import { HostContext, Slot, setConnected, webCoreFacet } from "../../runtime/web.tsx";
 import { startLanguage } from "../../web/language.ts";
 import { browserEnvironment, keepConnected } from "../../web/reconnect.ts";
 import { startTheme } from "../../web/theme.ts";
-
-/**
- * Pi Mobile closes an ended share's socket with 1008; chord2 links carry no such code, so a guest's page asks its
- * own server: an admitted guest gets the page, an ended share's cookie a sign-in refusal (401/403). Unreachable
- * (offline, a restart): not ended, keep reconnecting.
- */
-const shareHasEnded = (): Promise<boolean> =>
-	fetch("/", { method: "HEAD", cache: "no-store", credentials: "same-origin" }).then(
-		(response) => response.status === 401 || response.status === 403,
-		() => false,
-	);
 
 /** Starts the page with the web facets the server selected, in plugin load order. */
 export function startWeb(facets: readonly (readonly [string, Facet])[]): void {
@@ -42,8 +29,6 @@ export function startWeb(facets: readonly (readonly [string, Facet])[]): void {
 			console.error(`p2: ${hostErrorText(error)}`, error);
 		},
 	});
-	/** Whether this page is a guest's (from its Access object); a guest's ended share stops the reconnects. */
-	let guest = false;
 
 	/**
 	 * Connects (and after a drop, reconnects) upstream; remote references re-hold over the new link. A server on
@@ -65,12 +50,7 @@ export function startWeb(facets: readonly (readonly [string, Facet])[]): void {
 			};
 		},
 		onConnected: setConnected,
-		canRetry: async () => {
-			if (outdated) return false;
-			if (!guest || !(await shareHasEnded())) return true;
-			setShareEnded(true);
-			return false;
-		},
+		canRetry: async () => !outdated,
 		environment: browserEnvironment("connection"),
 	});
 	// First: holds before `load` was called throw. Held references wait for the load; rendering need not.
@@ -88,13 +68,6 @@ export function startWeb(facets: readonly (readonly [string, Facet])[]): void {
 			// Follows the user's LocaleChoice and the browser's languages; re-renders every useMessages consumer.
 			void startLanguage(host);
 		});
-	const access = host.hold(Access, {}, BACKGROUND_CONTEXT);
-	void whenLive(access).then(
-		() => {
-			guest = access.variant === "guest";
-		},
-		() => {},
-	);
 
 	// One web bundle is current. While visible, poll its no-store manifest; another complete manifest version (including
 	// a CSS-only change) means a plugin reload or restart with changed code, so replace the whole page.

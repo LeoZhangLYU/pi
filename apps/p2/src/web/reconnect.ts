@@ -44,7 +44,7 @@ export interface ReconnectOptions {
 	/** Opens a socket and its link; the socket reports to `events`. */
 	open(events: SocketEvents): ReconnectLink;
 	onConnected(connected: boolean): void;
-	/** Asked after every close; false stops reconnecting (an outdated page, a guest's ended share). */
+	/** Asked after every close; false stops reconnecting (an outdated page). */
 	canRetry(): Promise<boolean>;
 	/**
 	 * Replace an open socket after this long without a message, at any time, not only on wake. For sockets whose own

@@ -13,11 +13,10 @@ import { Chat } from "../../plugins/chat/contract.ts";
 import { AgentLocations } from "../../plugins/locations/contract.ts";
 import { createLocationExtension } from "../../plugins/locations/tool.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { SessionStatus } from "../../plugins/status/contract.ts";
 import { Subagents } from "../../plugins/subagents/contract.ts";
 import type { RefIn } from "../../src/runtime/chord.ts";
-import { expectChord, holdIn, http, startFixture, until } from "./helpers.ts";
+import { expectChord, holdIn, startFixture, until } from "./helpers.ts";
 
 const results = (view: ConversationView | null | undefined, tool?: string): ToolResultMessage[] =>
 	(view?.entries ?? [])
@@ -50,7 +49,7 @@ test("location tools: schemas and defaults", () => {
 });
 
 test(
-	"main agents list and move; subagents are placed, and move only with the tool; guests are refused",
+	"main agents list and move; subagents are placed, and move only with the tool",
 	{ timeout: 180_000 },
 	async (t) => {
 		const fixture = await startFixture({ allowedHosts: ["share.test"] });
@@ -165,40 +164,9 @@ test(
 		const [after] = await call("location_envs {}");
 		assert.match(text(after), new RegExp(`You work at ${next}`));
 
-		// Guests can neither discover environments nor move agents.
-		const sharing = owner.hold(Sharing, { session }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "full" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => Boolean(value?.length));
-		const headers = { Host: "share.test", Origin: "https://share.test", "Content-Type": "application/json" };
-		const joined = await http(fixture.server.port, "/join", {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ token: links?.[0]?.token, name: "Guest" }),
-		});
-		const guest = fixture.client({ ...headers, Cookie: String(joined.headers["set-cookie"]).split(";")[0]! }).host;
-		const guestChat = await holdIn(guest, Chat, { session, conversation: 1 }, "participant");
-		const [denied] = await call("location_envs {}", guestChat);
-		assert.equal(denied?.isError, true);
-		assert.match(text(denied), /needs a turn the owner started/);
-		const [noMove] = await call(`location_move ${JSON.stringify({ location: start })}`, guestChat);
-		assert.equal(noMove?.isError, true);
-		// Nor through a subagent, nor by placing one on another environment.
-		const moves = results(mover.view.value, "location_move").length;
-		await call(
-			`subagent ${JSON.stringify({ action: "send", name: "placed", message: `location_move ${JSON.stringify({ location: own })}` })}`,
-			guestChat,
-		);
-		const guestMove = await until(mover.view, (value) => results(value, "location_move").length > moves);
-		assert.equal(results(guestMove, "location_move").at(-1)?.isError, true);
-		assert.equal((await child("placed"))?.location?.cwd, other);
-		const [elsewhere] = await call(
-			`subagent ${JSON.stringify({ action: "spawn", name: "far", message: "hi", env: "box", cwd: "/" })}`,
-			guestChat,
-		);
-		assert.match(text(elsewhere), /Another environment needs a turn the owner started/);
-		await expectChord(whenLive(guest.hold(AgentLocations, {}, BACKGROUND_CONTEXT)), "forbidden");
+		// Agent locations are host-internal: the owner's browser does not hold them either.
 		await expectChord(whenLive(owner.hold(AgentLocations, {}, BACKGROUND_CONTEXT)), "forbidden");
 		assert.equal((await until(sessions.sessions, Boolean))?.find((row) => row.id === session)?.cwd, next);
-		for (const ref of [chat, plain, mover, guestChat]) ref.release();
+		for (const ref of [chat, plain, mover]) ref.release();
 	},
 );

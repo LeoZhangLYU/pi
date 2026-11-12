@@ -55,7 +55,7 @@ export function guardTool(tool: P2Tool): P2Tool {
 					if (rule !== "pass" && !lock.capabilities.includes(rule))
 						return refusal(`${tool.name} is not among the resources the owner picked for this session.`);
 				} else if ((await originOf(api, context)) !== "owner")
-					return refusal(`${tool.name} needs a turn the owner started; guests and what they start cannot use it.`);
+					return refusal(`${tool.name} needs a turn the owner started.`);
 			}
 			return tool.execute(args, api, context);
 		},

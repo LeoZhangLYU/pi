@@ -1,6 +1,6 @@
 // pi's keybinding ids and defaults, copied from coding-agent core/keybindings.ts (APP_KEYBINDINGS, the KEYBINDINGS
 // platform overrides and the legacy-name migration) and core/key-id-schema.ts. Pure data: the platform is the
-// guest's (from the launcher's `capabilities`), never this process's. Shared by the launcher and the worker.
+// visitor's (from the launcher's `capabilities`), never this process's. Shared by the launcher and the worker.
 import {
 	Key,
 	type KeybindingDefinitions,
@@ -12,7 +12,7 @@ import {
 export type KeyPlatform = { platform: string; windowsKeys: boolean };
 export const DEFAULT_KEY_PLATFORM: KeyPlatform = { platform: "linux", windowsKeys: false };
 
-/** pi's `app.*` table for one guest platform (coding-agent `APP_KEYBINDINGS`). */
+/** pi's `app.*` table for one visitor platform (coding-agent `APP_KEYBINDINGS`). */
 export function appKeybindings({ platform, windowsKeys }: KeyPlatform) {
 	return {
 		"app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },

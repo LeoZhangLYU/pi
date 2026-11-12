@@ -1,7 +1,8 @@
 // A read-only report of what a p2 data directory holds, to check that nothing was lost across a deploy that changes
-// no data (the move to Chord v2) or across `npm run migrate-data` (it reads either layout): sessions with their conversations and newest entries, subagents, shares, artifacts,
-// uploads and downloads, and the names of environments and port forwards. Never secrets: no tokens, cookies, keys,
-// forward addresses or message text. Every SQLite file is opened read-only, so it runs beside a live server.
+// no data (the move to Chord v2) or across `npm run migrate-data` (it reads either layout): sessions with their
+// conversations and newest entries, subagents, artifacts, uploads and downloads, and the names of environments and
+// port forwards. Never secrets: no tokens, cookies, keys, forward addresses or message text. Every SQLite file is
+// opened read-only, so it runs beside a live server.
 //
 //   node --import ./src/source.ts scripts/data-report.ts [--data <dir>] > before.json
 //   node --import ./src/source.ts scripts/data-report.ts [--data <dir>] --compare before.json
@@ -23,8 +24,6 @@ export type SessionReport = {
 	/** Per conversation ID: its number of entries and its newest entry ID. */
 	readonly conversations: Readonly<Record<string, { readonly entries: number; readonly newest: number }>>;
 	readonly subagents: readonly { readonly name: string; readonly location?: string; readonly archived: boolean }[];
-	/** The modes of its share links, and of the guests' grants (removed ones left out). */
-	readonly shares: { readonly links: readonly string[]; readonly guests: readonly string[] };
 	/** Per artifact name, its versions. */
 	readonly artifacts: Readonly<Record<string, number>>;
 	readonly uploads: number;
@@ -49,7 +48,6 @@ export function dataReport(dataDir: string): DataReport {
 			JSON.parse(String(row.value)) as StoredChild[],
 		]),
 	);
-	const shares = sharesBySession(join(dataDir, "shares.sqlite"));
 	const sessions: Record<string, SessionReport> = {};
 	for (const row of catalog) {
 		const id = String(row.id);
@@ -71,7 +69,6 @@ export function dataReport(dataDir: string): DataReport {
 					archived: child.archived === true,
 				}))
 				.sort((a, b) => a.name.localeCompare(b.name)),
-			shares: shares.get(id) ?? { links: [], guests: [] },
 			...filesOf(dataDir, id),
 		};
 	}
@@ -117,26 +114,6 @@ function rows(path: string, sql: string): Row[] {
 }
 
 const located = (env: string | null, cwd: string): string => (env ? `${env}:${cwd}` : cwd);
-
-/**
- * The links' and the current guests' modes of every shared session. Version 1 of `shares.sqlite` (one session per
- * guest, through its link) reports as version 2's grants do, so a report from before its migration compares equal.
- */
-function sharesBySession(path: string): Map<string, { links: string[]; guests: string[] }> {
-	const shares = new Map<string, { links: string[]; guests: string[] }>();
-	const of = (session: string) => {
-		const entry = shares.get(session) ?? { links: [], guests: [] };
-		shares.set(session, entry);
-		return entry;
-	};
-	for (const row of rows(path, "SELECT session,mode FROM links ORDER BY session,mode"))
-		of(String(row.session)).links.push(String(row.mode));
-	const grants = rows(path, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='grants'").length
-		? "SELECT session,mode FROM grants WHERE removed=0 ORDER BY session,mode"
-		: "SELECT session,mode FROM guests JOIN links ON links.id=guests.linkId WHERE removed=0 ORDER BY session,mode";
-	for (const row of rows(path, grants)) of(String(row.session)).guests.push(String(row.mode));
-	return shares;
-}
 
 /** A session's store in the layout before per-host stores (`sessions/<id>.sqlite`), when it is still there. */
 const oldStore = (dataDir: string, id: string): string => join(dataDir, "sessions", `${id}.sqlite`);

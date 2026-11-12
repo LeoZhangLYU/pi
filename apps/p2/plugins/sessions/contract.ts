@@ -246,7 +246,7 @@ const SessionsV3 = remote("p2.sessions", {
 				),
 			},
 		},
-		/** A guest sees its one session while it is not archived. */
+		/** Dead since sharing was removed: released histories keep the variant, the server never serves it. */
 		guest: {
 			state: { sessions: arr(SessionSchemaV3) },
 		},
@@ -286,9 +286,9 @@ const SessionsV5 = evolve(SessionsV4, (e) =>
 );
 
 /**
- * Sessions as a principal sees them. The owner lists and manages all; a guest sees its own session; a worker sees
- * and renames only its own session (its principal names it). The provider still serves 3, 4 and 5 (its `accepts`):
- * pages and TUIs loaded before a deploy keep working.
+ * Sessions as a principal sees them. The owner lists and manages all; a worker sees and renames only its own session
+ * (its principal names it). The provider still serves 3, 4 and 5 (its `accepts`): pages and TUIs loaded before a deploy
+ * keep working.
  *
  * 6, client-chosen IDs and lifecycle operations as jobs: `create` takes the new session's `id`, `clone` and `fork` the
  * copy's (`copy`), so a page navigates at once. `clone`, `fork`, `relocate` and `archive` answer once their effect is

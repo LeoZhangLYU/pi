@@ -186,7 +186,7 @@ export async function setupTui(bridge: Bridge, facets: readonly PluginFacet<P2Pr
 	const loaded = await host.load([...facets, { name: "@p2/tui-core", facet: tuiCoreFacet }], BACKGROUND_CONTEXT);
 	runtime.origin = typeof bridge.input.origin === "string" ? bridge.input.origin.slice(0, 200) : undefined;
 	// The launcher's admission (a hint from outside the sandbox): owner views hold at once; `Access` confirms it.
-	if (bridge.input.role === "owner" || bridge.input.role === "guest") runtime.role = bridge.input.role;
+	if (bridge.input.role === "owner") runtime.role = bridge.input.role;
 	await runtime.start();
 	// A facet left out at load (its setup threw) is shown, not silently missing.
 	for (const { plugin, error } of loaded.failed)
@@ -237,27 +237,15 @@ export async function setupTui(bridge: Bridge, facets: readonly PluginFacet<P2Pr
 		reported = { target, suspend, busy };
 	};
 	runtime.listeners.add(report);
-	// Who this TUI is: held once (Chord holds it again on every new link), the role and a guest's grant follow it.
+	// Who this TUI is: held once (Chord holds it again on every new link). Only the owner is admitted.
 	const access = host.hold(Access, {}, BACKGROUND_CONTEXT);
 	follow(access.state, (state) => {
 		if (state.kind !== "live") return;
-		const role = access.variant === "owner" ? "owner" : "guest";
-		if (role === runtime.role) return;
-		runtime.role = role;
+		if (runtime.role === "owner") return;
+		runtime.role = "owner";
 		runtime.changed();
 	});
-	void whenLive(access).then(
-		() => {
-			if (access.variant === "guest")
-				follow(access.grant, (grant) => {
-					runtime.grant = grant
-						? { name: grant.name, sessions: grant.sessions ?? { [grant.session]: grant.mode } }
-						: undefined;
-					if (grant) runtime.navigate("chat", grant.session);
-				});
-		},
-		(error: unknown) => runtime.fail(error),
-	);
+	void whenLive(access).catch((error: unknown) => runtime.fail(error));
 	bridge.onMessage(async (message) => {
 		if (message.kind === "snapshot") return snapshotRuntime(runtime);
 		if (message.kind === "activate") {
@@ -277,7 +265,7 @@ export async function setupTui(bridge: Bridge, facets: readonly PluginFacet<P2Pr
 				}
 				void host
 					.root(async (ctx) => (await ctx.get(TuiPreferences, {})).read(ctx), BACKGROUND_CONTEXT)
-					// Server defaults sit below the guest's local preferences (section 4.2).
+					// Server defaults sit below the visitor's local preferences (section 4.2).
 					.then((server) => runtime.appearance.update({ server }))
 					.catch((error: unknown) => runtime.fail(error));
 			} else link.drop();
@@ -287,7 +275,7 @@ export async function setupTui(bridge: Bridge, facets: readonly PluginFacet<P2Pr
 		else if (message.kind === "terminalColors")
 			runtime.appearance.update({ terminal: parseTerminalState(message.terminal) });
 		else if (message.kind === "capabilities") {
-			// Launcher-negotiated terminal facts (section 3.2): kitty keyboard, color depth, the guest's platform.
+			// Launcher-negotiated terminal facts (section 3.2): kitty keyboard, color depth, the visitor's platform.
 			setKittyProtocolActive(message.kittyProtocol === true);
 			terminal.kittyProtocolActive = message.kittyProtocol === true;
 			runtime.appearance.update({

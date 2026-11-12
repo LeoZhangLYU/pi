@@ -4,7 +4,7 @@
  * conversation's transcript (`TranscriptStore.seed`); the live view is merged into it when it continues it, and
  * replaces it otherwise.
  *
- * Only the owner's browser keeps conversations: a guest's share can end, and what it saw must not stay on its device.
+ * Only the owner's browser keeps conversations.
  * Signing out, or the server saying this browser is no longer the owner, clears everything kept (`clearKept`).
  *
  * Per conversation: the transcript's newest entries without a gap among them, up to `MAX_BYTES` (older ones page in

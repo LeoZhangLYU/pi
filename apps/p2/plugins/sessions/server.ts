@@ -16,7 +16,6 @@ import {
 	defineState,
 	deriveTyped,
 	forbidden,
-	isGuest,
 	isOwner,
 	isWorker,
 	type JobError,
@@ -712,13 +711,6 @@ export default defineFacet((host) => {
 						},
 					},
 				};
-			}
-			if (isGuest(principal)) {
-				const shared = principal.sessions;
-				const sessionsView = deriveTyped(self, [catalog.sessions], ([sessions]) =>
-					sessions.filter((s) => Object.hasOwn(shared, s.id) && s.archivedAt === null),
-				);
-				return { variant: "guest", members: { sessions: sessionsView } };
 			}
 			if (!isOwner(principal)) throw forbidden("sessions are owner-only");
 			const lifecycle = self.get(SessionOperations, {});

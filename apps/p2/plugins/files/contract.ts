@@ -48,7 +48,7 @@ export type Uploaded = Static<typeof UploadedSchema>;
 /**
  * Immutable private snapshots of files for the browser to download (server, host-internal): a producer on the server
  * saves a copy of a server file into the session's files (space `downloads`; producers on the worker, send_file, write
- * there directly). Served by `GET /download?session=<id>&id=<snapshot>` to the owner and the session's guests; later
+ * there directly). Served by `GET /download?session=<id>&id=<snapshot>` to the owner; later
  * changes of the source never show.
  */
 export const DownloadStore = local("p2.downloads", {

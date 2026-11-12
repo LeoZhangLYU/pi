@@ -80,7 +80,7 @@ export const LoginService = local("p2.login-service", {
 });
 
 /**
- * Signing in to model providers (any owner, local or remote; never guests).
+ * Signing in to model providers (any owner, local or remote).
  * Credentials are stored in `auth.json` and never sent to the browser. Held while the Providers sheet is open: once
  * none of the starting owner's browsers holds it (closed sheets, disconnects), that owner's unfinished login is
  * cancelled. Another owner sees no `login` while one runs, and cannot start, answer or cancel it.

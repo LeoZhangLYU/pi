@@ -81,14 +81,14 @@ export class FooterSurface implements TuiSurface {
 					);
 		});
 		this.scope.watch(Sessions, {}, (ref, follow) => {
-			const viewer = liveIn(ref, "owner", "guest");
+			const viewer = liveIn(ref, "owner");
 			if (viewer)
 				follow(viewer.sessions, (sessions) => {
 					this.sessions = sessions;
 				});
 		});
 		const changed = (): void => {
-			// The model catalog is owner-only (plugins/models/server.ts): guests never request it.
+			// The model catalog is owner-only (plugins/models/server.ts).
 			if (runtime.role === "owner" && !this.models) {
 				this.models = new TuiScope(runtime);
 				this.models.watch(Models, {}, (ref, follow) =>

@@ -247,7 +247,6 @@ test("the owner's contract adds, edits and removes a provider on disk", async ()
 				{
 					info: constant({ app: APP, dataDir: dir, fake: false, allowedHosts: [], port: 0 }),
 					revokeOwners: () => {},
-					revokeGuests: () => {},
 				},
 			],
 		],

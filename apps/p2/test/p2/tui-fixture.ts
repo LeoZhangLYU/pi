@@ -45,7 +45,7 @@ export async function topology(
 		server: Stub[];
 		worker: Stub[];
 		facets: ReturnType<typeof defineFacet>[];
-		role?: "owner" | "guest";
+		role?: "owner";
 		columns?: number;
 		/** The worker host becomes reachable only when this resolves (a starting worker, a reconnect). */
 		ready?: Promise<void>;

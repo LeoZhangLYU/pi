@@ -39,7 +39,7 @@ export const conversationLocation = (
 
 /**
  * The remote environments a session's conversations work on: the session's, then its subagents' own (archived ones
- * included: still usable). A read/write guest can reach all of them.
+ * included: still usable).
  */
 export const remoteEnvironments = (
 	session: { readonly env?: string | null } | undefined,
@@ -82,7 +82,7 @@ export const Subagents = remote("p2.subagents", {
 	},
 });
 
-/** Changing a session's subagents from the browser (worker): the owner and read/write guests. */
+/** Changing the session's subagents from the browser (worker): the owner. */
 export const SubagentControl = remote("p2.subagent-control", {
 	version: 1,
 	params: { session: param.str() },

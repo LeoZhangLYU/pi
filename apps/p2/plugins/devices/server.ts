@@ -62,7 +62,7 @@ export default defineFacet((host) => {
 			return session?.kind === "local" && !origin.remote ? { kind: "owner", access: "local" } : undefined;
 		};
 		self.contribute(Authenticators, { owner: (request, origin) => principal(request, origin) });
-		// A valid owner cookie takes precedence over a pre-existing guest cookie. Host checks still apply.
+		// Host checks still apply.
 		self.contribute(RequestResolvers, {
 			ownerCookie: (request) => {
 				const origin = requestOrigin(request, server.info.value.allowedHosts);

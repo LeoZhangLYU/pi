@@ -1,4 +1,4 @@
-// Public-origin pages (owner and guest, dev mode included) must never reach the visitor's local network, and load only
+// Public-origin pages (owner, dev mode included) must never reach the visitor's local network, and load only
 // the page's own bundle and `/chord`. All hosts/data/providers are disposable.
 
 import assert from "node:assert/strict";
@@ -14,9 +14,8 @@ import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { PROXY_MARKER_HEADER } from "../../plugins/proxy-marker/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { Browser, browserTests } from "./browser.ts";
-import { type Fixture, holdIn, http, startFixture, until } from "./helpers.ts";
+import { type Fixture, holdIn, http, startFixture } from "./helpers.ts";
 
 function localNetwork(url: string): boolean {
 	const host = new URL(url).hostname
@@ -45,9 +44,8 @@ describe("clients through a public-origin proxy", { skip: !browserTests }, () =>
 	let proxy: ReturnType<typeof createServer>;
 	let origin: string;
 	let publicHost: string;
-	let guestLink: string;
 	let ownerCookie: string;
-	let session: string;
+	let _session: string;
 	const sockets = new Set<Duplex>();
 	const browsers: Browser[] = [];
 	const startBrowser = async (cookie?: string) => {
@@ -162,16 +160,11 @@ describe("clients through a public-origin proxy", { skip: !browserTests }, () =>
 		origin = `https://${publicHost}`;
 		fixture = await startFixture({ web: true, dev: true, allowedHosts: [publicHost] });
 		const owner = fixture.browser();
-		session = (
+		_session = (
 			await (
 				await holdIn(owner, Sessions, {}, "owner")
 			).create({ cwd: fixture.workspace, title: "Network fixture" }, BACKGROUND_CONTEXT)
 		).id;
-		const sharing = owner.hold(Sharing, { session }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => Boolean(value?.length));
-		assert(links?.[0]);
-		guestLink = links[0].url;
 		const headers = {
 			Host: publicHost,
 			Origin: origin,
@@ -195,21 +188,6 @@ describe("clients through a public-origin proxy", { skip: !browserTests }, () =>
 		if (directory) rmSync(directory, { recursive: true, force: true });
 	});
 
-	it("a guest loads its styled app without local-network requests", async () => {
-		const { browser, requests, websockets } = await startBrowser();
-		await browser.open(guestLink);
-		await browser.wait('document.querySelector("#join #name")');
-		await browser.evaluate('document.querySelector("#name").value="Browser guest"');
-		await browser.click("#join button");
-		await browser.wait(
-			`document.querySelector('nav[aria-label="Shared session"]') && !document.querySelector('.offline')`,
-		);
-		// Let the version poll and any late request happen inside the observed window.
-		await new Promise((resolve) => setTimeout(resolve, 1500));
-		assertPublicOnly(requests, websockets);
-		assert(requests.some((url) => new URL(url).pathname.startsWith("/__p2_web/app-")));
-		assert.equal(await browser.evaluate<string>('getComputedStyle(document.querySelector(".app")).display'), "flex");
-	});
 	it("a signed-out visitor gets only the sign-in page, never the app or a connection", async () => {
 		const { browser, requests, websockets } = await startBrowser();
 		await browser.open(origin);

@@ -12,7 +12,6 @@ import { logsMessages } from "../../plugins/logs/messages.ts";
 import { mcpMessages } from "../../plugins/mcp/messages.ts";
 import { portsMessages } from "../../plugins/ports/messages.ts";
 import { sessionsMessages } from "../../plugins/sessions/messages.ts";
-import { sharingMessages } from "../../plugins/sharing/messages.ts";
 import { voiceMessages } from "../../plugins/voice/messages.ts";
 import { workspaceMessages } from "../../plugins/workspace/messages.ts";
 import { coreMessages } from "../../src/runtime/core-messages.ts";
@@ -52,7 +51,6 @@ test("every catalog has the same keys and value types in English and Chinese", (
 		["p2.core", coreMessages],
 		["p2.page", pageMessages],
 		["p2.web", webMessages],
-		["p2.sharing", sharingMessages],
 		["p2.mcp", mcpMessages],
 		["p2.chat", chatMessages],
 		["p2.chat-mode", chatModeMessages],

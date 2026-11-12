@@ -5,10 +5,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BACKGROUND_CONTEXT, isChordError, whenLive } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT, whenLive } from "@p2/app/v1";
 import { LogNotices, Logs } from "../../plugins/logs/contract.ts";
 import { resolveConfigValueUncached } from "../../plugins/models/config-value.ts";
-import { WorkerControl } from "../../plugins/status/contract.ts";
 import {
 	captureProcessLogs,
 	capturePublishedLogs,
@@ -356,34 +355,6 @@ test("owner-only Logs exposes live per-source state without starting workers, an
 	await stop();
 	assert(!(await readFile(path, "utf8")).includes("fixture-detached-secret"));
 	await until(terminals.lines, (lines) => lines?.some((line) => line.text === "detached-host [redacted]") === true);
-	const guest = fixture.as({
-		kind: "guest",
-		id: "g",
-		name: "Guest",
-		home: "s",
-		sessions: { s: "full" },
-		revision: 1,
-	});
-	const denied = guest.hold(Logs, { source }, BACKGROUND_CONTEXT);
-	await expectChord(whenLive(denied), "forbidden");
-	// A refused reference has no state: reading it throws the refusal.
-	assert.throws(
-		() => denied.sources.value,
-		(error) => isChordError(error, "forbidden"),
-	);
-	assert.throws(
-		() => denied.lines.value,
-		(error) => isChordError(error, "forbidden"),
-	);
-	denied.release();
-	const deniedNotices = guest.hold(LogNotices, {}, BACKGROUND_CONTEXT);
-	await expectChord(whenLive(deniedNotices), "forbidden");
-	await expectChord(deniedNotices.dismiss({ id: notice.id }, BACKGROUND_CONTEXT), "forbidden");
-	deniedNotices.release();
-	const deniedRetry = guest.hold(WorkerControl, { session: "s" }, BACKGROUND_CONTEXT);
-	await expectChord(whenLive(deniedRetry), "forbidden");
-	await expectChord(deniedRetry.restart(BACKGROUND_CONTEXT), "forbidden");
-	deniedRetry.release();
 	const worker = fixture
 		.as({ kind: "worker", session: "s", generation: 1 })
 		.hold(Logs, { source }, BACKGROUND_CONTEXT);

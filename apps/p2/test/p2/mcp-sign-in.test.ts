@@ -1,7 +1,7 @@
 // MCP OAuth sign-ins (plugins/mcp/sign-in.ts, routes.ts, probe.ts) on a bare server host, against a fake authorization
 // server whose MCP server takes only the tokens it issued: a 401 waits for a sign-in, the loopback flow (the owner
 // view's `signIn` and the device owner's sign-in route), the callback route of relayed and public owners with the probe
-// page and the probe, pasting, refusals (wrong state, guests, nobody), refreshing without a browser, signing out.
+// page and the probe, pasting, refusals (wrong state, nobody), refreshing without a browser, signing out.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -21,14 +21,6 @@ import { APP, holdIn, TEST, testHost, until } from "./helpers.ts";
 
 const OWNER: P2Principal = { kind: "owner", access: "local" };
 const RELAY_OWNER: P2Principal = { kind: "owner", access: "relay" };
-const GUEST: P2Principal = {
-	kind: "guest",
-	id: "g1",
-	name: "Guest",
-	home: "s1",
-	sessions: { s1: "full" },
-	revision: 1,
-};
 /** The session whose worker leases the servers. */
 const SESSION: Session = {
 	id: "s1",
@@ -199,7 +191,6 @@ async function signInHost(
 				{
 					info: constant({ app: APP, dataDir, fake: true, allowedHosts: [], port: 0 }),
 					revokeOwners: () => {},
-					revokeGuests: () => {},
 				},
 			],
 			[Hosts, { workers: constant({ s1: { running: true, generation: 1 } }), stop: () => {} }],
@@ -315,8 +306,6 @@ test("the sign-in route: loopback for the device owner; the probe page, the prob
 	const anonymous = await host.http(`/mcp/callback${back.search}`, undefined, BRAIN);
 	assert.equal(anonymous.status, 401);
 	assert.match(await anonymous.text(), /paste it in p2/);
-	const guest = await host.http(`/mcp/callback${back.search}`, GUEST, BRAIN);
-	assert.equal(guest.status, 403);
 	// A response of another sign-in is refused and leaves this one waiting.
 	const wrong = await host.http(`/mcp/callback?code=code-9&state=other`, RELAY_OWNER, BRAIN);
 	assert.equal(wrong.status, 400);
@@ -369,10 +358,9 @@ test("refused tokens refresh without a browser; signing out forgets them and wai
 	assert.doesNotMatch(readFileSync(join(host.dataDir, "mcp-auth.json"), "utf8"), /access-/);
 });
 
-test("guests and anonymous visitors get no sign-in route; unknown servers fail", async (t) => {
+test("anonymous visitors get no sign-in route; unknown servers fail", async (t) => {
 	const oauth = await authorizationServer(t);
 	const host = await signInHost(t, oauth);
-	assert.equal((await host.http("/mcp/sign-in/docs", GUEST, BRAIN)).status, 403);
 	assert.equal((await host.http("/mcp/sign-in/docs", undefined, BRAIN)).status, 401);
 	const unknown = await host.http("/mcp/sign-in/nope", OWNER);
 	assert.equal(unknown.status, 502);

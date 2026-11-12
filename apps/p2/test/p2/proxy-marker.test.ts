@@ -10,7 +10,6 @@ import { DownloadStore } from "../../plugins/files/contract.ts";
 import { ProviderLogin } from "../../plugins/login/contract.ts";
 import { PROXY_MARKER_HEADER } from "../../plugins/proxy-marker/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { type Fixture, holdIn, http, startFixture, until } from "./helpers.ts";
 
 const PROXIED = { Host: "p2.proxy.test", Origin: "https://p2.proxy.test", [PROXY_MARKER_HEADER]: "1" };
@@ -151,30 +150,6 @@ describe("proxy marking is never authentication (including the loopback Unix-soc
 		assert.equal(login.variant, "owner");
 		assert.equal(
 			(await http(fixture.server.port, "/owner-token", { headers: { ...PROXIED, Cookie: cookie } })).status,
-			403,
-		);
-	});
-	it("guests still enter only through a share link, independently of the marker", async () => {
-		const sharing = fixture.browser().hold(Sharing, { session }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => Boolean(value?.length));
-		const joined = await http(fixture.server.port, "/join", {
-			method: "POST",
-			headers: { ...PROXIED, "Content-Type": "application/json" },
-			body: JSON.stringify({ token: links?.[0]?.token, name: "Guest" }),
-		});
-		assert.equal(joined.status, 200);
-		const guestCookie = String(joined.headers["set-cookie"]).split(";")[0]!;
-		assert.equal(
-			(
-				await http(fixture.server.port, `/download?session=${session}&id=${file}`, {
-					headers: { ...PROXIED, Cookie: guestCookie },
-				})
-			).status,
-			200,
-		);
-		assert.equal(
-			(await http(fixture.server.port, "/owner-token", { headers: { ...PROXIED, Cookie: guestCookie } })).status,
 			403,
 		);
 	});

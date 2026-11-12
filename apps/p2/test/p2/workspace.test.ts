@@ -6,17 +6,16 @@ import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT, type Held, statusOf, whenLive } from "@p2/app/v1";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { type Session, Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { Workspace, WorkspaceTransfer } from "../../plugins/workspace/contract.ts";
 import { Hosts } from "../../src/runtime/server.ts";
-import { expectChord, type Fixture, failureOf, holdIn, http, startFixture, until } from "./helpers.ts";
+import { expectChord, type Fixture, failureOf, holdIn, startFixture, until } from "./helpers.ts";
 
-const TUNNEL = { Host: "share.test", Origin: "https://share.test" };
+const _TUNNEL = { Host: "share.test", Origin: "https://share.test" };
 
 describe("workspace plugin (fake provider, temporary git repository)", () => {
 	let fixture: Fixture;
 	let session: Session;
-	let other: Session;
+	let _other: Session;
 	let workspace: Held<typeof Workspace>;
 	let origin: string;
 	let hash: string;
@@ -34,19 +33,6 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 			headers,
 			body,
 		});
-	const joinGuest = async (mode: "view" | "full") => {
-		const share = fixture.browser().hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-		await share.link({ mode }, BACKGROUND_CONTEXT);
-		const links = await until(share.links, (value) => Boolean(value?.some((entry) => entry.mode === mode)));
-		const token = links?.find((entry) => entry.mode === mode)?.token;
-		const response = await http(fixture.server.port, "/join", {
-			method: "POST",
-			headers: { ...TUNNEL, "Content-Type": "application/json" },
-			body: JSON.stringify({ token, name: `Workspace ${mode}` }),
-		});
-		assert.equal(response.status, 200);
-		return String(response.headers["set-cookie"]).split(";")[0]!;
-	};
 	before(async () => {
 		fixture = await startFixture({ allowedHosts: ["share.test"] });
 		origin = `http://127.0.0.1:${fixture.server.port}`;
@@ -83,7 +69,7 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 		const browser = fixture.browser();
 		const sessions = await holdIn(browser, Sessions, {}, "owner");
 		session = await sessions.create({ cwd: fixture.workspace, title: "Workspace" }, BACKGROUND_CONTEXT);
-		other = await sessions.create({ cwd: fixture.workspace, title: "Other" }, BACKGROUND_CONTEXT);
+		_other = await sessions.create({ cwd: fixture.workspace, title: "Other" }, BACKGROUND_CONTEXT);
 		workspace = browser.hold(Workspace, { session: session.id, conversation: 1 }, BACKGROUND_CONTEXT);
 		await whenLive(workspace);
 	});
@@ -242,39 +228,6 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 		assert.equal((await upload("bad.txt", "x", "", {})).status, 403);
 		assert.equal((await upload("oversized.txt", Buffer.alloc(25 * 1024 * 1024 + 1))).status, 400);
 		assert(!(await readdir(fixture.workspace)).some((name) => name.startsWith(".pi-upload-")));
-	});
-
-	it("only owner and read/write guests access their workspace; HTTP reauthorizes after removal", async () => {
-		const viewer = await joinGuest("view");
-		const reader = fixture
-			.client({ ...TUNNEL, Cookie: viewer })
-			.host.hold(Workspace, { session: session.id, conversation: 1 }, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(reader), "forbidden");
-		assert.equal(
-			(await http(fixture.server.port, url("new.md"), { headers: { ...TUNNEL, Cookie: viewer } })).status,
-			403,
-		);
-		const writer = await joinGuest("full");
-		const browser = fixture.client({ ...TUNNEL, Cookie: writer }).host;
-		const full = browser.hold(Workspace, { session: session.id, conversation: 1 }, BACKGROUND_CONTEXT);
-		const file = await full.query({ kind: "file", path: "new.md" }, BACKGROUND_CONTEXT);
-		assert(file.kind === "file" && file.text?.includes("hello"));
-		assert.equal(
-			(await http(fixture.server.port, url("new.md"), { headers: { ...TUNNEL, Cookie: writer } })).status,
-			200,
-		);
-		assert.equal((await upload("guest.txt", "guest", "", { ...TUNNEL, Cookie: writer })).status, 200);
-		assert.equal(
-			(await http(fixture.server.port, url("new.md", other.id), { headers: { ...TUNNEL, Cookie: writer } })).status,
-			403,
-		);
-		assert.equal((await upload("guest.txt", "x", "", { ...TUNNEL, Cookie: writer }, other.id)).status, 403);
-		const share = fixture.browser().hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-		await share.link({ mode: "full", reset: true }, BACKGROUND_CONTEXT);
-		assert.equal(
-			(await http(fixture.server.port, url("new.md"), { headers: { ...TUNNEL, Cookie: writer } })).status,
-			403,
-		);
 	});
 
 	it("sends quoted browser review drafts as an ordinary attributed prompt", async () => {

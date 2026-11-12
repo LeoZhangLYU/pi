@@ -12,31 +12,15 @@ import { rankFiles, withDirectories } from "../../plugins/file-index/rank.ts";
 import { Models } from "../../plugins/models/contract.ts";
 import { resolveModelScope } from "../../plugins/models/scope.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import type { Host, VariantOf } from "../../src/runtime/chord.ts";
 import { FileIndex } from "../../src/runtime/file-index.ts";
 import { buildTranscript } from "../../src/web/transcript.ts";
 import { wholeView } from "../fixtures/whole-view.ts";
-import { expectChord, holdIn, http, startFixture, until } from "./helpers.ts";
+import { holdIn, startFixture, until } from "./helpers.ts";
 
-type Fixture = Awaited<ReturnType<typeof startFixture>>;
 const live = (view: ConversationView | null | undefined) => view?.docs["pi.live"] as LiveState | undefined;
 const queued = (view: ConversationView | null | undefined) =>
 	(view?.docs["pi.inbox"] as { items?: { id: number }[] } | undefined)?.items ?? [];
-
-/** A guest admitted through a share link of `mode`. */
-async function guestOf(fixture: Fixture, owner: Host, session: string, mode: "full" | "view", name: string) {
-	const sharing = owner.hold(Sharing, { session }, BACKGROUND_CONTEXT);
-	await sharing.link({ mode }, BACKGROUND_CONTEXT);
-	const links = await until(sharing.links, (value) => Boolean(value?.some((link) => link.mode === mode)));
-	const headers = { Host: "share.test", Origin: "https://share.test", "Content-Type": "application/json" };
-	const joined = await http(fixture.server.port, "/join", {
-		method: "POST",
-		headers,
-		body: JSON.stringify({ token: links?.find((link) => link.mode === mode)?.token, name }),
-	});
-	return fixture.client({ ...headers, Cookie: String(joined.headers["set-cookie"]).split(";")[0]! }).host;
-}
 
 async function sessionFixture(t: { after(fn: () => unknown): void }) {
 	const fixture = await startFixture({ allowedHosts: ["share.test"] });
@@ -52,38 +36,24 @@ async function sessionFixture(t: { after(fn: () => unknown): void }) {
 	return { fixture, owner, session, chat };
 }
 
-test("compact, reset and model metadata: owner, full guest and view guest", { timeout: 90_000 }, async (t) => {
-	const { fixture, owner, session, chat } = await sessionFixture(t);
+test("compact, reset and model metadata: the owner's conversation", { timeout: 90_000 }, async (t) => {
+	const { owner, chat } = await sessionFixture(t);
 	const ownerChat = await chat(owner, "participant");
 	t.after(follow(ownerChat.view, () => {}));
 	await ownerChat.send({ text: "first", requestId: "a" }, BACKGROUND_CONTEXT);
 	await until(ownerChat.view, (view) => Boolean(view?.entries.some((entry) => entry.kind === "pi.assistant")));
-	// Guest-safe model metadata: the conversation's model from the catalog, also for a view-only guest.
-	const viewer = await chat(await guestOf(fixture, owner, session, "view", "Viewer"), "viewer");
-	assert.equal(viewer.variant, "viewer");
-	const meta = await until(viewer.model, (value) => value != null);
+	// Model metadata is the conversation's catalog entry.
+	const meta = await until(ownerChat.model, (value) => value != null);
 	assert.equal(meta?.provider, "faux");
 	assert.equal(meta?.modelId, "faux-1");
 	assert(typeof meta?.contextWindow === "number" && meta.contextWindow > 0);
 	assert(Array.isArray(meta?.thinkingLevels));
-	// A reference carries every variant's members; the viewer's binding refuses the participant's (cast: the type has
-	// only the viewer's).
-	const asParticipant = viewer as unknown as Awaited<ReturnType<typeof chat<"participant">>>;
-	await expectChord(asParticipant.compact({}, BACKGROUND_CONTEXT), "invalid");
-	await expectChord(asParticipant.reset({}, BACKGROUND_CONTEXT), "invalid");
-	await expectChord(asParticipant.dequeueOwn(BACKGROUND_CONTEXT), "invalid");
 
 	// Compaction: a task, then a pi.compaction entry in the view; nothing to abort when idle.
 	const { taskId } = await ownerChat.compact({ instructions: "keep it short" }, BACKGROUND_CONTEXT);
 	assert(Number.isInteger(taskId));
 	await until(ownerChat.view, (view) => Boolean(view?.entries.some((entry) => entry.kind === "pi.compaction")));
 	assert.deepEqual(await ownerChat.abortCompaction(BACKGROUND_CONTEXT), { aborted: 0 });
-
-	// A full guest may compact and abort compaction, but not start a new context.
-	const guestChat = await chat(await guestOf(fixture, owner, session, "full", "Guest"), "participant");
-	assert.equal(guestChat.variant, "participant");
-	assert.deepEqual(await guestChat.abortCompaction(BACKGROUND_CONTEXT), { aborted: 0 });
-	await expectChord(guestChat.reset({ handoff: "x" }, BACKGROUND_CONTEXT), "forbidden");
 
 	// The owner's reset places a pi.reset entry carrying the handoff.
 	await ownerChat.reset({ handoff: "Continue with the tests." }, BACKGROUND_CONTEXT);
@@ -111,32 +81,21 @@ test("abortCompaction aborts a running compaction", { timeout: 90_000 }, async (
 	assert(!after?.entries.some((entry) => entry.kind === "pi.compaction"), "aborted: no summary");
 });
 
-test("dequeueOwn restores only the caller's queued inputs, in order", { timeout: 90_000 }, async (t) => {
-	const { fixture, owner, session, chat } = await sessionFixture(t);
+test("dequeueOwn restores the owner's queued inputs, in order", { timeout: 90_000 }, async (t) => {
+	const { owner, chat } = await sessionFixture(t);
 	const ownerChat = await chat(owner, "participant");
-	const guestChat = await chat(await guestOf(fixture, owner, session, "full", "Guest"), "participant");
 	t.after(follow(ownerChat.view, () => {}));
 	await ownerChat.send({ text: "slow run", requestId: "run" }, BACKGROUND_CONTEXT);
 	await until(ownerChat.view, (view) => Boolean(live(view)?.run));
 	const one = await ownerChat.send({ text: "owner one", requestId: "o1", whenBusy: "followUp" }, BACKGROUND_CONTEXT);
-	const theirs = await guestChat.send(
-		{ text: "guest one", requestId: "g1", whenBusy: "followUp" },
-		BACKGROUND_CONTEXT,
-	);
 	const two = await ownerChat.send({ text: "owner two", requestId: "o2", whenBusy: "followUp" }, BACKGROUND_CONTEXT);
-	await until(ownerChat.view, (view) => queued(view).length === 3);
+	await until(ownerChat.view, (view) => queued(view).length === 2);
 	assert.deepEqual(await ownerChat.dequeueOwn(BACKGROUND_CONTEXT), {
 		restored: ["owner one", "owner two"],
 		skipped: 0,
 	});
-	const after = await until(ownerChat.view, (view) => queued(view).length === 1);
-	assert.deepEqual(
-		queued(after).map((item) => item.id),
-		[theirs.submissionId],
-	);
+	await until(ownerChat.view, (view) => queued(view).length === 0);
 	assert(one.submissionId < two.submissionId);
-	// The guest's own call returns theirs; nothing of the owner's is left.
-	assert.deepEqual(await guestChat.dequeueOwn(BACKGROUND_CONTEXT), { restored: ["guest one"], skipped: 0 });
 	assert.deepEqual(await ownerChat.dequeueOwn(BACKGROUND_CONTEXT), { restored: [], skipped: 0 });
 	await ownerChat.stop(BACKGROUND_CONTEXT);
 });
@@ -239,16 +198,6 @@ test(
 			(await index.complete({ query: "added" }, BACKGROUND_CONTEXT)).items.map((item) => item.path),
 			["src/added.ts"],
 		);
-		// View-only guests get no file names.
-		const viewer = (await guestOf(fixture, owner, session, "view", "Viewer")).hold(
-			FileIndex,
-			{
-				session,
-				conversation: 1,
-			},
-			BACKGROUND_CONTEXT,
-		);
-		await expectChord(whenLive(viewer), "forbidden");
 	},
 );
 

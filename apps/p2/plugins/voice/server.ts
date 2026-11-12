@@ -1,9 +1,7 @@
 // Voice mode (server): browsers reach the speech service (sts-server) only through p2, which signs it in and tells it
 // who is talking (the token never leaves the server). `voice.json` in the data dir names the service and its token;
 // without it voice mode is off. Each conversation is a voice room: the owner's browser has Pi's speech synthesized
-// once for everyone, each person's microphone becomes their own messages and is relayed to the others. The owner and
-// read/write guests of the session take part (a guest's grant is rechecked while its socket lives); only the owner
-// speaks for Pi or sets the voice. View-only guests get nothing.
+// once, and the owner's microphone becomes its own messages.
 //
 // The configuration is pushed, not asked for: VoiceService (contract.ts) publishes the service's engines and default
 // (the service's /voices), or null without a valid voice.json. While anyone holds it, the data dir is watched, and each
@@ -18,33 +16,19 @@ import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { compile, nul, obj, type Static, str, union } from "@earendil-works/pi-schema";
 import {
-	BACKGROUND_CONTEXT,
-	type Ctx,
-	canSend,
 	contribute,
 	DEFAULT_OWNER_NAME,
 	defineFacet,
 	defineTypedState,
 	deriveTyped,
 	forbidden,
-	isGuest,
 	isOwner,
 	type P2Principal,
 	principalKey,
 	signalOf,
 } from "@p2/app/v1";
 import { optionalText, stripJsonComments } from "@p2/app/v1/node";
-import {
-	fromOrigin,
-	mayReach,
-	type RequestAccess,
-	Routes,
-	Server,
-	SessionAccess,
-	sendJson,
-	serverOf,
-	Upgrades,
-} from "@p2/app/v1/server";
+import { fromOrigin, type RequestAccess, Routes, Server, sendJson, Upgrades } from "@p2/app/v1/server";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
 import { ModelConfig } from "../models/contract.ts";
 import { VoiceService, VoiceServiceStore } from "./contract.ts";
@@ -53,7 +37,6 @@ import {
 	MAX_LOG_EVENTS,
 	MAX_LOG_MESSAGE,
 	RoomCommandSchema,
-	RoomPersonalSchema,
 	roomName,
 	SAMPLE_TEXT,
 	SampleSchema,
@@ -75,7 +58,6 @@ const isVoices = compile(VoicesSchema).check;
 const isLog = compile(LogSchema).check;
 const isSample = compile(SampleSchema).check;
 const isRoomCommand = compile(RoomCommandSchema).check;
-const isRoomPersonal = compile(RoomPersonalSchema).check;
 
 /** `voice.json`, read on every request so edits apply at once; undefined when missing or invalid. */
 async function readConfig(dataDir: string): Promise<Config | undefined> {
@@ -168,8 +150,6 @@ const refuse = (socket: Duplex, status: string): void => {
 
 /** Sockets one principal may hold per route (tabs and reconnects; more is abuse of the speech service). */
 const MAX_SOCKETS = 4;
-/** How often a guest's open socket checks that its grant still holds. */
-const GUEST_RECHECK_MS = 30_000;
 
 /** The speech service's voices and why they are unknown (in memory). */
 const Service = defineTypedState("p2.voice-service-store", {
@@ -217,10 +197,9 @@ export default defineFacet((host) => {
 		};
 	});
 
-	// Guests' objects are per grant revision, so a revoked grant ends this one.
+	// The owner's objects end with its session.
 	host.serve(VoiceService, (_params, principal, self) => {
-		if (!isOwner(principal) && !(isGuest(principal) && Object.values(principal.sessions).includes("full")))
-			throw forbidden("owners and read/write guests only");
+		if (!isOwner(principal)) throw forbidden("owner only");
 		const store = self.get(VoiceServiceStore, {});
 		// A service that was unreachable is asked again whenever someone starts looking.
 		self.onLive(async (ctx) => {
@@ -231,16 +210,9 @@ export default defineFacet((host) => {
 
 	contribute(host, "p2.voice-routes", (self) => {
 		const server = self.get(Server, {});
-		const access = self.registry(SessionAccess);
-		const natives = serverOf(self);
 		const config = () => readConfig(server.info.value.dataDir);
-		/** The owner, or a guest `session` (by default its home) is shared with read/write, whose grant is current. */
-		const mayTalk = async (principal: P2Principal | undefined, ctx: Ctx, session?: string): Promise<boolean> => {
-			if (isOwner(principal)) return true;
-			if (!isGuest(principal)) return false;
-			const target = session ?? principal.home;
-			return canSend(principal, target) && (await mayReach(access.value, principal, target, ctx));
-		};
+		/** Voice is the owner's: nobody else reaches the speech service through this p2. */
+		const mayTalk = (principal: P2Principal | undefined): boolean => isOwner(principal);
 		const models = self.get(ModelConfig, {});
 		/** settings.json's `ownerName`, read when the owner joins a room. */
 		const ownerName = (): string => {
@@ -252,11 +224,8 @@ export default defineFacet((host) => {
 		};
 		/** Open sockets per route and principal. */
 		const open = new Map<string, number>();
-		/**
-		 * Counts `browser` against its principal's limit until it closes; false (and closed) beyond it. A guest's socket
-		 * closes once its grant no longer holds.
-		 */
-		const admit = (route: string, principal: P2Principal, browser: WebSocket, session?: string): boolean => {
+		/** Counts `browser` against its principal's limit until it closes; false (and closed) beyond it. */
+		const admit = (route: string, principal: P2Principal, browser: WebSocket): boolean => {
 			const key = `${route} ${principalKey(principal)}`;
 			const count = open.get(key) ?? 0;
 			if (count >= MAX_SOCKETS) {
@@ -264,19 +233,7 @@ export default defineFacet((host) => {
 				return false;
 			}
 			open.set(key, count + 1);
-			const recheck = isGuest(principal)
-				? setInterval(() => {
-						// A timer of the socket, nothing at hand: the background context.
-						void natives()
-							.root((ctx) => mayTalk(principal, ctx, session), BACKGROUND_CONTEXT)
-							.catch(() => false)
-							.then((allowed) => {
-								if (!allowed) browser.close(1008, "Access ended");
-							});
-					}, GUEST_RECHECK_MS)
-				: undefined;
 			browser.once("close", () => {
-				clearInterval(recheck);
 				const left = (open.get(key) ?? 1) - 1;
 				if (left > 0) open.set(key, left);
 				else open.delete(key);
@@ -292,16 +249,9 @@ export default defineFacet((host) => {
 		);
 
 		// The browser's diagnostics: the phone's console is out of reach, the server's log (stdout) is not.
-		const log = async (
-			request: IncomingMessage,
-			response: ServerResponse,
-			{ principal, origin }: RequestAccess,
-			ctx: Ctx,
-		) => {
-			if (!fromOrigin(request, origin) || !(await mayTalk(principal, ctx)))
+		const log = async (request: IncomingMessage, response: ServerResponse, { principal, origin }: RequestAccess) => {
+			if (!fromOrigin(request, origin) || !mayTalk(principal))
 				return sendJson(response, 403, { error: "Forbidden" });
-			// A guest's lines say whose they are (its client ID is its own choice).
-			const who = isGuest(principal) ? `guest:${principal.id} ` : "";
 			const body = await readBody(request, MAX_LOG_EVENTS * (4 * MAX_LOG_MESSAGE + 64) + 1024);
 			let input: unknown;
 			try {
@@ -312,7 +262,7 @@ export default defineFacet((host) => {
 			if (!isLog(input)) return sendJson(response, 400, { error: "Expected { client, events: [{ t, message }] }" });
 			for (const { t, message } of input.events)
 				console.log(
-					`[voice ${who}${input.client}] ${new Date(t).toISOString().slice(11, 23)} ${message.replace(/\p{Cc}/gu, " ")}`,
+					`[voice ${input.client}] ${new Date(t).toISOString().slice(11, 23)} ${message.replace(/\p{Cc}/gu, " ")}`,
 				);
 			response.writeHead(204).end();
 		};
@@ -363,25 +313,19 @@ export default defineFacet((host) => {
 		self.contribute(Upgrades, {
 			// The conversation's voice room. The service trusts the identity headers because of the token, so they are
 			// p2's alone: set from the authenticated principal, never taken from the browser's request.
-			"/voice/room": async (request, socket, head, principal, ctx) => {
+			"/voice/room": async (request, socket, head, principal) => {
 				const query = new URL(request.url ?? "/", "http://p2").searchParams;
 				const session = query.get("session") ?? "";
 				const conversation = Number(query.get("conversation"));
 				const room =
 					Number.isInteger(conversation) && conversation >= 1 ? roomName(session, conversation) : undefined;
 				if (!room) return refuse(socket, "400 Bad Request");
-				if (!principal || !(await mayTalk(principal, ctx, session))) return refuse(socket, "403 Forbidden");
+				if (!principal || !mayTalk(principal)) return refuse(socket, "403 Forbidden");
 				const current = await config();
 				if (!current) return refuse(socket, "503 Service Unavailable");
-				const participant = isOwner(principal)
-					? { id: "owner", name: ownerName(), role: "owner" }
-					: isGuest(principal)
-						? { id: principal.id, name: principal.name, role: "guest" }
-						: undefined;
-				if (!participant || !/^[A-Za-z0-9_-]{1,64}$/.test(participant.id)) return refuse(socket, "403 Forbidden");
-				const owner = participant.role === "owner";
+				const participant = { id: "owner", name: ownerName(), role: "owner" };
 				sockets.value.handleUpgrade(request, socket, head, (browser) => {
-					if (!admit("room", principal, browser, session)) return;
+					if (!admit("room", principal, browser)) return;
 					const upstream = new WebSocket(`${current.url.replace(/^http/, "ws")}/room`, {
 						headers: {
 							Authorization: `Bearer ${current.token}`,
@@ -441,16 +385,13 @@ export default defineFacet((host) => {
 						} catch {
 							command = undefined;
 						}
-						// A guest may only tune its own microphone; the owner also speaks for Pi and sets the voice.
-						const allowed = owner ? isRoomCommand(command) : isRoomPersonal(command);
-						if (!allowed) {
+						// The owner speaks for Pi and sets the voice.
+						if (!isRoomCommand(command)) {
 							browser.send(
 								JSON.stringify({
 									type: "error",
-									code: owner ? "invalid_message" : "forbidden",
-									message: owner
-										? "Expected reset, vad, config, speak or cancel"
-										: "Guests may only send reset or vad (silence 0.5-2 s)",
+									code: "invalid_message",
+									message: "Expected reset, vad, config, speak or cancel",
 								}),
 							);
 							return;

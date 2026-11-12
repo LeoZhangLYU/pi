@@ -169,7 +169,7 @@ export default defineFacet((host) => {
 				if (!name || name.length > 255) throw new UploadError(400, "Invalid file name");
 				const declared = Number(request.headers["content-length"] ?? Number.NaN);
 				if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) throw new UploadError(413, "File too large");
-				const source = principal?.kind === "guest" ? `guest:${principal.id}` : "owner";
+				const source = "owner";
 				// A root of the server's own (the worker's `SessionFiles` answers only the server).
 				const uploaded = await server().root(async (ctx) => {
 					// An archived session's worker never starts: refused at once, never waited for.
@@ -213,7 +213,7 @@ export default defineFacet((host) => {
 		): Promise<void> => {
 			const query = new URL(request.url ?? "/", "http://localhost").searchParams;
 			const session = query.get("session") ?? "";
-			// A cross-site page may link here, but never with the owner's or a guest's access.
+			// A cross-site page may link here, but never with the owner's access.
 			if (request.headers["sec-fetch-site"] === "cross-site" || !canView(principal, session)) {
 				response.writeHead(403, { "Content-Type": "text/plain" });
 				response.end("Forbidden");

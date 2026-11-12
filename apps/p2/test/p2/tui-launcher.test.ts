@@ -6,18 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { WebSocketServer } from "ws";
 import { VirtualTerminal } from "../../../../packages/tui/test/virtual-terminal.ts";
-import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { startServer } from "../../src/hosts/server.ts";
 import { startTuiClient } from "../../src/hosts/tui-client.ts";
 import { claimOwner } from "../../src/hosts/tui-config.ts";
 import { TERMINAL_COLOR_QUERY } from "../../src/hosts/tui-terminal-colors.ts";
 import { cookieTransport, type TuiTransport } from "../../src/hosts/tui-transport.ts";
 import { DARK_THEME } from "../../src/tui/theme/builtin-themes.ts";
-import { holdIn, http, poll, startFixture, until } from "./helpers.ts";
+import { http, poll, startFixture } from "./helpers.ts";
 
 const supported = Number(process.versions.node.split(".")[0]) >= 26;
 type Snapshot = { session?: string; drafts: [string, string][]; screen: string };
@@ -294,29 +291,22 @@ test(
 	},
 );
 
-test("TUI admission matches web: strangers refused, associated owners and share guests admitted", async (t) => {
+test("TUI admission matches web: strangers refused, the owner admitted", async (t) => {
 	const fixture = await startFixture({ allowedHosts: ["tui.test"] });
 	t.after(() => fixture.close());
 	const port = fixture.server.port;
 	const anonymous = await http(port, "/__p2_tui", { headers: { Host: "tui.test" } });
 	assert.equal(anonymous.status, 401);
 	assert(!anonymous.body.includes("export default"));
-	const session = await (await holdIn(fixture.browser(), Sessions, {}, "owner")).create(
-		{ cwd: fixture.workspace },
-		BACKGROUND_CONTEXT,
-	);
-	const sharing = fixture.browser().hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-	await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-	const links = await until(sharing.links, (value) => Boolean(value?.length));
-	assert(links?.[0]);
-	const shareToken = new URL(links[0].url).pathname.split("/").at(-1)!;
-	const joined = await http(port, "/join", {
+	// An owner on a remote origin: a device session from a one-time token (a loopback local session is nobody there).
+	const { token } = JSON.parse((await fixture.http("/owner-token")).body) as { token: string };
+	const claimed = await http(port, "/owner/claim", {
 		method: "POST",
 		headers: { Host: "tui.test", Origin: "https://tui.test", "Content-Type": "application/json" },
-		body: JSON.stringify({ token: shareToken, name: "TUI guest" }),
+		body: JSON.stringify({ token }),
 	});
-	assert.equal(joined.status, 200);
-	const cookie = String(joined.headers["set-cookie"]).split(";")[0]!;
+	assert.equal(claimed.status, 200);
+	const cookie = String(claimed.headers["set-cookie"]).split(";")[0]!;
 	const manifestResponse = await http(port, "/__p2_tui", { headers: { Host: "tui.test", Cookie: cookie } });
 	assert.equal(manifestResponse.status, 200);
 	const manifest = JSON.parse(manifestResponse.body) as { version: string; bundle: string };

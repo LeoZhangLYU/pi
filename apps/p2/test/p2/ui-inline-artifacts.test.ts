@@ -12,14 +12,13 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import type { RefIn } from "../../src/runtime/chord.ts";
 import { Browser, browserTests } from "./browser.ts";
 import { type Fixture, holdIn, poll, startFixture, until } from "./helpers.ts";
 
 type Call = { name: string; title: string; type: "html" | "svg" | "markdown" | "text"; content: string };
 
-const setInput = (selector: string, value: string) =>
+const _setInput = (selector: string, value: string) =>
 	`(() => { const input=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true})); })()`;
 const frame = (name: string) => `document.querySelector('.inline-artifact[data-artifact="${name}:1"] iframe')`;
 
@@ -226,45 +225,5 @@ describe("inline artifacts in Chromium", { skip: !browserTests }, () => {
 				`document.querySelector('.inline-artifact[data-artifact="${name}:1"] .notice.error')?.textContent==='Artifact unavailable'`,
 			);
 		assert.equal(await browser.evaluate<number>(`document.querySelectorAll('.inline-artifact iframe').length`), 0);
-	});
-
-	it("renders inline SVG and HTML for a guest too, without a tap", async () => {
-		const id = await publish("Inline for guests", [
-			{ name: "flow", title: "Flow", type: "svg", content: DIAGRAM },
-			{
-				name: "page",
-				title: "Page",
-				type: "html",
-				content:
-					"<!doctype html><html><head><title>Page</title></head><body style='margin:0'><div style='height:240px;background:#09c'>HTML inline</div></body></html>",
-			},
-		]);
-		const sharing = fixture.browser().hold(Sharing, { session: id }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => value?.length === 1);
-		const guest = await Browser.start();
-		try {
-			await guest.metrics(1280, 900);
-			// A fresh profile on loopback gets the join form and joins as a guest (loopback-join.test.ts).
-			await guest.open(`http://127.0.0.1:${fixture.server.port}${new URL(links![0]!.url).pathname}`);
-			await guest.wait(`document.querySelector('#join #name') && document.querySelector('#join button')`);
-			await guest.evaluate(setInput("#name", "Reader"));
-			await guest.click("#join button");
-			await guest.wait(`document.querySelector('.subagent-bar')?.textContent.includes('Joined as Reader')`);
-			// Both report their content height: their scripts ran in the frame, so they rendered.
-			await guest.wait(
-				`Math.abs(${frame("flow")}?.getBoundingClientRect().height-${frame("flow")}?.clientWidth/2)<=2`,
-			);
-			await guest.wait(`${frame("page")}?.getBoundingClientRect().height===240`);
-			assert.equal(
-				await guest.evaluate<boolean>(
-					`[...document.querySelectorAll('.inline-artifact button')].some((button)=>/show/i.test(button.textContent))`,
-				),
-				false,
-			);
-		} finally {
-			await guest.close();
-			sharing.release();
-		}
 	});
 });

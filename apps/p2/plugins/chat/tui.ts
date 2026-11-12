@@ -252,7 +252,7 @@ export class ChatSurface implements TuiSurface, ChatSurfaceApi {
 			}
 			if (text.trimStart().startsWith("/")) {
 				if (runtime.ctx.commands.runSlash(text)) return;
-				// A known command that does not apply here (not connected yet, a guest, ...) is not sent as a message.
+				// A known command that does not apply here (not connected yet, ...) is not sent as a message.
 				const name = /^\/(\S+)/.exec(text.trimStart())?.[1];
 				if (name && runtime.ctx.commands.list().some((item) => item.slash === name)) {
 					this.editor.setText(text);
@@ -305,7 +305,7 @@ export class ChatSurface implements TuiSurface, ChatSurfaceApi {
 		// The session's cwd: tool paths display relative to it.
 		this.sessions = new TuiScope(runtime);
 		this.catalog = this.sessions.watch(Sessions, {}, (ref, follow) => {
-			const viewer = liveIn(ref, "owner", "guest");
+			const viewer = liveIn(ref, "owner");
 			if (viewer)
 				follow(viewer.sessions, (rows) => {
 					this.rows = rows;
@@ -409,9 +409,8 @@ export class ChatSurface implements TuiSurface, ChatSurfaceApi {
 			follow(pagesWatchable(store), () => {});
 			if (ref.variant === "participant") this.holdWriterParts(scope, session, conversation);
 		});
-		// Who may write is known before the conversation is live (the role, a guest's grant): no wait for it.
-		if (runtime.role === "owner" || runtime.guestMode() === "full")
-			this.holdWriterParts(scope, session, conversation);
+		// Who may write is known before the conversation is live (the role): no wait for it.
+		if (runtime.role === "owner") this.holdWriterParts(scope, session, conversation);
 	}
 
 	/**
@@ -529,10 +528,7 @@ export class ChatSurface implements TuiSurface, ChatSurfaceApi {
 					!this.session
 						? `${this.runtime.ctx.keyText("p2.sessions") || "/sessions"} to choose a session`
 						: ref !== undefined && statusOf(ref) === "live"
-							? // The web's read-only bar: a view-only guest sees under which name it joined.
-								this.runtime.role === "guest" && this.runtime.grant
-								? `Joined as ${lineText(this.runtime.grant.name).slice(0, 40)} (unverified) · read-only`
-								: "Read-only conversation"
+							? "Read-only conversation"
 							: "Connecting conversation…",
 				),
 			);
@@ -595,10 +591,8 @@ export class ChatSurface implements TuiSurface, ChatSurfaceApi {
 	}
 
 	/** Who the server will record as this visitor (for messages and commands shown before it does). */
-	private ownAuthor(): { kind: "owner" | "guest"; name: string } {
-		return this.runtime.role === "guest"
-			? { kind: "guest", name: this.runtime.grant?.name ?? "Guest" }
-			: { kind: "owner", name: "Owner" };
+	private ownAuthor(): { kind: "owner"; name: string } {
+		return { kind: "owner", name: "Owner" };
 	}
 
 	/** The running command as shown: the server's, else one just started from here. */

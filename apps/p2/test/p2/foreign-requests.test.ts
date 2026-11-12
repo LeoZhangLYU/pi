@@ -11,9 +11,8 @@ import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { WebSocket } from "ws";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { Browser, browserTests } from "./browser.ts";
-import { type Fixture, holdIn, http, poll, startFixture, until } from "./helpers.ts";
+import { type Fixture, holdIn, http, poll, startFixture } from "./helpers.ts";
 
 const NO_CORS = { "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "script" };
 const NAVIGATE = { "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" };
@@ -42,7 +41,6 @@ describe("foreign browser requests", () => {
 	let port: number;
 	let session: string;
 	let device: string;
-	let guest: string;
 
 	before(async () => {
 		fixture = await startFixture({ web: browserTests });
@@ -54,16 +52,6 @@ describe("foreign browser requests", () => {
 			).create({ cwd: fixture.workspace, title: "Mine" }, BACKGROUND_CONTEXT)
 		).id;
 		device = fixture.owner.cookie;
-		const sharing = owner.hold(Sharing, { session }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "full" }, BACKGROUND_CONTEXT);
-		const link = (await until(sharing.links, (links) => Boolean(links?.length)))![0]!;
-		const joined = await http(port, "/join", {
-			method: "POST",
-			headers: { Origin: `http://127.0.0.1:${port}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ token: link.token, name: "Guest" }),
-		});
-		guest = cookieOf(joined.headers, `p2_guest_${port}`);
-		assert.ok(guest, "a guest cookie");
 	});
 	after(() => fixture?.close());
 
@@ -78,11 +66,8 @@ describe("foreign browser requests", () => {
 				403,
 				`${site}: no invitation`,
 			);
-			// A guest cookie: not that guest (403 for a guest outside the web UI, 401 for nobody).
-			assert.equal((await http(port, `/s/${session}`, { headers: { ...foreign, Cookie: guest } })).status, 401);
 			const socket = { "Sec-Fetch-Site": site, "Sec-Fetch-Mode": "websocket", "Sec-Fetch-Dest": "websocket" };
 			assert.equal(await upgrade(port, { ...socket, Cookie: device }), 403, `${site}: no owner WebSocket`);
-			assert.equal(await upgrade(port, { ...socket, Cookie: guest }), 403, `${site}: no guest WebSocket`);
 			// Framing the app is no navigation either.
 			const framed = { "Sec-Fetch-Site": site, "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe" };
 			assert.equal((await http(port, "/", { headers: { ...framed, Cookie: device } })).status, 401);
@@ -91,7 +76,6 @@ describe("foreign browser requests", () => {
 		assert.equal((await check({ "Sec-Fetch-Site": "same-origin", Cookie: device })).status, 200);
 		assert.equal((await check({ Cookie: device })).status, 200);
 		assert.equal(await upgrade(port, { Cookie: device }), 101);
-		assert.equal(await upgrade(port, { Cookie: guest }), 101);
 		// Loopback without a credential is nobody.
 		assert.equal((await check({})).status, 401);
 		assert.equal(await upgrade(port, {}), 403);

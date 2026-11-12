@@ -80,7 +80,7 @@ export const WorkspaceBackend = local("p2.workspace-backend", {
 	},
 });
 
-/** Holding this object leases the filesystem watch; read-only guests cannot get it. */
+/** Holding this object leases the filesystem watch (the owner's). */
 export const Workspace = remote("p2.workspace", {
 	version: 1,
 	params: Input,

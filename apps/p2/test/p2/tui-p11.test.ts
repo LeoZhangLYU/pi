@@ -27,15 +27,13 @@ import { SentFiles } from "../../plugins/send-file/contract.ts";
 import sendFileTui from "../../plugins/send-file/tui.ts";
 import { type Session, Sessions } from "../../plugins/sessions/contract.ts";
 import sessionsTui from "../../plugins/sessions/tui.ts";
-import { GuestPresence, Sharing } from "../../plugins/sharing/contract.ts";
-import sharingTui from "../../plugins/sharing/tui.ts";
 import { SessionMetrics, SessionStatus, WorkerControl } from "../../plugins/status/contract.ts";
 import statusTui from "../../plugins/status/tui.ts";
 import { type Child, SubagentControl, Subagents } from "../../plugins/subagents/contract.ts";
 import subagentsTui from "../../plugins/subagents/tui.ts";
 import { Workspace } from "../../plugins/workspace/contract.ts";
 import type { WorkspaceQuery, WorkspaceResult } from "../../plugins/workspace/protocol.ts";
-import workspaceTui, { piDiff } from "../../plugins/workspace/tui.ts";
+import workspaceTui from "../../plugins/workspace/tui.ts";
 import type { Ctx, defineFacet } from "../../src/runtime/chord.ts";
 import { tuiCoreFacet } from "../../src/tui/core-commands.ts";
 import { type Cell, poll } from "./helpers.ts";
@@ -208,7 +206,7 @@ async function setup(
 	t: { after(fn: () => unknown): void },
 	options: Parameters<typeof fixture>[1] & {
 		facets?: ReturnType<typeof defineFacet>[];
-		role?: "owner" | "guest";
+		role?: "owner";
 		calls?: Calls;
 	} = {},
 ) {
@@ -501,46 +499,11 @@ function ownerStubs(calls: Calls) {
 				},
 			}),
 		],
-		[GuestPresence, () => ({ variant: "owner" })],
-		[
-			Sharing,
-			(_input, _principal, self) => {
-				record("sharingAcquired", true);
-				const env = self.state("box");
-				const links = self.state<{ mode: "view" | "full"; token: string; url: string }[]>([]);
-				const guests = self.state([{ id: "g1", name: "Alice", mode: "view" }]);
-				const people = self.state([]);
-				const peopleUrl = self.state(null);
-				let tokens = 0;
-				return {
-					variant: "owner",
-					env,
-					links,
-					guests,
-					people,
-					peopleUrl,
-					share: (args: unknown) => {
-						record("share", args);
-					},
-					link: (args: { mode: "view" | "full"; reset?: boolean }, ctx: Ctx) => {
-						record("link", args);
-						const token = `tok-${args.mode}-${++tokens}`;
-						links.replace(ctx, [
-							...(links.value ?? []).filter((link) => link.mode !== args.mode),
-							{ mode: args.mode, token, url: `https://share.test/join/${token}` },
-						]);
-					},
-					remove: (args: unknown) => {
-						record("removeGuest", args);
-					},
-				};
-			},
-		],
 	];
 	return { stubs, cells };
 }
 
-const OWNER_FACETS = [tuiCoreFacet, chatTui, statusTui, logsTui, envsTui, portsTui, devicesTui, sharingTui];
+const OWNER_FACETS = [tuiCoreFacet, chatTui, statusTui, logsTui, envsTui, portsTui, devicesTui];
 
 test("owner diagnostics: notices once, /notices dismisses, /logs follows sources, worker retry, dev reload", async (t) => {
 	const calls: Calls = {};
@@ -590,28 +553,6 @@ test("owner diagnostics: notices once, /notices dismisses, /logs follows sources
 	runtime.ctx.commands.run("p2.dev.restart");
 	await poll(() => grants.length === 2);
 	assert.deepEqual(grants[1], ["devCommand", { action: "restart" }]);
-});
-
-test("guests never acquire owner objects and cannot open owner panels", async (t) => {
-	const calls: Calls = {};
-	const owner = ownerStubs(calls);
-	const { runtime } = await setup(t, { calls, server: owner.stubs, facets: OWNER_FACETS, role: "guest" });
-	for (const id of [
-		"p2.logs",
-		"p2.notices",
-		"p2.worker.retry",
-		"p2.dev.reload",
-		"p2.dev.restart",
-		"p2.envs",
-		"p2.ports",
-		"p2.devices",
-		"p2.share",
-	])
-		assert(!runtime.ctx.commands.run(id), `${id} is owner-only`);
-	await new Promise((resolve) => setTimeout(resolve, 100));
-	assert.equal(calls.noticesAcquired, undefined);
-	assert.equal(calls.logs, undefined);
-	assert(!runtime.notices.some((notice) => /forbidden|owner-only/.test(notice.text)));
 });
 
 test("/envs tests an environment; a host key is trusted only after confirming its fingerprints", async (t) => {
@@ -824,114 +765,6 @@ test("/files, /changes and /grep read the workspace (participants); guests and r
 		calls.query?.map((query) => (query as WorkspaceQuery).kind),
 		["list", "list", "file", "status", "diff", "search", "file"],
 	);
-});
-
-test("view-only guests get no workspace commands and never acquire Workspace", async (t) => {
-	const calls: Calls = {};
-	const { runtime, screen } = await setup(t, {
-		calls,
-		viewer: true,
-		role: "guest",
-		worker: [
-			[
-				Workspace,
-				() => {
-					calls.workspace = [true];
-					throw new Error("forbidden");
-				},
-			],
-		],
-		facets: [tuiCoreFacet, chatTui, statusTui, workspaceTui],
-	});
-	await poll(async () => (await screen()).includes("view only") || runtime.ctx.surface("chat") !== undefined);
-	for (const id of ["p2.files", "p2.changes", "p2.grep"])
-		assert(!runtime.ctx.commands.run(id, "x"), `${id} needs send access`);
-	await new Promise((resolve) => setTimeout(resolve, 50));
-	assert.equal(calls.workspace, undefined);
-});
-
-test("piDiff turns a unified patch into pi's numbered diff lines", () => {
-	assert.equal(
-		piDiff(
-			"--- a/x\n+++ b/x\n@@ -3,3 +3,3 @@\n keep\n-old\n+new\n@@ -20 +20 @@\n-a\n+b\n\\ No newline at end of file\n",
-		),
-		// Numbers are padded to the widest one, as pi's edit diffs are.
-		["  3 keep", "- 4 old", "+ 4 new", "    ...", "-20 a", "+20 b"].join("\n"),
-	);
-});
-
-test("/share copies links through the launcher, confirms a remote read/write link, resets links and removes guests", async (t) => {
-	const calls: Calls = {};
-	const owner = ownerStubs(calls);
-	const { screen, send, runtime } = await setup(t, { calls, server: owner.stubs, facets: OWNER_FACETS });
-	const grants: [string, unknown][] = [];
-	runtime.onGrant = async (action, payload) => {
-		grants.push([action, payload]);
-		return { ok: true, value: null };
-	};
-	runtime.ctx.commands.run("p2.share");
-	await poll(async () => (await screen()).includes("Share · 1 guest connected"));
-	assert.match(await screen(), /Read-only link[\s\S]*Read\/write link[\s\S]*Alice \(unverified name\)/);
-	assert.match(await screen(), /change files on the remote\s+environment "box"/);
-	// Read-only: created on first use, then copied through the launcher's consent screen.
-	send(ENTER);
-	await poll(() => grants.length === 1);
-	assert.deepEqual(calls.link, [{ mode: "view" }]);
-	assert.deepEqual(grants[0], ["copy", { text: "https://share.test/join/tok-view-1", label: "Read-only share link" }]);
-	await poll(() => runtime.notices.some((notice) => notice.text === "Read-only link copied"));
-	// Read/write on a remote environment: confirmed before the link exists; declining creates nothing.
-	send(DOWN);
-	send(ENTER);
-	await poll(async () => (await screen()).includes("Create a read/write link?"));
-	send(ESC);
-	await new Promise((resolve) => setTimeout(resolve, 50));
-	assert.equal(calls.link?.length, 1);
-	await poll(async () => (await screen()).includes("Share · 1 guest"));
-	send(ENTER);
-	await poll(async () => (await screen()).includes("Create a read/write link?"));
-	typed(send, "y");
-	await poll(() => grants.length === 2);
-	assert.deepEqual(calls.link?.[1], { mode: "full", remoteConfirmed: true });
-	assert.deepEqual(grants[1], [
-		"copy",
-		{ text: "https://share.test/join/tok-full-2", label: "Read/write share link" },
-	]);
-	// Reset the read-only link; remove the guest. Both confirmed.
-	send("\x1b[A");
-	send("\x12"); // Ctrl+R
-	await poll(async () => (await screen()).includes("New read-only link?"));
-	typed(send, "y");
-	await poll(() => calls.link?.length === 3);
-	assert.deepEqual(calls.link?.[2], { mode: "view", reset: true });
-	send(DOWN);
-	send(DOWN);
-	send(CTRL_D);
-	await poll(async () => (await screen()).includes("Remove Alice?"));
-	typed(send, "y");
-	await poll(() => (calls.removeGuest?.length ?? 0) === 1);
-	assert.deepEqual(calls.removeGuest, [{ guestId: "g1" }]);
-	// A declined copy says nothing; a failed one points at the launcher's own message.
-	runtime.onGrant = async () => ({ ok: false, error: "failed" });
-	send("\x1b[A");
-	send("\x1b[A");
-	send(ENTER);
-	await poll(() => runtime.notices.some((notice) => notice.text.includes("launcher could not")));
-});
-
-test("a view-only guest sees under which name it joined instead of the editor", async (t) => {
-	const { screen, runtime } = await setup(t, {
-		viewer: true,
-		role: "guest",
-		facets: [tuiCoreFacet, chatTui, statusTui],
-	});
-	runtime.grant = { name: "Alice\x1b[31m", sessions: {} };
-	runtime.changed();
-	await poll(
-		async () =>
-			(await screen()).includes("Joined as Alice[31m (unverified) · read-only") ||
-			(await screen()).includes("Joined as Alice (unverified) · read-only"),
-	);
-	assert(!(await screen()).includes("\x1b[31m"));
 });
 
 const resultEntry = (id: number, toolCallId: string, toolName: string, details: JsonValue, text: string): EntryRecord =>

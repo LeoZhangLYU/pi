@@ -197,15 +197,9 @@ export class TuiRuntime implements Component, Focusable {
 	/** Answers launcher questions bound to a grant (e.g. P5's `copyText`); unknown questions get null. */
 	readonly launcherAnswers = new Map<string, (payload: unknown) => unknown>();
 	role: TuiRole | undefined;
-	/** A guest's share grant (name as the guest typed it, the sessions shared with it), from `Access`. */
-	grant: { name: string; sessions: Readonly<Record<string, "view" | "full">> } | undefined;
-	/** A guest's mode in the session it views; undefined for the owner or outside a shared session. */
-	guestMode(): "view" | "full" | undefined {
-		return this.session === undefined ? undefined : this.grant?.sessions[this.session];
-	}
 	readonly host: Host;
 	readonly tui: TUI;
-	/** Guest-local preferences, terminal colors and the instance theme (sections 4.2, 5.3). */
+	/** Local preferences, terminal colors and the instance theme (sections 4.2, 5.3). */
 	readonly appearance: TuiAppearance;
 	/** Command registry dispatcher and the current keymap (section 6). */
 	readonly commands: TuiCommandDispatcher;
@@ -216,7 +210,7 @@ export class TuiRuntime implements Component, Focusable {
 		this.commands = new TuiCommandDispatcher({
 			ctx: () => this.ctx,
 			contexts: () => this.contexts(),
-			exclusive: () => [this.screens(), ["owner", "guest"]],
+			exclusive: () => [this.screens(), ["owner"]],
 			onError: (error) => this.fail(error),
 		});
 		this.appearance = new TuiAppearance((appearance) => {
@@ -237,12 +231,9 @@ export class TuiRuntime implements Component, Focusable {
 			get origin() {
 				return runtime.origin;
 			},
-			// Section 4.1: "guest · <name> (unverified) · view|full" once Access names the grant.
+			// Section 4.1: the TUI is the owner's.
 			get role() {
-				const grant = runtime.grant;
-				return runtime.role === "guest" && grant
-					? `guest · ${lineText(grant.name).slice(0, 40)} (unverified) · ${runtime.guestMode() === "full" ? "full access" : "view only"}`
-					: runtime.role;
+				return runtime.role;
 			},
 			get connected() {
 				return runtime.connected;

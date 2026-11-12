@@ -114,7 +114,7 @@ export class SessionWorkers implements SessionWorkerControl {
 				entry: options.entry,
 				execArgv: options.execArgv,
 				...(options.env === undefined ? {} : { env: options.env }),
-				// Owners reach every session, the server's own code too (`SERVER`); guests only the sessions their grant names.
+				// Owners reach every session, the server's own code too (`SERVER`).
 				authorize: (principal: P2Principal, address) =>
 					principal.kind === "server" || canView(principal, address.params.id),
 				principal: (address): P2Principal => ({

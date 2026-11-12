@@ -2,7 +2,6 @@ import { memo, type ReactNode, useEffect, useState, useSyncExternalStore } from 
 import type { SearchResults } from "../../plugins/search/contract.ts";
 import type { Session } from "../../plugins/sessions/contract.ts";
 import type { Child } from "../../plugins/subagents/contract.ts";
-import { type Grant, grantMode } from "../runtime/access.ts";
 import { locationLabel } from "./path-label.ts";
 
 export { locationLabel } from "./path-label.ts";
@@ -312,7 +311,6 @@ export const Drawer = memo(function Drawer({
 	onProviders,
 	onEnvs,
 	onOwnerLink,
-	guest,
 	sandboxes,
 }: {
 	onSearch?: (query: string, archived: boolean) => Promise<SearchResults>;
@@ -337,7 +335,6 @@ export const Drawer = memo(function Drawer({
 	onProviders: () => void;
 	onEnvs: () => void;
 	onOwnerLink: () => void;
-	guest?: Grant;
 	/** Environments that are sandboxes (the owner's view): their groups show a lock. */
 	sandboxes?: ReadonlySet<string>;
 }) {
@@ -346,7 +343,7 @@ export const Drawer = memo(function Drawer({
 	const [archived, setArchived] = useState(false);
 	const [results, setResults] = useState<SearchResults>();
 	useEffect(() => {
-		if (guest || !onSearch || !connected || !query.trim()) {
+		if (!onSearch || !connected || !query.trim()) {
 			setResults(undefined);
 			return;
 		}
@@ -360,7 +357,7 @@ export const Drawer = memo(function Drawer({
 			current = false;
 			clearTimeout(timer);
 		};
-	}, [onSearch, query, archived, connected, guest]);
+	}, [onSearch, query, archived, connected]);
 	const ids = results ? new Set(results.sessions) : undefined;
 	const visible = sessions.filter(
 		(session) => Boolean(session.archivedAt) === archived && (!ids || ids.has(session.id)),
@@ -379,51 +376,6 @@ export const Drawer = memo(function Drawer({
 	const ordered = [...groups].sort(([a], [b]) => (latest.get(b) ?? 0) - (latest.get(a) ?? 0));
 	for (const [, list] of ordered)
 		list.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
-	if (guest)
-		return (
-			<nav className="drawer-content" aria-label={t("sharedSession")}>
-				<div className="drawer-top">
-					<div className="brand">
-						<PiLogo compact />
-						<span>{t("sharedSession")}</span>
-					</div>
-				</div>
-				<p className="empty-note">
-					{t("joinedAs")} <strong>{guest.name}</strong>
-					<br />
-					{/* The open session's access: sessions may be shared with a guest in different modes. */}
-					{grantMode(guest, activeId) === "full" ? t("readWrite") : t("readOnly")}
-				</p>
-				<div className="session-scroll">
-					{sessions.map((session) => (
-						<SessionRow
-							key={session.id}
-							session={session}
-							conversationId={session.id === activeId ? conversationId : session.main}
-							onOpen={onOpen}
-						>
-							<button
-								type="button"
-								className={`session-main ${session.id === activeId && conversationId === session.main ? "active" : ""}`}
-								onClick={() => onOpen(session.id)}
-							>
-								<span className="session-title">{session.title}</span>
-								{Boolean(session.worker.busy?.length || session.worker.unread) && (
-									<span className="session-meta">
-										<SessionDot worker={session.worker} />
-									</span>
-								)}
-							</button>
-						</SessionRow>
-					))}
-				</div>
-				<div className="drawer-foot">
-					<span className="spacer" />
-					<LanguageButton />
-					<ThemeButton />
-				</div>
-			</nav>
-		);
 	return (
 		<nav className="drawer-content" aria-label={t("sessions")}>
 			<div className="drawer-top">

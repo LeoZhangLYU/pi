@@ -1,5 +1,5 @@
 import { num, obj } from "@earendil-works/pi-schema";
-import { authorIdOf, canSend, defineFacet, defineState, forbidden, isGuest, isOwner } from "@p2/app/v1";
+import { authorIdOf, defineFacet, defineState, forbidden, isOwner } from "@p2/app/v1";
 import { DraftStore, Drafts, DraftsByKeySchema, draftKey } from "./contract.ts";
 
 /** Restored drafts by `<conversation>:<author id>`, and the next draft's ID (in memory, for the worker's lifetime). */
@@ -44,9 +44,8 @@ export default defineFacet((host) => {
 		};
 	});
 
-	host.serve(Drafts, ({ session, conversation }, principal, self) => {
-		if (!canSend(principal, session)) throw forbidden("participants only");
-		if (!isOwner(principal) && !isGuest(principal)) throw forbidden("people only");
+	host.serve(Drafts, ({ conversation }, principal, self) => {
+		if (!isOwner(principal)) throw forbidden("owners only");
 		const authorId = authorIdOf(principal);
 		const store = self.get(DraftStore, {});
 		const key = draftKey(conversation, authorId);

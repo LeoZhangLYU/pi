@@ -49,7 +49,7 @@ const WATCH_EXCLUDED = [".git", "node_modules"];
 // file operation and git command goes through the environment, never this process's
 // filesystem, so a remote environment works unchanged. Canonical confinement filters
 // accidental escapes (symlinked directories); it is not a security boundary against
-// a hostile environment, which owners and read/write guests can already command.
+// a hostile environment, which the owner can already command.
 export class Workspace {
 	readonly env: ExecutionEnv;
 	/** Canonical directories the panel must never expose, such as pi-mobile's private data. */

@@ -11,10 +11,8 @@ import { Terminals } from "../../plugins/terminals/contract.ts";
 import { localSystem, terminalDaemon } from "../../plugins/terminals/daemon.ts";
 import { connectTerminalHost } from "../../plugins/terminals/detached.ts";
 import { encodeFrame, type TerminalEvent } from "../../plugins/terminals/protocol.ts";
-import terminalsServer from "../../plugins/terminals/server.ts";
 import { startServer } from "../../src/hosts/server.ts";
-import { Server } from "../../src/runtime/server.ts";
-import { APP, clientHost, expectChord, holdIn, type LocalOwner, localOwner, poll, testHost } from "./helpers.ts";
+import { APP, clientHost, expectChord, holdIn, type LocalOwner, localOwner, poll } from "./helpers.ts";
 
 let noDaemon: string | undefined;
 try {
@@ -23,40 +21,6 @@ try {
 } catch (error) {
 	noDaemon = error instanceof Error ? error.message : "No pi-env daemon with terminal support";
 }
-
-test("terminals objects deny guests before acquiring a detached-host resource", async (t) => {
-	const fixture = await testHost({
-		facets: [terminalsServer],
-		stubs: [
-			[
-				Server,
-				(_input, _principal, self) => ({
-					info: self.state({
-						app: APP,
-						dataDir: tmpdir(),
-						port: 0,
-						fake: true,
-						allowedHosts: [],
-					}),
-					resourceOptions: {},
-					revokeGuests: () => {},
-					revokeOwners: () => {},
-				}),
-			],
-		],
-	});
-	t.after(() => fixture.close());
-	const guest = fixture.client({
-		kind: "guest",
-		id: "g",
-		name: "Guest",
-		home: "s",
-		sessions: { s: "full" },
-		revision: 1,
-	});
-	const view = guest.hold(Terminals, { session: "s", view: randomUUID() }, BACKGROUND_CONTEXT);
-	await expectChord(whenLive(view), "forbidden");
-});
 
 async function byteChannel(owner: LocalOwner, token: string) {
 	const socket = new WebSocket(`ws://127.0.0.1:${owner.port}/terminal?${new URLSearchParams({ token })}`, {

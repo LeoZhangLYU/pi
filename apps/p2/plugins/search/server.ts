@@ -150,7 +150,7 @@ export default defineFacet((host) => {
 	});
 
 	host.serve(SessionReads, (_params, principal, self) => {
-		// Guests never read for the owner, nor see what the owner has read.
+		// Reads are the owner's: nobody else reads for it.
 		if (!isOwner(principal)) throw forbidden("read markers are owner-only");
 		const index = self.get(SearchIndex, {});
 		return {

@@ -15,13 +15,12 @@ import { BACKGROUND_CONTEXT, whenLive } from "@p2/app/v1";
 import { WebSocket } from "ws";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { AgentTerminals, TerminalServices, Terminals } from "../../plugins/terminals/contract.ts";
 import { localSystem, terminalDaemon } from "../../plugins/terminals/daemon.ts";
 import { connectTerminalHost } from "../../plugins/terminals/detached.ts";
 import { encodeFrame, type TerminalEvent, type TerminalInfo } from "../../plugins/terminals/protocol.ts";
 import { Hosts } from "../../src/runtime/server.ts";
-import { APP, expectChord, holdIn, http, poll, startFixture, until } from "./helpers.ts";
+import { APP, expectChord, holdIn, poll, startFixture, until } from "./helpers.ts";
 
 let unavailable: string | undefined;
 try {
@@ -84,7 +83,11 @@ test(
 		};
 		// The owner's terminal panel: its byte channel hears the session's terminals change.
 		const view = await holdIn(owner, Terminals, { session: session.id, view: randomUUID() }, "owner");
-		const bytes = await byteChannel(fixture.server.port, (await view.channel({}, BACKGROUND_CONTEXT)).token);
+		const bytes = await byteChannel(
+			fixture.server.port,
+			(await view.channel({}, BACKGROUND_CONTEXT)).token,
+			fixture.owner.cookie,
+		);
 		t.after(() => bytes.socket.terminate());
 		await view.list({}, BACKGROUND_CONTEXT);
 		const listed = () =>
@@ -166,31 +169,6 @@ test(
 			assert.match(value[3]!, /capture-pane: invalid start line: x/);
 		});
 
-		await t.test("guest turns may use it, like bash", async () => {
-			const sharing = owner.hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-			await sharing.link({ mode: "full" }, BACKGROUND_CONTEXT);
-			const links = await until(sharing.links, (value) => Boolean(value?.length));
-			const headers = { Host: "share.test", Origin: "https://share.test", "Content-Type": "application/json" };
-			const joined = await http(fixture.server.port, "/join", {
-				method: "POST",
-				headers,
-				body: JSON.stringify({ token: links?.[0]?.token, name: "Guest" }),
-			});
-			const guest = fixture.client({ ...headers, Cookie: String(joined.headers["set-cookie"]).split(";")[0]! }).host;
-			const guestChat = await holdIn(guest, Chat, { session: session.id, conversation: 1 }, "participant");
-			const value = (await script(
-				'return await tools.terminal({ command: "capture-pane", args: ["-p", "-t", "dev"] });',
-				guestChat,
-			)) as { window: number; output: string };
-			assert.equal(value.window, 1);
-			assert.match(value.output, /from-owner/);
-			// Guests still have no terminal panel.
-			await expectChord(
-				whenLive(guest.hold(Terminals, { session: session.id, view: randomUUID() }, BACKGROUND_CONTEXT)),
-				"forbidden",
-			);
-		});
-
 		await t.test("the server serves the session's current worker only, on its environments", async () => {
 			const state = await fixture.server.host.root(
 				async (ctx) => (await ctx.get(Hosts, {})).workers.value[session.id],
@@ -262,8 +240,10 @@ test(
 	},
 );
 
-async function byteChannel(port: number, token: string) {
-	const socket = new WebSocket(`ws://127.0.0.1:${port}/terminal?${new URLSearchParams({ token })}`);
+async function byteChannel(port: number, token: string, cookie: string) {
+	const socket = new WebSocket(`ws://127.0.0.1:${port}/terminal?${new URLSearchParams({ token })}`, {
+		headers: { Cookie: cookie },
+	});
 	const events: TerminalEvent[] = [];
 	socket.on("message", (data, binary) => {
 		if (!binary) {

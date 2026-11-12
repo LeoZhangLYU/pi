@@ -81,13 +81,13 @@ recovery link instead, on the host with `PORT` matching its running server:
    POSTs its token on the same origin, then redirects to `/`. The fragment never reaches HTTP/proxy logs.
 
 Links work once and expire after ten minutes. Treat their output as a private credential: do not publish it or
-put the token in a query/path. You can also use **Devices → Copy token** in a local owner's UI, or the private
-`<P2_DATA_DIR>/owner-token.txt` startup token, and paste it at `/owner`.
+put the token in a query/path. The private `<P2_DATA_DIR>/owner-token.txt` startup token works the same way; paste
+it at `/owner`.
 
 Owners get distinct signed, HttpOnly, SameSite=Lax cookies, Secure on a remote HTTPS origin. Cookies last 30 days
 (server-side expiry too), are port-scoped, and survive restarts through the private `owner-key`. Devices signed in
 on a remote origin are remote owners (`access: "device"`), so provider login and SSH-key upload work but owner-token
-minting does not; only local owners can mint invitations. Guest sharing is independent and session-limited. Radius
+minting does not; only local owners can mint invitations. Radius
 remains a separate authenticated owner transport; a proxy marker is never authentication.
 
 **Devices → Sign out on this device** revokes this cookie, including its live connections (a local session's links
@@ -102,16 +102,16 @@ do not survive server restarts; a fresh headless token replaces `owner-token.txt
 
 ## Providers and SSH keys
 
-**Providers** is available to every owner (local, associated device or Radius), never guests. Provider-owned
+**Providers** is available to every owner (local, associated device or Radius). Provider-owned
 pi-ai flows support API keys and OAuth; credentials stay in the server's private `auth.json`. Remote connections prefer
 device-code methods where offered. For a browser-callback flow, complete sign-in in the provider tab and paste its
 code or final redirect URL into Providers. If OpenAI ChatGPT lands on an unreachable localhost page, copy its entire
 address from the address bar and paste it; the page need not load. Anthropic displays a code to paste. The provider's
 registered callback URL is unchanged.
 
-**Envs → Upload private key** also works for every owner, locally or remotely, never guests. Keys must be passphrase-less
+**Envs → Upload private key** also works for every owner, locally or remotely. Keys must be passphrase-less
 and at most 16 KiB; they are stored privately under `<data>/ssh/keys/`, never returned to a browser. Key generation
-and fetching an existing public key are available to every owner too, never guests. See [remote environments](docs/remote-envs.md).
+and fetching an existing public key are available to every owner too. See [remote environments](docs/remote-envs.md).
 
 API keys, pasted login codes and uploaded SSH keys pass through your tunnel or relay. Use a trusted transport.
 Keep the data directory, owner-key/tokens/revocations, provider credentials and SSH keys private; never commit them.
@@ -123,8 +123,8 @@ Keep p2 loopback-only. Preserve the public Host header and forward WebSocket upg
 request with a constant marker, for example `1`. The historical header name remains, but its value has no authority
 and `P2_PROXY_SECRET` is no longer used. Any marked/forwarded localhost request is rejected rather than receiving
 device privileges, even when a Unix-socket bridge makes its network peer `127.0.0.1`. Allowed public hosts are
-remote regardless of the marker; without an owner/guest cookie visitors get only a minimal sign-in page and no
-application assets, sessions, WebSockets or file/upload access. Share links still work without owner sign-in.
+remote regardless of the marker; without an owner cookie visitors get only a minimal sign-in page and no
+application assets, sessions, WebSockets or file/upload access.
 
 Example Caddyfile behind an existing HTTPS front end (the Unix-to-loopback bridge is unchanged):
 

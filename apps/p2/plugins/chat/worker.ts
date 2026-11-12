@@ -34,7 +34,6 @@ import {
 	type Factory,
 	forbidden,
 	INPUT_ENTRY,
-	isGuest,
 	isOwner,
 	type MessageData,
 	messageData,
@@ -351,8 +350,7 @@ export default defineFacet((host) => {
 
 	/** A conversation as a principal sees it (a declared factory, so the call below can take options). */
 	const chatFactory: Factory<typeof Chat> = ({ session, conversation }, principal, self) => {
-		if (!canView(principal, session)) throw forbidden("viewers only");
-		if (!isOwner(principal) && !isGuest(principal)) throw forbidden("people only");
+		if (!isOwner(principal)) throw forbidden("owners only");
 		const authorId = authorIdOf(principal);
 		const chat = self.get(Conversation, { conversation });
 		const settings = self.get(WorkerModels, {});
@@ -410,7 +408,7 @@ export default defineFacet((host) => {
 					}),
 				shell: ({ command, includeInContext, requestId }, ctx) =>
 					call(async () => {
-						// Anyone who may send may run commands, as tools run them for them (full guests included).
+						// Anyone who may send may run commands, as tools run them for them (the owner's).
 						await writable(ctx);
 						if (!command.trim()) throw new Error("Invalid command");
 						for (const gate of gates.value.values()) await gate(ctx);

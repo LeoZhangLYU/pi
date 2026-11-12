@@ -29,7 +29,7 @@ export class PromptSurface implements TuiSurface {
 		this.runtime = runtime;
 		const changed = (): void => {
 			// Viewers cannot send, so they never hold it (the worker would refuse them).
-			const participant = runtime.role === "owner" || runtime.guestMode() === "full";
+			const participant = runtime.role === "owner";
 			const session = participant ? runtime.session : undefined;
 			const conversation = runtime.conversation;
 			const viewed = session === undefined ? undefined : `${session}#${conversation}`;

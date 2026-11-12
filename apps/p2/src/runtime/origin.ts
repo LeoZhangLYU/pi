@@ -15,7 +15,7 @@ import { messageData } from "./input.ts";
 /**
  * Who started the calling tool's turn: the owner, or nobody allowed (undefined). The turn is the conversation's current
  * run, a code mode script's nested calls included: it is the owner's only if every input the run placed so far is
- * (`entryOrigin`). A guest's message steered into the run takes it away for the rest of the run.
+ * (`entryOrigin`). An input not the owner's (a guest entry from before sharing was removed) takes it away.
  */
 export async function originOf(api: ToolExecutionApi, context: Context): Promise<ConversationOrigin | undefined> {
 	const inputs = (await api.snapshot(LiveDoc, api.conversationId, context))?.run?.inputs ?? [];

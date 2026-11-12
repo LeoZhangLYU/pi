@@ -653,24 +653,18 @@ test("footer provenance: owner sees context against the model window, guests get
 			};
 		},
 	];
-	const footerOf = async (role: "owner" | "guest", ready: RegExp) => {
+	const footerOf = async (ready: RegExp) => {
 		const { screen } = await topology(t, {
 			server: [sessionsStub(session), metrics, models],
 			worker: [chat],
 			facets: [statusTui],
-			role,
+			role: "owner",
 			columns: 100,
 		});
 		await poll(async () => ready.test(await screen()));
 		return screen();
 	};
-	const guest = await footerOf("guest", /Footer fixture[\s\S]*\$0\.250/);
-	assert.equal(modelsRequested, 0, "guests never request the owner-only catalog");
-	assert.match(guest, /\/work • Footer fixture/);
-	assert.match(guest, /↑12 ↓3 R30 CH0\.0% \$0\.250 \d+ ctx session \$1\.500/);
-	assert.match(guest, /\(faux\) faux-1 • medium/);
-	assert(!/%\/1\.0k/.test(guest));
-	await footerOf("owner", /\d+\.\d%\/1\.0k/);
+	await footerOf(/\d+\.\d%\/1\.0k/);
 	assert(modelsRequested > 0);
 });
 

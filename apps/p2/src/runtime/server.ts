@@ -5,6 +5,7 @@ import type { Duplex } from "node:stream";
 import {
 	constant,
 	defineRegistry,
+	evolve,
 	type FollowAttachment,
 	type FollowObserver,
 	local,
@@ -32,7 +33,7 @@ import { contribute } from "./contribute.ts";
 import { coreMessages } from "./core-messages.ts";
 import type { SignInState } from "./page.ts";
 import { pageMessages } from "./page-messages.ts";
-import { isGuest, isOwner, type P2Principal } from "./principals.ts";
+import { isOwner, type P2Principal } from "./principals.ts";
 import { record } from "./schema.ts";
 
 export const ServerInfoSchema = obj({
@@ -48,11 +49,10 @@ export const ServerInfoSchema = obj({
 export type ServerInfo = Static<typeof ServerInfoSchema>;
 
 /**
- * The server process (lifetime "host"): its configuration (constant), and revocation. `revokeGuests` ends every object
- * of one guest's principals, here and in workers: their references end `forbidden/revoked`, and the server closes
- * their sockets.
+ * The server process (lifetime "host"): its configuration (constant), and revocation. 3: `revokeGuests` is gone with
+ * the sharing plugin (no principal other than the owner exists).
  */
-export const Server = local("p2.server", {
+const ServerV2 = local("p2.server", {
 	version: 2,
 	params: {},
 	members: {
@@ -62,6 +62,8 @@ export const Server = local("p2.server", {
 		revokeGuests: method(obj({ id: str() })),
 	},
 });
+
+export const Server = evolve(ServerV2, (e) => e.removeMethod("revokeGuests"));
 
 /** Overrides of p2's Resources (tests only): e.g. `createModels` with a fixture provider. */
 export type ServerResourceOptions = {
@@ -160,7 +162,7 @@ export type RequestOrigin = {
 /** A person Radius authenticated: their Radius user ID and normalized, verified email. */
 export type RelayUser = { readonly id: string; readonly email: string };
 
-/** Who sent an HTTP request (undefined: nobody authenticated, e.g. a guest before joining) and from where. */
+/** Who sent an HTTP request (undefined: nobody authenticated) and from where. */
 export type RequestAccess = { readonly principal: P2Principal | undefined; readonly origin: RequestOrigin };
 
 /**
@@ -224,7 +226,6 @@ export function findRoute(
 
 /**
  * Authenticates requests (loopback and tunnel hosts): an owner returned wins, else the first principal returned.
- * Example: the sharing plugin maps a guest cookie to its current grant.
  */
 export type Authenticator = (
 	request: IncomingMessage,
@@ -233,33 +234,9 @@ export type Authenticator = (
 ) => P2Principal | undefined | Promise<P2Principal | undefined>;
 export const Authenticators = keyedRegistry<Authenticator>("p2.authenticators");
 
-/**
- * Where people a session is shared with by email open it, through a transport that authenticates them (the brain's
- * page in the Radius shell), or undefined while unknown. Without one, sharing with people is unavailable.
- */
-export type ShareUrl = (session: string) => string | undefined;
-export const ShareUrls = keyedRegistry<ShareUrl>("p2.share-urls");
-
-/**
- * Whether a principal other than the owner may reach a session (its worker host, its files): any entry saying yes
- * admits. Example: the sharing plugin admits a guest of that session whose grant is current.
- */
-export type SessionAuthorizer = (principal: P2Principal, session: string, ctx: Ctx) => boolean | Promise<boolean>;
-export const SessionAccess = keyedRegistry<SessionAuthorizer>("p2.session-access");
-
-/** Owner, the server's own code, or a principal some `SessionAccess` entry (the registry's value) admits to `session`. */
-export async function mayReach(
-	access: ReadonlyMap<string, SessionAuthorizer>,
-	principal: P2Principal,
-	session: string,
-	ctx: Ctx,
-): Promise<boolean> {
-	if (isOwner(principal) || principal.kind === "host" || principal.kind === "server") return true;
-	if (!isGuest(principal)) return false;
-	for (const authorize of access.values()) {
-		if (await authorize(principal, session, ctx)) return true;
-	}
-	return false;
+/** Owner, the server's own code, or a host: nobody else reaches a session. */
+export function mayReach(principal: P2Principal): boolean {
+	return isOwner(principal) || principal.kind === "host" || principal.kind === "server";
 }
 
 /**
@@ -298,8 +275,6 @@ export function serveServerRegistries(facet: FacetHost): void {
 		SignInStates,
 		Upgrades,
 		Authenticators,
-		ShareUrls,
-		SessionAccess,
 		WorkerInitValues,
 	])
 		serveKeyed(facet, registry as typeof Routes);
@@ -329,10 +304,6 @@ export function serverCore(host: Host, info: ServerInfo, parts: ServerParts): Fa
 				}
 				return null;
 			},
-			revokeGuests: async ({ id }, ctx) => {
-				host.revoke({ guest: id }, ctx);
-				return null;
-			},
 		}));
 		facet.serve(Hosts, (_params, self) => {
 			// The workers component's state, followed: never copied into a document of this object.
@@ -346,23 +317,8 @@ export function serverCore(host: Host, info: ServerInfo, parts: ServerParts): Fa
 			};
 		});
 		facet.serve(Access, (_params, principal) => {
-			if (isOwner(principal)) return { variant: "owner", members: {} };
-			if (!isGuest(principal)) throw forbidden("owners and guests only");
-			// One object per grant revision: the grant never changes within it.
-			const { id, name, email, home, sessions } = principal;
-			return {
-				variant: "guest",
-				members: {
-					grant: constant({
-						id,
-						name,
-						session: home,
-						mode: sessions[home] ?? "view",
-						sessions,
-						...(email === undefined ? {} : { email }),
-					}),
-				},
-			};
+			if (!isOwner(principal)) throw forbidden("owner only");
+			return { variant: "owner", members: {} };
 		});
 	});
 }

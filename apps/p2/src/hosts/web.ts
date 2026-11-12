@@ -3,11 +3,9 @@
 
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { posix } from "node:path";
 import type { Language } from "@earendil-works/chord";
 import { coreMessages } from "../runtime/core-messages.ts";
 import { requestLanguage } from "../runtime/locale.ts";
-import type { GuestPrincipal } from "../runtime/principals.ts";
 import { WEB_BUNDLE_PATH, type WebBundle, type WebManifest, webManifest } from "./bundles.ts";
 
 /** The current web bundle manifest; its files remain under `WEB_BUNDLE_PATH`. */
@@ -45,13 +43,6 @@ export function isPublicFile(path: string): boolean {
 
 /** A page path of the app: `/`, a session, or one of its conversations. */
 const PAGE = /^\/s\/[0-9a-f-]+(?:\/c\/[1-9]\d*)?$/;
-
-/** A page path of `guest`'s sessions: `/`, a session shared with it, or one of its conversations. */
-function guestPage(path: string, guest: GuestPrincipal): boolean {
-	if (path === "/") return true;
-	const session = /^\/s\/([^/]+)(?:\/c\/[1-9]\d*)?$/.exec(path)?.[1];
-	return session !== undefined && Object.hasOwn(guest.sessions, session);
-}
 
 /**
  * The app page. The inline style and theme script run before any CSS so the first paint has the right background;
@@ -121,21 +112,6 @@ export function createWeb(options: {
 			if (file) return file;
 		}
 	};
-
-	/**
-	 * Whether a guest may load `request`: GET/HEAD of its session's pages, the app's public files, the bundle manifest
-	 * and the current bundle's files. Encoded or traversing paths are refused before normalizing.
-	 */
-	async function guestMayLoad(request: IncomingMessage, guest: GuestPrincipal): Promise<boolean> {
-		if (request.method !== "GET" && request.method !== "HEAD") return false;
-		const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
-		if (pathname.includes("%") || pathname.includes("\\")) return false;
-		const path = posix.normalize(pathname);
-		if (path !== pathname) return false;
-		if (guestPage(path, guest) || path === WEB_MANIFEST_PATH || isPublicFile(path)) return true;
-		if (!path.startsWith(WEB_BUNDLE_PATH)) return false;
-		return (await bundleFile(path.slice(WEB_BUNDLE_PATH.length))) !== undefined;
-	}
 
 	async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
 		const path = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -207,6 +183,5 @@ export function createWeb(options: {
 				);
 			});
 		},
-		guestMayLoad,
 	};
 }

@@ -1,7 +1,6 @@
 import { defineFacet, nativeOf, serveNative } from "@p2/app/v1";
-import { RequestResolvers, Server, ShareUrls } from "@p2/app/v1/server";
+import { RequestResolvers, Server } from "@p2/app/v1/server";
 import { ForwardStore, ForwardsNative } from "../ports/contract.ts";
-import { Shares } from "../sharing/contract.ts";
 import { RadiusBrain, type RadiusStatus } from "./brain.ts";
 import { RadiusConnections, RadiusService } from "./contract.ts";
 import { RelayAccess } from "./relay-access.ts";
@@ -54,21 +53,10 @@ export default defineFacet((host) => {
 					port: server.info.value.port,
 					...(relayed.shellOrigin === undefined ? {} : { relayShellOrigin: relayed.shellOrigin }),
 				};
-				// Anyone else is whom sharing finds by their email (the sessions shared with them), or nobody.
+				// Anyone else is refused by the request handler (p2 shares nothing).
 				return relayed.user === undefined
 					? { principal: { kind: "owner", access: "relay" }, origin }
 					: { principal: undefined, origin: { ...origin, relayUser: relayed.user } };
-			},
-		});
-		// Radius admits and lists this brain for the emails sessions are shared with.
-		const shares = self.get(Shares, {});
-		self.on(shares.emails, async ({ value: emails }) => {
-			connection.value.brain.reportShares(emails);
-		});
-		self.contribute(ShareUrls, {
-			radius: (session) => {
-				const page = connection.value.brain.shellPage;
-				return page && `${page}?${new URLSearchParams({ path: `/s/${session}` })}`;
 			},
 		});
 		self.contribute(RadiusConnections, {

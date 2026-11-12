@@ -18,7 +18,7 @@ import { conversationsActivity } from "./activity.tsx";
 function Attribution({ children }: { children?: ReactNode }) {
 	const { t } = useMessages(webMessages);
 	const sessions = useObject(Sessions, {});
-	const listed = useReadable(liveIn(sessions, "owner", "guest")?.sessions) ?? [];
+	const listed = useReadable(liveIn(sessions, "owner")?.sessions) ?? [];
 	const owner = liveIn(sessions, "owner");
 	// As Pi Mobile: peer labels link only while connected; errors go to the app's toast.
 	const connected = useConnected();

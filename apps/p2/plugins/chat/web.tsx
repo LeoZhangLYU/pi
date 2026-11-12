@@ -1,11 +1,9 @@
 // Main view: the transcript of the open session with its composer, or the new-session screen.
 
 import {
-	Access,
 	BACKGROUND_CONTEXT,
 	defineFacet,
 	expandComposerText,
-	grantMode,
 	type Held,
 	isChordError,
 	liveIn,
@@ -93,7 +91,6 @@ import {
 	useReadable,
 	useRegistry,
 	useRoute,
-	useShareEnded,
 	useSheet,
 	useStatus,
 	WorkingDirectory,
@@ -593,7 +590,7 @@ function TopBar({
 	const connected = useConnected();
 	const nav = useNavigation();
 	const route = useRoute();
-	// Only the owner reads environments: guests see the location without the sandbox lock.
+	// Only the owner reads environments.
 	const envs = useReadable(useObject(Envs, owner ? {} : undefined)?.envs);
 	const sandboxed = envs?.find((env) => env.name === session?.env)?.config.type === "gondolin";
 	const lock = sandboxed && (
@@ -755,8 +752,8 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	);
 	const connected = useConnected();
 	const host = useHost();
-	// The catalog as the owner or a guest sees it (`worker` is a session worker's).
-	const sessions = liveIn(useObject(Sessions, {}), "owner", "guest");
+	// The catalog (the owner's; `worker` is a session worker's).
+	const sessions = liveIn(useObject(Sessions, {}), "owner");
 	const listed = useReadable(sessions?.sessions);
 	const session = listed?.find((entry) => entry.id === sessionId);
 	// A session archived or removed elsewhere while viewed: the new-session screen replaces it, and the toast says why
@@ -772,13 +769,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		}
 	}, [listed, session, nav, sessionId, toast, t]);
 	// Who this browser is, as the server last said: kept while reconnecting (`useOwner`), so the composer stays.
-	const access = useObject(Access, {});
-	const liveGrant = useReadable(liveIn(access, "guest")?.grant);
 	const owner = useOwner();
-	const lastGrant = useRef(liveGrant);
-	// Taken while the object is live, a removed grant (null) included.
-	if (useStatus(access) === "live") lastGrant.current = liveGrant;
-	const grant = owner ? undefined : lastGrant.current;
 	const { fail } = useComposerState();
 	const [resources, setDefault] = useModelResources(owner, fail);
 	const subagents = liveIn(useObject(Subagents, {}), "reader");
@@ -859,7 +850,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	const writer = liveIn(chat, "participant");
 	// Who may write decides what shows (as Pi Mobile's `canWrite`), not whether the chat object is live yet: during a
 	// load, a cold start or a reconnect the composer stays and only Send waits.
-	const canWrite = owner || grantMode(grant, sessionId) === "full";
+	const canWrite = owner;
 	// Held with the view, not once the subagent list names the child: Archive works right after load.
 	const subagentControl = useObject(SubagentControl, canWrite ? { session: sessionId } : undefined);
 	// The bar's archived mark flips at the tap.
@@ -1019,7 +1010,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	const known = liveView !== undefined;
 	// How tools' calls show: contributed by the plugins that own them.
 	const tools = useRegistry(ToolActivities);
-	// How much of a turn the transcript shows (settings.json `detail`, the owner's; guests see the default).
+	// How much of a turn the transcript shows (settings.json `detail`, the owner's).
 	const detail = useDetail(resources);
 	const rows = useMemo(
 		// Anything else: the default (`transcriptRows`' `DEFAULT_DETAIL`).
@@ -1039,13 +1030,10 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	// The author the server will record, as the transcript last showed it: the outgoing message looks the same.
 	const author = useMemo(() => {
 		const own = transcript?.items.findLast(
-			(item) =>
-				item.type === "user" &&
-				item.author !== undefined &&
-				(owner ? item.author.kind === "owner" : item.author.kind === "guest" && item.author.name === grant?.name),
+			(item) => item.type === "user" && item.author !== undefined && item.author.kind === "owner",
 		);
 		return own?.type === "user" ? own.author : undefined;
-	}, [transcript, owner, grant]);
+	}, [transcript]);
 	/**
 	 * Sends the composer's message without waiting for the connection: it leaves the composer and shows at once, and
 	 * the outbox delivers it when it can (outbox.ts). Sending keeps the reader's scroll position; the scroll-down button
@@ -1228,14 +1216,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		(items, submissionId: number) => items.filter((item) => item.id !== submissionId),
 		fail,
 	);
-	const modelControl = owner ? (
-		<ModelControl resources={resources} {...(choice ? { choice } : {})} />
-	) : (
-		<span className="model-control static">
-			{grant?.name}
-			{t("guestTag")}
-		</span>
-	);
+	const modelControl = owner ? <ModelControl resources={resources} {...(choice ? { choice } : {})} /> : null;
 	const footer = (
 		<SessionStats
 			usage={usage}
@@ -1250,7 +1231,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 						: undefined
 			}
 			onCost={() => openLayer({ kind: "sheet", name: "cost" })}
-			onClients={owner ? () => openLayer({ kind: "sheet", name: "share" }) : undefined}
 			controls={modelControl}
 		/>
 	);
@@ -1299,7 +1279,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	);
 	const readOnlyBar = (!canWrite || failure) && (
 		<div className="subagent-bar">
-			<span>{failure ? t("sessionUnavailable") : grant ? t("joinedAsReadOnly", grant.name) : t("connecting")}</span>
+			<span>{failure ? t("sessionUnavailable") : t("connecting")}</span>
 		</div>
 	);
 	const queuedRows = queued.length + pendingQueued.length > 0 && (
@@ -1535,7 +1515,7 @@ function NewSession() {
 	const host = useHost();
 	const owner = useOwner();
 	const catalog = useObject(Sessions, {});
-	const listed = useReadable(liveIn(catalog, "owner", "guest")?.sessions);
+	const listed = useReadable(liveIn(catalog, "owner")?.sessions);
 	// Only the owner creates sessions.
 	const sessions = liveIn(catalog, "owner");
 	const [resources, setDefault] = useModelResources(owner, useComposerState().fail);
@@ -1734,31 +1714,9 @@ function NewSession() {
 	);
 }
 
-/** A guest's share ended: Pi Mobile clears the view and says so in its toast; nothing reconnects. */
-function ShareEnded() {
-	const { t } = useMessages(chatMessages);
-	const place = useChatScreen(undefined);
-	return (
-		<>
-			<TopBar />
-			<button type="button" className="toast">
-				{t("shareEnded")}
-			</button>
-			{place(<div className="scroller" />)}
-		</>
-	);
-}
-
 function Main() {
 	const nav = useNavigation();
 	const route = useRoute();
-	const ended = useShareEnded();
-	const access = useObject(Access, {});
-	const grant = useReadable(liveIn(access, "guest")?.grant);
-	// A guest stays within the sessions shared with it; anywhere else it lands in the one shared or joined last.
-	useEffect(() => {
-		if (grant && !grantMode(grant, route.session)) void nav.replace(conversationRoute(route, grant.session), route);
-	}, [grant, route, nav]);
 	// The frame outlives the screens in it: its dock, with the one composer, stays while they change.
 	const [view, setView] = useState<HTMLDivElement | null>(null);
 	const [dock, setDock] = useState<HTMLDivElement | null>(null);
@@ -1775,9 +1733,7 @@ function Main() {
 	const conversation = route.session && `${route.session}:${shownConversation}`;
 	return (
 		<ChatFrame.Provider value={frame}>
-			{ended ? (
-				<ShareEnded />
-			) : route.session ? (
+			{route.session ? (
 				<Slot name="chat-content">
 					<Slot name="chat-attribution">
 						<SessionChat key={conversation} sessionId={route.session} conversationId={shownConversation} />
@@ -1792,7 +1748,7 @@ function Main() {
 				<Dock frame={frame} dockRef={setDock} />
 			</div>
 			{/* Below the chat, per conversation (the bottom terminal panel). */}
-			{conversation && !ended && <Slot key={conversation} name="chat-bottom" />}
+			{conversation && <Slot key={conversation} name="chat-bottom" />}
 		</ChatFrame.Provider>
 	);
 }

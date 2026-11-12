@@ -27,7 +27,6 @@ import {
 } from "../../plugins/radius/relay-access.ts";
 import { radiusStatusText } from "../../plugins/radius/server.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { Terminals } from "../../plugins/terminals/contract.ts";
 import { radiusTransport } from "../../src/hosts/tui-radius.ts";
 import { Access } from "../../src/runtime/access.ts";
@@ -161,83 +160,25 @@ test("Radius-relayed artifact previews may sit below the Radius shell's frame", 
 	assert.match(String(csp?.[1]), /; frame-ancestors 'self' https:\/\/radius\.earendil\.com$/);
 });
 
-test("Radius admits people sessions are shared with by email, across organizations", { timeout: 30_000 }, async (t) => {
+test("Radius refuses relayed people: p2 shares nothing", { timeout: 30_000 }, async (t) => {
 	const f = await fixture(t);
-	// The owner's relayed request names the shell, so people get links into it.
-	assert.equal((await f.radius.response(f.open("/probe"))).status, 200);
-	const config = await readRadiusConfig(f.directory);
-	assert(config);
-	const owner = clientHost(await localOwner(f.server));
-	t.after(() => owner.close(BACKGROUND_CONTEXT));
-	const sessions = await holdIn(owner, Sessions, {}, "owner");
-	const first = await sessions.create({ cwd: f.directory, title: "First" }, BACKGROUND_CONTEXT);
-	const second = await sessions.create({ cwd: f.directory, title: "Second" }, BACKGROUND_CONTEXT);
-	const sharing = owner.hold(Sharing, { session: first.id }, BACKGROUND_CONTEXT);
-	await whenLive(sharing);
-	await poll(() => f.radius.shares.length > 0);
-	assert.deepEqual(f.radius.shares.at(-1), [], "the brain reports its shares when it connects");
-	await sharing.share({ email: " Ann.Example@GoogleMail.com ", mode: "view" }, BACKGROUND_CONTEXT);
-	const people = await until(sharing.people, (value) => value?.length === 1);
-	assert.deepEqual(
-		people?.map(({ name, mode }) => ({ name, mode })),
-		[{ name: "Ann.Example@GoogleMail.com", mode: "view" }],
-		"people are listed as the owner wrote them",
-	);
-	assert.equal(
-		await until(sharing.peopleUrl, Boolean),
-		`https://radius.earendil.com/pi/brains/org_1/${config.serverId}?path=%2Fs%2F${first.id}`,
-	);
-	await poll(() => f.radius.shares.at(-1)?.[0] === "annexample@gmail.com", 10_000, "Radius learns the email");
-	const secondSharing = owner.hold(Sharing, { session: second.id }, BACKGROUND_CONTEXT);
-	await secondSharing.share({ email: "annexample@gmail.com", mode: "full" }, BACKGROUND_CONTEXT);
-
-	// Radius admits Ann, of another organization, with her verified email; the brain decides what she sees.
+	const as = (user: { id: string; email?: string }) => ({
+		[RELAY_SECRET_HEADER]: f.relay.secret,
+		[RELAY_ORIGIN_HEADER]: PUBLIC_ORIGIN,
+		[RELAY_SHELL_HEADER]: "https://radius.earendil.com",
+		[RELAY_USER_HEADER]: encodeRelayUser(user as { id: string; email: string }),
+		Origin: PUBLIC_ORIGIN,
+	});
 	const ann = { id: "usr_2", email: "annexample@gmail.com" };
 	assert.equal(
 		(await f.radius.response(f.open("/probe", { principal: { ...OWNER, ...ann, organization_id: "org_9" } }))).status,
 		403,
-		"admitted, but not the owner",
+		"not the owner",
 	);
-	const withoutEmail = f.open("/probe", { principal: { ...OWNER, id: "usr_3" } });
-	await poll(() =>
-		f.radius.controls.some(
-			(message) => message.type === "connection_close" && message.connection_id === withoutEmail,
-		),
-	);
-	const as = (user: { id: string; email: string }) => ({
-		[RELAY_SECRET_HEADER]: f.relay.secret,
-		[RELAY_ORIGIN_HEADER]: PUBLIC_ORIGIN,
-		[RELAY_SHELL_HEADER]: "https://radius.earendil.com",
-		[RELAY_USER_HEADER]: encodeRelayUser(user),
-		Origin: PUBLIC_ORIGIN,
-	});
-	const socket = new WebSocket(`ws://127.0.0.1:${f.server.port}/chord`, { headers: as(ann) });
-	const browser = clientHost(socket);
-	t.after(() => browser.close(BACKGROUND_CONTEXT));
-	const access = await holdIn(browser, Access, {}, "guest");
-	const grant = await until(access.grant, Boolean);
-	assert.deepEqual(grant?.sessions, { [first.id]: "view", [second.id]: "full" });
-	assert.equal(grant?.session, second.id, "she lands in the session shared last");
-	assert.equal(grant?.email, "annexample@gmail.com");
-	const listed = await until((await holdIn(browser, Sessions, {}, "guest")).sessions, (value) => value?.length === 2);
-	assert.deepEqual(listed?.map((session) => session.id).sort(), [first.id, second.id].sort());
-	await assert.rejects(whenLive(browser.hold(Sharing, { session: first.id }, BACKGROUND_CONTEXT)), /owner-only/);
-	// Links are for browsers on this device or a tunnel; Radius users have no cookie to join with.
-	await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-	const token = (await until(sharing.links, (links) => links?.length === 1))?.[0]?.token ?? "";
-	assert.equal((await http(f.server.port, `/join/${token}`, { headers: as(ann) })).status, 403);
 	const stranger = await http(f.server.port, "/", { headers: as({ id: "usr_4", email: "bob@example.com" }) });
 	assert.equal(stranger.status, 403);
-	assert.match(stranger.body, /Nothing on this brain is shared with you/);
-
-	// Removing her from one session ends her old principal; the brain keeps reporting her while one remains.
-	await sharing.remove({ guestId: grant?.id ?? "" }, BACKGROUND_CONTEXT);
-	await poll(() => socket.readyState === WebSocket.CLOSED, 10_000, "her old principal ended");
-	assert.deepEqual(await until(sharing.people, (people) => people?.length === 0), []);
-	await secondSharing.remove({ guestId: grant?.id ?? "" }, BACKGROUND_CONTEXT);
-	await poll(() => f.radius.shares.at(-1)?.length === 0, 10_000, "Radius forgets her");
+	assert.match(stranger.body, /Forbidden/);
 });
-
 test(
 	"Radius HTTP bodies follow credit in both directions; uplink congestion loses no data",
 	{ timeout: 45_000 },

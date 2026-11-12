@@ -1,7 +1,7 @@
 import { chmodSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { contribute, defineFacet, deriveTyped, forbidden, isGuest, isOwner, isWorker } from "@p2/app/v1";
+import { contribute, defineFacet, deriveTyped, forbidden, isOwner, isWorker } from "@p2/app/v1";
 import { Hosts, Server, WorkerInitValues } from "@p2/app/v1/server";
 import { Catalog, type Session } from "../sessions/contract.ts";
 import { type Child, ChildStore, Subagents } from "./contract.ts";
@@ -90,13 +90,7 @@ export default defineFacet((host) => {
 				members: { report: ({ children }, ctx) => store.report({ session, generation, children }, ctx) },
 			};
 		}
-		if (isGuest(principal)) {
-			const children = deriveTyped(self, [store.children], ([value]) =>
-				Object.fromEntries(Object.keys(principal.sessions).map((session) => [session, value[session] ?? []])),
-			);
-			return { variant: "reader", members: { children } };
-		}
-		if (!isOwner(principal)) throw forbidden("owners and guests only");
+		if (!isOwner(principal)) throw forbidden("owners only");
 		return { variant: "reader", members: { children: store.children } };
 	});
 });

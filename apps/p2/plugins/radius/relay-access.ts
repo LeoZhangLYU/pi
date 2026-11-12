@@ -27,13 +27,12 @@ const ORIGIN = /^https?:\/\/[^/\s]+$/;
  * The relay client marks its loopback requests with a per-process secret. A
  * marked request comes from a browser Radius authenticated on the cortex
  * origin, and is treated as remote, so every localhost-only path stays closed.
- * Without the user header it is the brain's owner. With it, it is a person the
- * owner shared sessions with by email: Radius vouches for their email, and
- * p2's sharing decides what they may reach, as for a guest cookie on a tunnel
- * host. Without the secret the marker headers mean nothing, so neither
- * browsers nor other local processes can claim them. Without the shell header
- * it is the owner's Pi client, the TUI launcher through Radius (brain.ts,
- * "Client channels").
+ * Without the user header it is the brain's owner. With it, Radius vouches for
+ * another person: p2 no longer shares sessions, so the server refuses such a
+ * request (hosts/server.ts). Without the secret the marker headers mean
+ * nothing, so neither browsers nor other local processes can claim them.
+ * Without the shell header it is the owner's Pi client, the TUI launcher
+ * through Radius (brain.ts, "Client channels").
  */
 export class RelayAccess {
 	readonly secret = randomBytes(32).toString("hex");
@@ -53,7 +52,7 @@ export class RelayAccess {
 		const shellOrigin = request.headers[RELAY_SHELL_HEADER];
 		if (typeof publicOrigin !== "string" || !ORIGIN.test(publicOrigin)) return undefined;
 		if (shellOrigin === undefined) {
-			// Clients are the owner's only; sharing admits people on the brain's UI.
+			// Clients are the owner's only.
 			return request.headers[RELAY_USER_HEADER] === undefined ? { publicOrigin } : undefined;
 		}
 		if (typeof shellOrigin !== "string" || !ORIGIN.test(shellOrigin)) return undefined;

@@ -1,4 +1,4 @@
-// P10: `/settings` (after coding-agent's settings-selector.ts, the guest-local G settings of section 1.14), its theme
+// P10: `/settings` (after coding-agent's settings-selector.ts, the local G settings of section 1.14), its theme
 // picker (theme-selector.ts, with an isolated preview pane) and `/keybindings` (rebinding). Nothing is written here:
 // changes are collected and proposed to the launcher as one `savePrefs` patch, which shows the diff and writes the
 // visitor's own prefs.json after a local confirmation; the launcher's file watcher then applies them.

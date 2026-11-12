@@ -10,10 +10,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { BACKGROUND_CONTEXT, follow } from "@p2/app/v1";
 import { WebSocket } from "ws";
-import { Envs } from "../../plugins/envs/contract.ts";
 import { ProviderLogin } from "../../plugins/login/contract.ts";
-import { Catalog } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import type { ServerResourceOptions } from "../../src/runtime/server.ts";
 import { browserTests } from "./browser.ts";
 import { type Fixture, poll, startFixture, until } from "./helpers.ts";
@@ -215,68 +212,5 @@ describe("sheet parity", { skip: !browserTests }, () => {
 		await wait(`document.querySelector('[role=dialog][aria-label=Environments] .empty-note')`);
 		await evaluate(`document.querySelector('[role=dialog] button[aria-label=Close]').click()`);
 		await call("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-	});
-
-	it("asks inline before creating a remote read/write link, but not when copying or resetting an existing one", async () => {
-		const owner = fixture.browser();
-		await owner
-			.hold(Envs, {}, BACKGROUND_CONTEXT)
-			.save({ name: "remote", config: { type: "ssh", host: "unreachable.invalid" } }, BACKGROUND_CONTEXT);
-		// Seed metadata directly: this UI-only test never needs a real SSH connection.
-		const session = await fixture.server.host.root(
-			async (ctx) =>
-				(await ctx.get(Catalog, {})).create(
-					{
-						cwd: "/tmp",
-						env: "remote",
-						title: "Remote share",
-						model: { provider: "faux", modelId: "faux-1" },
-						thinkingLevel: "off",
-					},
-					ctx,
-				),
-			BACKGROUND_CONTEXT,
-		);
-		const sharing = owner.hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-		const stop = follow(sharing.links, () => {});
-		try {
-			await call("Page.navigate", { url: `http://127.0.0.1:${fixture.server.port}/s/${session.id}` });
-			await wait(`document.querySelector('button[aria-label="Session options"]')`);
-			await evaluate(
-				`window.confirm=()=>{throw new Error('Sharing must use an inline confirmation')}; document.querySelector('button[aria-label="Session options"]').click();`,
-			);
-			await wait(`document.querySelector('[role=dialog][aria-label=Session] .row-button')`);
-			await evaluate(`document.querySelector('[role=dialog][aria-label=Session] .row-button').click()`);
-			await wait(`document.querySelector('[role=dialog][aria-label=Share] .share-row .button:not(:disabled)')`);
-			await evaluate(`document.querySelectorAll('.share-row')[1].querySelector('.button').click()`);
-			await wait(
-				`document.querySelector('[role=dialog]')?.textContent.includes('Guests can run commands on "remote". Create the link?')`,
-			);
-			assert.equal((await until(sharing.links, (links) => links !== undefined))?.length, 0);
-			await click("Cancel");
-			await evaluate(`document.querySelectorAll('.share-row')[1].querySelector('.button').click()`);
-			await click("Create");
-			await until(sharing.links, (links) => Boolean(links?.some((link) => link.mode === "full")));
-			await wait(`document.querySelectorAll('.share-row')[1]?.textContent.includes('Reset')`);
-			await evaluate(`document.querySelectorAll('.share-row')[1].querySelector('.button').click()`);
-			assert(
-				await evaluate<boolean>(
-					`(() => { const dialog=document.querySelector('[role=dialog][aria-label=Share]');return Boolean(dialog && !dialog.textContent.includes('Create the link?')); })()`,
-				),
-			);
-			await click("Reset");
-			await wait(
-				`document.querySelector('[role=dialog]')?.textContent.includes('New link, disconnect its guests?')`,
-			);
-			const previous = sharing.links.value?.find((link) => link.mode === "full")?.token;
-			await click("Reset");
-			await until(sharing.links, (links) =>
-				Boolean(links?.some((link) => link.mode === "full" && link.token !== previous)),
-			);
-			await evaluate(`document.querySelector('[role=dialog] button[aria-label=Close]').click()`);
-		} finally {
-			stop();
-			sharing.release();
-		}
 	});
 });

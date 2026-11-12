@@ -17,7 +17,7 @@ function ParentLink() {
 	const { t } = useMessages(webMessages);
 	const nav = useNavigation();
 	const route = useRoute();
-	const rows = useReadable(liveIn(useObject(Sessions, {}), "owner", "guest")?.sessions);
+	const rows = useReadable(liveIn(useObject(Sessions, {}), "owner")?.sessions);
 	const main = rows?.find((row) => row.id === route.session)?.main;
 	if (!route.session || main === undefined || route.conversation === main) return null;
 	return (

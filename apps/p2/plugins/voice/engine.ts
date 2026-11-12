@@ -931,7 +931,7 @@ export class VoiceEngine {
 			remember(this.#skip, answer.key);
 			remember(this.#silenced, answer.key);
 		}
-		// What plays now, too (a guest may not know its answer yet).
+		// What plays now, too.
 		for (const id of this.#outstanding.keys()) {
 			const dash = id.lastIndexOf("-");
 			if (dash > 0) remember(this.#silenced, id.slice(0, dash));

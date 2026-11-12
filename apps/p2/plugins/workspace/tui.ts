@@ -1,7 +1,7 @@
 // The workspace in the TUI (p2-tui-port.md P11i), after the web's Workspace panel, read-only: `/files` browses the
 // session directory and shows a file, `/changes` lists git changes and shows a change's diff (pi's diff renderer),
 // `/grep` searches text and opens a match at its line. Participants only: holding `Workspace` leases the worker's
-// filesystem watch, which read-only guests cannot get. Comments, commits and uploads stay on the web for now.
+// filesystem watch. Comments, commits and uploads stay on the web for now.
 
 import type { Held } from "@p2/app/v1";
 import { BACKGROUND_CONTEXT, contribute, defineFacet, liveIn, statusOf, whenLive } from "@p2/app/v1";
@@ -299,7 +299,7 @@ export const WORKSPACE_COMMANDS: Record<string, TuiCommand> = {
 /**
  * The viewed conversation's git branch for the footer (pi's `cwd (branch)`), from `Workspace.query({kind: "status"})`,
  * asked again when files change (debounced). "detached" for a detached HEAD, as pi. Only for those who may hold
- * `Workspace` (the owner, full-access guests): view-only guests are refused, so they never ask.
+ * `Workspace` (the owner): held in the TUI as the web does.
  */
 export class GitBranch implements TuiSurface {
 	readonly runtime: TuiRuntime;
@@ -318,8 +318,7 @@ export class GitBranch implements TuiSurface {
 		this.sync();
 	}
 	private allowed(): boolean {
-		const runtime = this.runtime;
-		return runtime.role === "owner" || (runtime.role === "guest" && runtime.guestMode() === "full");
+		return this.runtime.role === "owner";
 	}
 	private sync(): void {
 		const session = this.runtime.session;

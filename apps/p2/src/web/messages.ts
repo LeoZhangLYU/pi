@@ -110,7 +110,6 @@ export const webMessages = defineMessages("p2.web", {
 		followSystem: "Follow system",
 		// Drawer
 		sessions: "Sessions",
-		sharedSession: "Shared session",
 		newSession: "New session",
 		newSessionIn: (location: string) => `New session in ${location}`,
 		collapseSidebar: "Collapse sidebar",
@@ -130,8 +129,6 @@ export const webMessages = defineMessages("p2.web", {
 		envsTitle: "Remote environments",
 		devices: "Devices",
 		devicesTitle: "Sign in another device",
-		joinedAs: "Joined as",
-		readWrite: "Read/write",
 		readOnly: "Read-only",
 		working: "Working",
 		newAnswer: "New answer",
@@ -262,10 +259,8 @@ export const webMessages = defineMessages("p2.web", {
 		cacheRateTitle: (input: number, read: number, write: number) =>
 			`Cache hit rate of latest assistant response: input ${input} · cache read ${read} · cache write ${write}`,
 		noAssistantResponse: "No assistant response in this conversation yet",
-		viewersAria: (clients: number, share: boolean) =>
-			`${clients} ${clients === 1 ? "browser" : "browsers"} viewing this session${share ? "; share" : ""}`,
+		viewersAria: (clients: number) => `${clients} ${clients === 1 ? "browser" : "browsers"} viewing this session`,
 		viewersTitle: "Browsers viewing this session, including subagent views",
-		viewersTitleShare: "Browsers viewing this session, including subagent views. Open sharing.",
 		costDetailsTitle: "Open response cost details; session total includes subagents and tools",
 		sessionCostTitle: "Session total cost: all conversations, subagents and tools",
 		// Theme
@@ -346,7 +341,6 @@ export const webMessages = defineMessages("p2.web", {
 		followSystem: "跟随系统",
 		// Drawer
 		sessions: "Session",
-		sharedSession: "共享 Session",
 		newSession: "新建 Session",
 		newSessionIn: (location) => `在 ${location} 新建 Session`,
 		collapseSidebar: "收起侧边栏",
@@ -366,8 +360,6 @@ export const webMessages = defineMessages("p2.web", {
 		envsTitle: "远程环境",
 		devices: "设备",
 		devicesTitle: "登录另一台设备",
-		joinedAs: "已加入：",
-		readWrite: "可读写",
 		readOnly: "只读",
 		working: "运行中",
 		newAnswer: "新回复",
@@ -495,9 +487,8 @@ export const webMessages = defineMessages("p2.web", {
 		cacheRateTitle: (input, read, write) =>
 			`最新助手回复的缓存命中率：输入 ${input} · 缓存读取 ${read} · 缓存写入 ${write}`,
 		noAssistantResponse: "此对话中还没有助手回复",
-		viewersAria: (clients, share) => `${clients} 个浏览器正在查看此 Session${share ? "；共享" : ""}`,
+		viewersAria: (clients) => `${clients} 个浏览器正在查看此 Session`,
 		viewersTitle: "正在查看此 Session 的浏览器，包括 Subagent 视图",
-		viewersTitleShare: "正在查看此 Session 的浏览器，包括 Subagent 视图。打开共享。",
 		costDetailsTitle: "打开回复费用明细；会话总计包含 Subagent 和 Tool",
 		sessionCostTitle: "会话总费用：所有对话、Subagent 和 Tool",
 		// Theme

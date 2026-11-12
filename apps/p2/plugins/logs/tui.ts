@@ -1,7 +1,7 @@
 // Owner diagnostics in the TUI (p2-tui-port.md P11d), after the web's logs sheet and owner notice lane: `/logs`
 // shows a log source (server, terminals, dev supervisor, session workers) and follows its tail; owner notices from
 // the server (`LogNotices`) become status lines as they arrive, and `/notices` lists and dismisses them. Owner only:
-// guests never acquire these objects.
+// hold them.
 
 import type { Held } from "@p2/app/v1";
 import { BACKGROUND_CONTEXT, contribute, defineFacet, follow, liveIn, whenLive } from "@p2/app/v1";

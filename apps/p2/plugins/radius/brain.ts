@@ -33,19 +33,10 @@ import {
  * credential from `npm run radius:login`.
  *
  * Who may open a channel. The owner reaches everything the owner reaches
- * locally. Radius also admits people, in any organization, to the brain's UI
- * when the brain shared a session with their email (`reportShares`): Radius
- * verifies the email, and the brain passes such a user on as a Radius user (not
- * an owner), whom p2's sharing maps to the sessions shared with that email now.
- * A user without an email, service accounts, and everyone but the owner on
- * forward origins are refused. Browser cookies never reach the server through
- * the brain's UI channels.
- *
- * Shares. Radius admits and lists a brain for the emails the brain reports with
- * `PUT /v1/servers/<id>/shares`, which replaces the whole set. The brain reports
- * whenever the set changes and after every connect, so a report lost while
- * offline is repaired by the next connection. Radius learns nothing else: not
- * which sessions, nor their titles.
+ * locally. A Radius user other than the owner, with or without an email, is
+ * refused: p2 shares nothing. Everyone but the owner on forward origins is
+ * refused. Browser cookies never reach the server through the brain's UI
+ * channels.
  *
  * Backpressure. Nothing may buffer without bound between a loopback source and
  * a slow browser; the relay itself cannot see a slow WebSocket reader.
@@ -320,11 +311,6 @@ export class RadiusBrain {
 	/** Connect with `?replace=1`; false while another brain with this server ID holds the relay. */
 	#replace = true;
 	#shellPage: string | undefined;
-	/** The emails to report (see "Shares"), once known; `#reported` while Radius has them. */
-	#shares: readonly string[] | undefined;
-	#reported = false;
-	/** Reports run one at a time, so an older set never lands after a newer one. */
-	#reporting: Promise<void> = Promise.resolve();
 	readonly #heartbeatIdleMs: number;
 	readonly #heartbeatTimeoutMs: number;
 	readonly #handshakeTimeoutMs: number;
@@ -351,13 +337,6 @@ export class RadiusBrain {
 
 	start(): void {
 		void this.#connect();
-	}
-
-	/** Reports the emails sessions are shared with now if connected, else after the next connect (see "Shares"). */
-	reportShares(emails: readonly string[]): void {
-		this.#shares = emails;
-		this.#reported = false;
-		this.#report();
 	}
 
 	/** This brain's page in the Radius shell, once known (see `RadiusBrainConfig.shellPage`). */
@@ -442,8 +421,6 @@ export class RadiusBrain {
 				organizationId: owner.organization_id,
 				...(name === undefined ? {} : { name }),
 			});
-			this.#reported = false;
-			this.#report();
 		});
 		// With this listener `ws` leaves a rejected handshake open; record why and abort it, which closes the socket.
 		socket.on("unexpected-response", (_request, response) => {
@@ -489,28 +466,6 @@ export class RadiusBrain {
 		this.#onStatus({ status: "retrying", error: error instanceof Error ? error.message : String(error) });
 		this.#retryTimer = setTimeout(() => void this.#connect(), this.#retryMs);
 		this.#retryMs = Math.min(this.#retryMs * 2, RETRY_MAX_MS);
-	}
-
-	#report(): void {
-		this.#reporting = this.#reporting
-			.then(async () => {
-				const shares = this.#shares;
-				if (shares === undefined || this.#reported || this.#socket?.readyState !== WebSocket.OPEN) return;
-				const config = await this.#currentConfig();
-				const response = await fetch(new URL(`/v1/servers/${config.serverId}/shares`, config.gateway), {
-					method: "PUT",
-					headers: { authorization: `Bearer ${config.credential.access}`, "content-type": "application/json" },
-					body: JSON.stringify({ emails: shares }),
-					signal: AbortSignal.any([this.#abort.signal, AbortSignal.timeout(30_000)]),
-				});
-				if (!response.ok) throw new Error(`${response.status}: ${(await response.text()).slice(0, 200)}`);
-				if (this.#shares === shares) this.#reported = true;
-			})
-			// The next change or connect reports again.
-			.catch((error: unknown) => {
-				if (!this.#closed)
-					console.warn(`Radius: reporting shares failed (${error instanceof Error ? error.message : error})`);
-			});
 	}
 
 	/** Reads radius.json again for every attempt and refreshes the access token when it is about to expire. */

@@ -71,12 +71,8 @@ try {
 	while (!stopping) {
 		const admission: TuiAdmission = radius
 			? { role: "owner" }
-			: await authenticateTui(options, config, (kind, reason) =>
-					ask(
-						kind === "name"
-							? "Your name (shown to the owner and other guests; not verified): "
-							: `${reason ? `${reason}.\n` : ""}Owner link (npm run owner-link on the host) or share link: `,
-					),
+			: await authenticateTui(options, config, (_kind, reason) =>
+					ask(`${reason ? `${reason}.\n` : ""}Owner link (npm run owner-link on the host): `),
 				);
 		if (!radius) saveConfig(config);
 		const url = radius ? radius.url : options.url;
@@ -131,13 +127,13 @@ try {
 			break;
 		}
 		// Launcher-drawn, on the restored terminal: the same words as the web page, then a way back in.
-		console.error(endedNotice(admission.role));
+		console.error(endedNotice());
 		// A local sign-in ended (all devices signed out): the data directory's owner key signs in again.
 		if (admission.local) continue;
-		const next = await resumeAfterEnded(admission.role, options.url, config, ask);
+		const next = await resumeAfterEnded(options.url, config, ask);
 		saveConfig(config);
 		if (!next) break;
-		options = { ...options, joinLink: next.joinLink, ownerLink: next.ownerLink };
+		options = { ...options, ownerLink: next.ownerLink };
 	}
 } catch (error) {
 	await client?.close();

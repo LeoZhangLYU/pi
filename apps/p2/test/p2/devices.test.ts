@@ -11,8 +11,6 @@ import { WebSocket } from "ws";
 import { DeviceAccesses } from "../../plugins/devices/contract.ts";
 import { OwnerAccess } from "../../plugins/devices/owner-access.ts";
 import { ProviderLogin } from "../../plugins/login/contract.ts";
-import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { startServer } from "../../src/hosts/server.ts";
 import { Access } from "../../src/runtime/access.ts";
 import {
@@ -21,7 +19,7 @@ import {
 	localOwnerProof,
 	localOwnerSignIn,
 } from "../../src/runtime/local-owner.ts";
-import { clientHost, type Fixture, holdIn, http, poll, startFixture, until, webBundle } from "./helpers.ts";
+import { clientHost, type Fixture, holdIn, http, poll, startFixture, webBundle } from "./helpers.ts";
 
 const TUNNEL = { Host: "owner.test", Origin: "https://owner.test" };
 const requestWith = (cookie: string) => ({ headers: { cookie } }) as IncomingMessage;
@@ -82,7 +80,6 @@ test("Devices plugin signs in a remote owner over HTTP/WS, never mints tokens fo
 	let restarted: Awaited<ReturnType<typeof startServer>> | undefined;
 	try {
 		const port = fixture.server.port;
-		const local = fixture.browser();
 		const token = await ownerToken(fixture);
 		const landing = await http(port, "/owner", { headers: TUNNEL });
 		assert.equal(landing.status, 200);
@@ -152,24 +149,6 @@ test("Devices plugin signs in a remote owner over HTTP/WS, never mints tokens fo
 		await fixture.server.reload(["devices"]);
 		const afterReload = await claim(JSON.stringify({ token: outstanding }));
 		assert.equal(afterReload.status, 200, "compatible reloads retain invitations and the owner key");
-		const session = await (await holdIn(local, Sessions, {}, "owner")).create(
-			{ cwd: fixture.workspace },
-			BACKGROUND_CONTEXT,
-		);
-		const sharing = local.hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "full" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => Boolean(value?.length));
-		const joined = await http(port, "/join", {
-			headers: { ...TUNNEL, "Content-Type": "application/json" },
-			method: "POST",
-			body: JSON.stringify({ token: links?.[0]?.token, name: "Guest" }),
-		});
-		assert.equal(joined.status, 200);
-		const guestCookie = String(joined.headers["set-cookie"]).split(";")[0]!;
-		assert.equal((await http(port, "/owner-token", { headers: { ...TUNNEL, Cookie: guestCookie } })).status, 403);
-		const both = fixture.client({ ...TUNNEL, Cookie: `${guestCookie}; ${cookie}` }).host;
-		const ownerAgain = await holdIn(both, Access, {}, "owner");
-		assert.equal(ownerAgain.variant, "owner", "an owner cookie is not downgraded by an existing guest cookie");
 		const startup = (await readFile(join(fixture.dataDir, "owner-token.txt"), "utf8")).trim();
 		assert.equal((await claim(JSON.stringify({ token: startup }))).status, 200, "headless startup token signs in");
 		await fixture.server.close();

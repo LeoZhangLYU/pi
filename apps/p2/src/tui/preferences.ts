@@ -1,4 +1,4 @@
-// Guest-local TUI preferences (p2-tui-port.md section 4.2): validated by the launcher, posted to the worker as data
+// The visitor's local TUI preferences (p2-tui-port.md section 4.2): validated by the launcher, posted to the worker as data
 // and merged over the server's defaults there. Pure (no fs/env); shared by the launcher, the worker and the server.
 
 import { compile, type Schema } from "@earendil-works/pi-schema";

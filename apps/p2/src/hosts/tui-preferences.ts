@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defineFacet, type Facet, forbidden } from "../runtime/chord.ts";
-import { isGuest, isOwner } from "../runtime/principals.ts";
+import { isOwner } from "../runtime/principals.ts";
 import { TuiPreferences } from "../runtime/tui-preferences.ts";
 import { MAX_PREFERENCE_FILE, sanitizeServerPreferences } from "../tui/preferences.ts";
 
@@ -13,7 +13,7 @@ import { MAX_PREFERENCE_FILE, sanitizeServerPreferences } from "../tui/preferenc
 export const tuiPreferencesFacet = (dataDir: string): Facet =>
 	defineFacet((host) =>
 		host.serve(TuiPreferences, (_params, principal) => {
-			if (!isOwner(principal) && !isGuest(principal)) throw forbidden("owners and guests only");
+			if (!isOwner(principal)) throw forbidden("owner only");
 			return {
 				variant: "viewer",
 				members: {

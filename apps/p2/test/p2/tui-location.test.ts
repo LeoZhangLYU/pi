@@ -57,7 +57,7 @@ const TREE: Record<string, { path: string; directories: string[] }> = {
 	"gpu\0/work": { path: "/work", directories: [] },
 };
 
-function stubs(calls: Calls, role: "owner" | "guest" = "owner") {
+function stubs(calls: Calls) {
 	const record = (name: string, args: unknown) => {
 		calls[name] = [...(calls[name] ?? []), args];
 	};
@@ -70,7 +70,6 @@ function stubs(calls: Calls, role: "owner" | "guest" = "owner") {
 				const defaultCwd = self.state("/work");
 				const defaultEnv = self.state(null);
 				catalog = sessions;
-				if (role === "guest") return { variant: "guest", sessions: sessions };
 				return {
 					variant: "owner",
 					sessions,
@@ -178,15 +177,15 @@ function stubs(calls: Calls, role: "owner" | "guest" = "owner") {
 	return { server, worker, catalog: () => catalog };
 }
 
-async function setup(t: { after(fn: () => unknown): void }, role: "owner" | "guest" = "owner") {
+async function setup(t: { after(fn: () => unknown): void }) {
 	const calls: Calls = {};
-	const { server, worker } = stubs(calls, role);
+	const { server, worker } = stubs(calls);
 	const setup = await topology(t, {
 		server,
 		worker,
 		facets: [tuiCoreFacet, chatTui, sessionsTui, statusTui, envsTui],
 		columns: 100,
-		role,
+		role: "owner",
 	});
 	setup.runtime.navigate("chat", "s");
 	await poll(async () => (await setup.screen()).includes("/work • Fixture"));
@@ -296,14 +295,6 @@ test("+ New session: Tab cycles this device and the environments; /new [env:]pat
 		await poll(() => (calls.create?.length ?? 0) === before + 1);
 		assert.deepEqual(calls.create?.at(-1), expected);
 	}
-});
-
-test("guests cannot change directories and never acquire Envs", async (t) => {
-	const { runtime, calls } = await setup(t, "guest");
-	assert(!runtime.ctx.commands.run("p2.session.cd", "/tmp"));
-	assert(!runtime.ctx.commands.run("app.session.new", "gpu:/data"));
-	await new Promise((resolve) => setTimeout(resolve, 50));
-	assert.equal(calls.envsAcquired, undefined);
 });
 
 test("/envs moves the session: local → gpu (same path there) → local; home when the path is missing; current marked", async (t) => {

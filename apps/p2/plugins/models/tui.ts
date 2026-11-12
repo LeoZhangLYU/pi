@@ -1,7 +1,7 @@
 // Model and thinking selection in the TUI (p2-tui-port.md section 1.7, P4): pi's model selector, thinking selector
 // and scoped models selector as overlays, Shift+Tab thinking cycling and Ctrl+P / Shift+Ctrl+P model cycling over the
 // owner's scope (`enabledModels`, else every signed-in model). The model is the owner's choice and cost: `Models` and
-// `Chat.configure` are owner-only, so guests get a read-only line. Without a session, a choice sets the default for
+// `Chat.configure` are owner-only, so the TUI shows a read-only line. Without a session, a choice sets the default for
 // new sessions.
 
 import type { Held } from "@p2/app/v1";
@@ -69,7 +69,7 @@ export class ModelState implements TuiSurface {
 			(shown, guess: Guess) => ({ ...shown, ...guess }),
 		);
 		const changed = (): void => {
-			// The catalog is owner-only: guests never request it.
+			// The catalog is owner-only.
 			if (runtime.role === "owner" && !this.owner) {
 				this.owner = new TuiScope(runtime);
 				this.models = this.owner.watch(Models, {}, (ref, follow) => {
@@ -231,7 +231,7 @@ function setDefault(
 	ctx.perform(state.choosing({ defaultModel }, service.setDefault(defaultModel, BACKGROUND_CONTEXT)));
 }
 
-/** Guests (and the owner without the catalog yet) see the model read-only. */
+/** The owner before the catalog arrives sees the model read-only. */
 function readOnly(ctx: TuiContext, state: ModelState | undefined): boolean {
 	if (ctx.role === "owner" && state?.service()) return false;
 	ctx.notify(

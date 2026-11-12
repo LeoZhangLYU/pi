@@ -12,7 +12,6 @@ export function SessionSheet({
 	onRename,
 	onPin,
 	onArchive,
-	onShare,
 	onCwd,
 	reindex,
 	onReindex,
@@ -22,7 +21,6 @@ export function SessionSheet({
 	onRename: (title: string) => void;
 	onPin: () => void;
 	onArchive: () => void;
-	onShare: () => void;
 	onCwd: () => void;
 	reindex: Reindex;
 	/** Re-indexes the session's history for search (long work: the row shows it running); absent without search. */
@@ -54,10 +52,6 @@ export function SessionSheet({
 				)}
 			</form>
 			<div className="list">
-				<button type="button" className="row-button" onClick={onShare}>
-					<span>{t("share")}</span>
-					<ChevronIcon />
-				</button>
 				<button type="button" className="row-button" onClick={onCwd}>
 					<span>{t("workingDirectory")}</span>
 					<small className="row-value mono">{locationLabel(session.env, session.cwd)}</small>

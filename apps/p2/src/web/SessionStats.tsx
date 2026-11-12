@@ -31,7 +31,6 @@ export function SessionStats({
 	clients,
 	context,
 	onCost,
-	onClients,
 	controls,
 }: {
 	usage?: Usage;
@@ -40,8 +39,6 @@ export function SessionStats({
 	/** The context bar's numbers; "pending" while they load (the bar's space stays), undefined for none. */
 	context?: { used: number; limit: number } | "pending";
 	onCost?: () => void;
-	/** Owner only: open the share sheet from the viewer count. */
-	onClients?: () => void;
 	controls?: ReactNode;
 }) {
 	const { t } = useMessages(webMessages);
@@ -49,28 +46,15 @@ export function SessionStats({
 		<div className="session-usage">
 			{controls && <div className="session-controls">{controls}</div>}
 			<div className="session-stats">
-				{onClients ? (
-					<button
-						type="button"
-						className="usage footer-action client-count"
-						aria-label={t("viewersAria", clients, true)}
-						title={t("viewersTitleShare")}
-						onClick={onClients}
-					>
-						<UsersIcon />
-						{clients}
-					</button>
-				) : (
-					<span
-						className="usage client-count"
-						role="img"
-						aria-label={t("viewersAria", clients, false)}
-						title={t("viewersTitle")}
-					>
-						<UsersIcon />
-						{clients}
-					</span>
-				)}
+				<span
+					className="usage client-count"
+					role="img"
+					aria-label={t("viewersAria", clients)}
+					title={t("viewersTitle")}
+				>
+					<UsersIcon />
+					{clients}
+				</span>
 				<span className="usage"> · </span>
 				<UsageLine usage={cacheUsage} />
 				{usage && (

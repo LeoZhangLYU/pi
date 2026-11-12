@@ -2,7 +2,7 @@
 // small Streamable HTTP server and a stub of the workers' states: instances per session and location or shared, leases
 // set per worker generation and released by the view's end, processes ending with their instances, edits of mcp.json,
 // the generation and incarnation fences, placement refusals, projects' mcp.json, where sessions work, environments
-// through a local pi-env daemon, a reload, guests. Reconnects: mcp-instances.test.ts.
+// through a local pi-env daemon, a reload. Reconnects: mcp-instances.test.ts.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -22,7 +22,7 @@ import type { ConnectEnv } from "../../plugins/mcp/environments.ts";
 import { mcpServerFacet } from "../../plugins/mcp/server.ts";
 import { Catalog, type Session, SessionLocks } from "../../plugins/sessions/contract.ts";
 import { type Child, ChildStore } from "../../plugins/subagents/contract.ts";
-import { APP, type Cell, expectChord, failureOf, holdIn, poll, settled, TEST, testHost, until } from "./helpers.ts";
+import { APP, type Cell, expectChord, holdIn, poll, settled, TEST, testHost, until } from "./helpers.ts";
 
 const FIXTURE = fileURLToPath(new URL("../fixtures/mcp-server.mjs", import.meta.url));
 /** The pi-env daemon environments start servers through: `PI_ENV_DAEMON`, else the debug build of packages/env. */
@@ -35,15 +35,6 @@ const DAEMON =
 		),
 	);
 const OWNER: P2Principal = { kind: "owner", access: "local" };
-const GUEST: P2Principal = {
-	kind: "guest",
-	id: "g1",
-	name: "Guest",
-	home: "s1",
-	sessions: { s1: "full" },
-	revision: 1,
-};
-
 type Paths = { readonly root: string; readonly log: string };
 
 /** Views linger this long after their last reference here (30 s in p2). */
@@ -144,7 +135,6 @@ async function mcpHost(
 				{
 					info: constant({ app: APP, dataDir, fake: true, allowedHosts: [], port: 0 }),
 					revokeOwners: () => {},
-					revokeGuests: () => {},
 				},
 			],
 			[
@@ -805,10 +795,4 @@ test("a reload of the plugin keeps the leases and the tools: the new supervisor 
 		textOf(await s1.call({ location: one, server: "files", tool: "echo", args: { text: "again" } }, TEST)),
 		"echo: again",
 	);
-});
-
-test("guests get no MCP servers", async (t) => {
-	const host = await mcpHost(t, (paths) => ({ files: stdio(paths) }));
-	const error = await failureOf(host.fixture.client(GUEST).hold(Mcp, {}, TEST));
-	assert.equal(error.code, "forbidden");
 });

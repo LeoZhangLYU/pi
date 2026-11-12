@@ -22,7 +22,6 @@ import {
 } from "../../plugins/prompt/templates.ts";
 import promptTui from "../../plugins/prompt/tui.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { startTuiClient } from "../../src/hosts/tui-client.ts";
 import { expandComposerText } from "../../src/runtime/composer.ts";
 import { UserMessageComponent } from "../../src/tui/components/messages.ts";
@@ -30,7 +29,7 @@ import { parseSkillBlock } from "../../src/tui/components/skill-invocation.ts";
 import { tuiCoreFacet } from "../../src/tui/core-commands.ts";
 import { ThemeRef } from "../../src/tui/theme/ref.ts";
 import { BUILTIN_THEMES, createTheme } from "../../src/tui/theme/theme.ts";
-import { expectChord, holdIn, poll, startFixture, until } from "./helpers.ts";
+import { holdIn, poll, startFixture, until } from "./helpers.ts";
 import { topology } from "./tui-fixture.ts";
 
 test("pi's argument parsing and substitution", () => {
@@ -157,22 +156,6 @@ test("PromptResources on the worker: participants only, live templates, expand w
 	await mkdir(join(fixture.workspace, ".pi", "prompts"), { recursive: true });
 	await writeFile(join(fixture.workspace, ".pi", "prompts", "plan.md"), "Plan $@");
 	await until(resources.templates, (value) => value?.some((entry) => entry.name === "plan") === true);
-	// A view-only guest cannot hold it.
-	const sharing = owner.hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-	await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-	const links = await until(sharing.links, (value) => Boolean(value?.length));
-	const token = new URL(links![0]!.url).pathname.split("/").at(-1)!;
-	const joined = await fetch(`http://127.0.0.1:${fixture.server.port}/join`, {
-		method: "POST",
-		headers: { Origin: `http://127.0.0.1:${fixture.server.port}`, "Content-Type": "application/json" },
-		body: JSON.stringify({ token, name: "Viewer" }),
-	});
-	const cookie = joined.headers.getSetCookie()[0]!.split(";")[0]!;
-	const viewer = fixture.client({ Cookie: cookie }).host;
-	await expectChord(
-		whenLive(viewer.hold(PromptResources, { session: session.id, conversation: 1 }, BACKGROUND_CONTEXT)),
-		"forbidden",
-	);
 });
 
 test("TUI: a skill invocation shows pi's collapsed skill block, then the user's text", () => {

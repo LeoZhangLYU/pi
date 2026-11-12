@@ -26,11 +26,9 @@ import { SHELL_ENTRY, type ShellData, shellTail } from "../../src/runtime/shell.
 import { type HarnessParts, type Liveness, SessionLocation } from "../../src/runtime/worker.ts";
 import { buildTranscript } from "../../src/web/transcript.ts";
 import { wholeView } from "../fixtures/whole-view.ts";
-import { expectChord, holdIn, testHost, until, workerFacet } from "./helpers.ts";
+import { holdIn, testHost, until, workerFacet } from "./helpers.ts";
 
 const OWNER = { kind: "owner", access: "local" } as const;
-const ALICE = { kind: "guest", id: "alice", name: "Alice", home: "s1", sessions: { s1: "full" }, revision: 1 } as const;
-const BOB = { kind: "guest", id: "bob", name: "Bob", home: "s1", sessions: { s1: "view" }, revision: 1 } as const;
 const where = { session: "s1", conversation: 1 };
 
 async function shellHost() {
@@ -163,16 +161,11 @@ describe("user shell commands", () => {
 		assert(!transcript.items.some((item) => item.type === "user"), "never shown as a person's message");
 	});
 
-	it("one command at a time; Escape cancels (its author or the owner); full guests run, viewers watch", async (t) => {
+	it("one command at a time; the owner cancels it", async (t) => {
 		const fixture = await shellHost();
 		t.after(() => fixture.close());
-		const [alice, owner, bob] = await Promise.all([
-			holdIn(fixture.client(ALICE), Chat, where, "participant"),
-			holdIn(fixture.client(OWNER), Chat, where, "participant"),
-			// View-only guests cannot run commands.
-			holdIn(fixture.client(BOB), Chat, where, "viewer"),
-		]);
-		const { shellId } = await alice.shell(
+		const owner = await holdIn(fixture.client(OWNER), Chat, where, "participant");
+		const { shellId } = await owner.shell(
 			{
 				command: "echo started; sleep 20; echo late",
 				includeInContext: true,
@@ -180,33 +173,31 @@ describe("user shell commands", () => {
 			},
 			BACKGROUND_CONTEXT,
 		);
-		// Everyone sees it run, with its output so far. It is a job (the worker stays up) and one active call while it
+		// It is shown running, with its output so far. It is a job (the worker stays up) and one active call while it
 		// runs (a move or a clone waits for it).
-		const live = await until(bob.liveShell, (value) => Boolean(value?.running && value.output.includes("started")));
-		assert.deepEqual(live?.author, { kind: "guest", id: "alice", name: "Alice" });
+		const live = await until(owner.liveShell, (value) => Boolean(value?.running && value.output.includes("started")));
+		assert.deepEqual(live?.author, { kind: "owner", id: "owner", name: "Owner" });
 		assert.equal(fixture.host.activity.value.jobs, 1);
 		assert.equal(fixture.activeCalls(), 1);
 		await assert.rejects(
 			owner.shell({ command: "true", includeInContext: true, requestId: "b" }, BACKGROUND_CONTEXT),
 			(error: Error) => error.message.includes(SHELL_BUSY),
 		);
-		// The owner may cancel anyone's command; a cancelled one is placed as cancelled.
+		// A cancelled command is placed as cancelled.
 		assert.deepEqual(await owner.abortShell({ shellId }, BACKGROUND_CONTEXT), { aborted: true });
 		const view = await until(owner.view, (next) => shells(next).length === 1);
 		const [cancelled] = shells(view);
 		assert.equal(cancelled?.data.cancelled, true);
 		assert.doesNotMatch(cancelled?.data.output ?? "", /late/);
-		assert.deepEqual(cancelled?.data.author, { kind: "guest", id: "alice", name: "Alice" });
+		assert.deepEqual(cancelled?.data.author, { kind: "owner", id: "owner", name: "Owner" });
 		await until(owner.liveShell, (value) => value === null);
 		await until(fixture.host.activity, (activity) => activity.jobs === 0);
 		assert.equal(fixture.activeCalls(), 0);
-		// Only its author or the owner cancels a running command.
 		const second = await owner.shell(
 			{ command: "sleep 20", includeInContext: false, requestId: "c" },
 			BACKGROUND_CONTEXT,
 		);
-		await until(alice.liveShell, (value) => Boolean(value?.running));
-		await expectChord(alice.abortShell({ shellId: second.shellId }, BACKGROUND_CONTEXT), "forbidden");
+		await until(owner.liveShell, (value) => Boolean(value?.running));
 		assert.deepEqual(await owner.abortShell({ shellId: second.shellId }, BACKGROUND_CONTEXT), { aborted: true });
 		await until(owner.view, (next) => shells(next).length === 2);
 	});

@@ -42,10 +42,10 @@ export {
 	useScrollMemory,
 } from "../web/navigation.ts";
 
-import { Access, grantMode } from "./access.ts";
+import { Access } from "./access.ts";
 import type { KeyedRegistry } from "./chord.ts";
 import { canonicalJson } from "./json.ts";
-import { follow, followRegistry, type HeldIn, type HeldRef, knownRegistry, liveIn, UI_LINGER } from "./refs.ts";
+import { follow, followRegistry, type HeldIn, type HeldRef, knownRegistry, UI_LINGER } from "./refs.ts";
 import { Slots } from "./web-core.ts";
 
 export { shortPath } from "../web/path-label.ts";
@@ -350,28 +350,6 @@ export function useConnected(): boolean {
 	);
 }
 
-// ─── a guest's share that ended ───
-
-let shareEnded = false;
-const shareEndedListeners = new Set<() => void>();
-
-/** A guest's access ended (link reset, removal, archive): the page stops reconnecting and shows Pi Mobile's notice. */
-export function setShareEnded(ended: boolean): void {
-	if (shareEnded === ended) return;
-	shareEnded = ended;
-	for (const listener of shareEndedListeners) listener();
-}
-
-export function useShareEnded(): boolean {
-	return useSyncExternalStore(
-		(listener) => {
-			shareEndedListeners.add(listener);
-			return () => shareEndedListeners.delete(listener);
-		},
-		() => shareEnded,
-	);
-}
-
 // ─── navigation ───
 
 let navigation: Navigation | undefined;
@@ -476,14 +454,9 @@ export function useOwner(): boolean {
 	return owner;
 }
 
-/**
- * Whether this browser may write in `session` (send, stop, the workspace): the owner as last known (`useOwner`, so no
- * wait for `Access`), or a guest whose grant gives it full access there.
- */
-export function useCanWrite(session: string | undefined): boolean {
-	const owner = useOwner();
-	const grant = useReadable(liveIn(useObject(Access, {}), "guest")?.grant);
-	return owner || grantMode(grant, session) === "full";
+/** Whether this browser may write in `session` (send, stop, the workspace): the owner as last known. */
+export function useCanWrite(_session: string | undefined): boolean {
+	return useOwner();
 }
 
 /** Forgets what this browser keeps for the owner: signing out. The kept app (public/sw.js) goes too. */

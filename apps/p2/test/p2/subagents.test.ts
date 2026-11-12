@@ -9,13 +9,12 @@ import { BACKGROUND_CONTEXT, whenLive } from "@p2/app/v1";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { Mcp } from "../../plugins/mcp/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { SessionStatus } from "../../plugins/status/contract.ts";
 import { type Child, ChildStore, SubagentControl, Subagents } from "../../plugins/subagents/contract.ts";
 import { Workspace } from "../../plugins/workspace/contract.ts";
 import { startServer } from "../../src/hosts/server.ts";
 import type { Host, RefIn } from "../../src/runtime/chord.ts";
-import { expectChord, type Fixture, failureOf, holdIn, http, startFixture, until } from "./helpers.ts";
+import { type Fixture, failureOf, holdIn, startFixture, until } from "./helpers.ts";
 
 const MCP_FIXTURE = fileURLToPath(new URL("../fixtures/mcp-server.mjs", import.meta.url));
 
@@ -174,33 +173,6 @@ describe("subagents (fake provider)", () => {
 		await chat.send({ text: "subagent-answer", requestId: "answer-again" }, BACKGROUND_CONTEXT);
 		await until(chat.view, (view) => texts(view).some((text) => text.startsWith("Echo: slow child")));
 		await until(status.statuses, (value) => value?.[session]?.tasks === 0);
-	});
-
-	it("limits guest sidebar children to their session and disallows reporting", async () => {
-		const sharing = owner.hold(Sharing, { session }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => Boolean(value?.length));
-		const joined = await http(fixture.server.port, "/join", {
-			method: "POST",
-			headers: { Host: "share.test", Origin: "https://share.test", "Content-Type": "application/json" },
-			body: JSON.stringify({ token: links?.[0]?.token, name: "Reader" }),
-		});
-		assert.equal(joined.status, 200);
-		const cookie = String(joined.headers["set-cookie"]).split(";")[0]!;
-		const guest = fixture.client({ Host: "share.test", Origin: "https://share.test", Cookie: cookie }).host;
-		const list = await holdIn(guest, Subagents, {}, "reader");
-		const value = await until(list.children, (value) => Boolean(value?.[session]?.length));
-		assert.deepEqual(Object.keys(value!), [session]);
-		// @ts-expect-error `report` is a worker's: a reader calling it anyway is refused.
-		await expectChord(list.report({ children: [] }, BACKGROUND_CONTEXT), "invalid");
-		const sub = await holdIn(guest, Chat, { session, conversation: child.conversationId }, "viewer");
-		// Read-only guests cannot archive (read/write guests can, as the owner).
-		await expectChord(whenLive(guest.hold(SubagentControl, { session }, BACKGROUND_CONTEXT)), "forbidden");
-		await until(sub.view, (view) => texts(view).includes("Echo: hello helper"));
-		sub.release();
-		list.release();
-		await guest.close(BACKGROUND_CONTEXT);
-		sharing.release();
 	});
 
 	it("loads persisted sidebar children after server restart without starting a worker", async () => {

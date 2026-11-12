@@ -1,5 +1,5 @@
 // Uploads (POST /upload into the session's files, attached to messages by ID and materialized) and download snapshots
-// (GET /download), owner and guests; the server's mirror of the session's file summaries.
+// (GET /download), the owner; the server's mirror of the session's file summaries.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -12,15 +12,14 @@ import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { DownloadStore, FileSummaries, type Uploaded } from "../../plugins/files/contract.ts";
 import { type Session, Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import type { RefIn } from "../../src/runtime/chord.ts";
-import { type Fixture, holdIn, http, poll, startFixture, until } from "./helpers.ts";
+import { type Fixture, holdIn, poll, startFixture, until } from "./helpers.ts";
 
 const PNG = Buffer.from(
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
 	"base64",
 );
-const TUNNEL = { Host: "share.test", Origin: "https://share.test" };
+const _TUNNEL = { Host: "share.test", Origin: "https://share.test" };
 const userMessages = (view: ConversationView | null | undefined): UserMessage[] =>
 	(view?.entries ?? []).flatMap((entry) => (entry.kind === "p2.input" ? [entry.model?.[0] as UserMessage] : []));
 
@@ -47,19 +46,6 @@ describe("files (fake provider)", () => {
 			async (ctx) => (await ctx.get(DownloadStore, {})).save({ session: id, path, ...(name ? { name } : {}) }, ctx),
 			BACKGROUND_CONTEXT,
 		);
-	const guestCookie = async (mode: "view" | "full"): Promise<string> => {
-		const sharing = fixture.browser().hold(Sharing, { session: session.id }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => Boolean(value?.some((link) => link.mode === mode)));
-		const token = links?.find((link) => link.mode === mode)?.token ?? "";
-		const joined = await http(fixture.server.port, "/join", {
-			method: "POST",
-			headers: { ...TUNNEL, "Content-Type": "application/json" },
-			body: JSON.stringify({ token, name: mode }),
-		});
-		assert.equal(joined.status, 200, joined.body);
-		return String(joined.headers["set-cookie"] ?? "").split(";")[0] ?? "";
-	};
 
 	before(async () => {
 		fixture = await startFixture({ allowedHosts: ["share.test"] });
@@ -159,26 +145,6 @@ describe("files (fake provider)", () => {
 		assert.equal(partial.body, "234");
 		assert.equal(partial.headers["content-range"], "bytes 2-4/10");
 		assert.equal((await fixture.http(clipPath, { headers: { Range: "bytes=20-" } })).status, 416);
-	});
-
-	it("lets guests download from their session, and only read/write guests upload", async () => {
-		const source = join(fixture.dataDir, "shared.txt");
-		await writeFile(source, "shared");
-		const shared = await snapshot(session.id, source);
-		const hidden = await snapshot(other.id, source);
-		const viewer = await guestCookie("view");
-		const get = (path: string, cookie: string) =>
-			http(fixture.server.port, path, { headers: { ...TUNNEL, Cookie: cookie } });
-		const downloaded = await get(`/download?session=${session.id}&id=${shared.id}`, viewer);
-		assert.equal(downloaded.status, 200);
-		assert.equal(downloaded.body, "shared");
-		assert.equal((await get(`/download?session=${other.id}&id=${hidden.id}`, viewer)).status, 403);
-		assert.equal((await get(`/download?session=${session.id}&id=${shared.id}`, "")).status, 403, "not signed in");
-		assert.equal((await upload(session.id, "a.txt", "x", { ...TUNNEL, Cookie: viewer })).status, 403, "read-only");
-		const writer = await guestCookie("full");
-		const uploaded = await upload(session.id, "guest.txt", "from guest", { ...TUNNEL, Cookie: writer });
-		assert.equal(uploaded.status, 200, uploaded.body);
-		assert.equal((await upload(other.id, "a.txt", "x", { ...TUNNEL, Cookie: writer })).status, 403);
 	});
 
 	it("answers at once for an archived or unknown session, never waiting for its worker", async () => {

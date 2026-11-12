@@ -79,7 +79,7 @@ function NameSheet({ name, onSave, onClose }: { name: string; onSave: (name: str
 	);
 }
 
-/** Beside Steer in the composer: the owner's switch; for guests, a marker while chat mode is on. */
+/** Beside Steer in the composer: the owner's switch. */
 function ChatModeChip() {
 	const { t } = useMessages(chatModeMessages);
 	const route = useRoute();

@@ -12,7 +12,7 @@ import { parseProjects } from "../../plugins/projects/config.ts";
 import { below, Projects, placeOn } from "../../plugins/projects/contract.ts";
 import { ProjectStore } from "../../plugins/projects/store.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { expectChord, holdIn, poll, startFixture, until } from "./helpers.ts";
+import { holdIn, poll, startFixture, until } from "./helpers.ts";
 
 const PI = { pi: [{ env: "mac", path: "~/projects/pi/pi" }, { path: "~/projects/pi/pi" }] };
 
@@ -110,11 +110,6 @@ test("Projects is owner-only, follows projects.json and names this device by its
 	await writeFile(join(fixture.dataDir, "projects.json"), "{}");
 	await until(projects.failure, (failure) => failure === null);
 	assert.deepEqual(projects.projects.value, []);
-	const guest = fixture
-		.as({ kind: "guest", id: "guest", name: "Guest", home: "unknown", sessions: { unknown: "full" }, revision: 1 })
-		.hold(Projects, {}, BACKGROUND_CONTEXT);
-	await expectChord(whenLive(guest), "forbidden");
-	guest.release();
 });
 
 test("membership: assigned to projects.json's projects only, followed by copies, kept when the project goes", async (t) => {

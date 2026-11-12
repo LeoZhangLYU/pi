@@ -30,54 +30,35 @@ import {
 } from "./helpers.ts";
 
 const OWNER = { kind: "owner", access: "local" } as const;
-const ALICE = {
-	kind: "guest",
-	id: "alice",
-	name: "Alice",
-	home: "sample",
-	sessions: { sample: "full" },
-	revision: 1,
-} as const;
 
 describe("testHost", () => {
-	it("runs a worker facet in a bare session host and checks guest variants over memory links", async (t) => {
+	it("runs a worker facet in a bare session host", async (t) => {
 		const fixture = await testHost({ address: Session({ id: "sample" }), kind: "worker", facets: [draftsWorker] });
 		t.after(() => fixture.close());
 		await fixture.root(async (ctx) => {
 			await (await ctx.get(DraftStore, {})).add(
 				{
 					conversation: 1,
-					items: [
-						{ author: { kind: "owner", id: "owner", name: "Owner" }, text: "owner draft" },
-						{ author: { kind: "guest", id: ALICE.id, name: ALICE.name }, text: "alice draft" },
-					],
+					items: [{ author: { kind: "owner", id: "owner", name: "Owner" }, text: "owner draft" }],
 				},
 				ctx,
 			);
 		});
-		const alice = fixture.client(ALICE).hold(Drafts, { session: "sample", conversation: 1 }, BACKGROUND_CONTEXT);
-		await whenLive(alice);
-		assert.equal(alice.variant, "author");
-		const drafts = await settled(alice.drafts);
+		const owner = fixture.client(OWNER).hold(Drafts, { session: "sample", conversation: 1 }, BACKGROUND_CONTEXT);
+		await whenLive(owner);
+		assert.equal(owner.variant, "author");
+		const drafts = await settled(owner.drafts);
 		assert.deepEqual(
 			drafts.map((draft) => draft.text),
-			["alice draft"],
+			["owner draft"],
 		);
-		assert.deepEqual(await alice.claim({ ids: drafts.map((draft) => draft.id) }, BACKGROUND_CONTEXT), {
-			texts: ["alice draft"],
+		assert.deepEqual(await owner.claim({ ids: drafts.map((draft) => draft.id) }, BACKGROUND_CONTEXT), {
+			texts: ["owner draft"],
 		});
-		assert.deepEqual(await settled(alice.drafts), []);
-		const viewer = fixture
-			.client({ ...ALICE, sessions: { sample: "view" }, revision: 2 })
-			.hold(Drafts, { session: "sample", conversation: 1 }, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(viewer), "forbidden");
-		const foreign = fixture
-			.client({ ...ALICE, id: "foreign", home: "other", sessions: { other: "full" } })
-			.hold(Drafts, { session: "sample", conversation: 1 }, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(foreign), "forbidden");
+		assert.deepEqual(await settled(owner.drafts), []);
 	});
 
-	it("tests the status facet with a Hosts stub, generation fences and guest-scoped state", async (t) => {
+	it("tests the status facet with a Hosts stub and generation fences", async (t) => {
 		let publish!: (ctx: Ctx, workers: Record<string, WorkerState>) => void;
 		const fixture = await testHost({
 			facets: [statusServer],
@@ -114,26 +95,16 @@ describe("testHost", () => {
 		);
 		await stale.report({ tasks: 99, busy: [99] }, BACKGROUND_CONTEXT);
 		assert.deepEqual((await settled(owner.statuses)).sample, { running: true, tasks: 3, busy: [1, 4] });
-		const guest = await holdIn(
-			fixture.client({ ...ALICE, sessions: { sample: "view" } }),
-			SessionStatus,
-			{},
-			"reader",
-		);
-		assert.deepEqual(Object.keys(await settled(guest.statuses)), ["sample"]);
 		const anonymous = fixture.client({ kind: "anonymous" } as never).hold(SessionStatus, {}, BACKGROUND_CONTEXT);
 		await expectChord(whenLive(anonymous), "forbidden");
 		await fixture.root((ctx) =>
 			publish(ctx, { sample: { running: false, generation: 2 }, other: { running: true, generation: 1 } }),
 		);
 		await until(owner.statuses, (value) => value?.sample?.running === false);
-		assert.deepEqual((await settled(guest.statuses)).sample, { running: false, tasks: 0, busy: [] });
 		await fixture.root((ctx) =>
 			publish(ctx, { sample: { running: false, generation: 2, error: "worker fixture failure" } }),
 		);
 		await until(owner.statuses, (value) => value?.sample?.error === "worker fixture failure");
-		// Guests learn that it stopped, never the worker's error text (paths, stacks), as in Pi Mobile.
-		assert.deepEqual((await settled(guest.statuses)).sample, { running: false, tasks: 0, busy: [] });
 		await fixture.root((ctx) => publish(ctx, { sample: { running: true, generation: 3 } }));
 		await until(owner.statuses, (value) => value?.sample?.running === true && value.sample.error === undefined);
 	});

@@ -9,13 +9,13 @@ export const ToolActivityContext = createContext<ToolActivityTable>(new Map());
 export const OpenConversation = createContext<(conversationId: number) => void>(() => {});
 /** The session's one-shot agents: conversation by the nested call ID that ran them (`<script call ID>/c<n>`). */
 export const OneShotAgents = createContext<ReadonlyMap<string, number>>(new Map());
-/** Owner-only navigation to another session's root; absent for guest views. */
+/** Owner-only navigation to another session's root. */
 export const OpenPeerConversation = createContext<((sessionId: string) => void) | undefined>(undefined);
 /** Tool paths are displayed relative to the containing session's working directory. */
 export const WorkingDirectory = createContext<string | undefined>(undefined);
 /** Opens a cwd-relative file in the workspace panel; absent when the viewer has no workspace access. */
 export const OpenWorkspaceFile = createContext<((path: string, line?: number) => void) | undefined>(undefined);
-/** Shows one of the session's terminals in the terminal panel (owner only: guests have none). */
+/** Shows one of the session's terminals in the terminal panel (owner only). */
 export const OpenTerminal = createContext<((terminalId: string) => void) | undefined>(undefined);
 /** Download and artifact locators are scoped to the containing session, including child views. */
 export const SessionId = createContext<string | undefined>(undefined);

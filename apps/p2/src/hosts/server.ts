@@ -27,7 +27,7 @@ import { requestLanguage } from "../runtime/locale.ts";
 import { captureProcessLogs, processLogs } from "../runtime/logs.ts";
 import { mintOwnerLink } from "../runtime/owner-link.ts";
 import { type SignInState, signIn } from "../runtime/page.ts";
-import { isGuest, isOwner, type P2Principal, SERVER } from "../runtime/principals.ts";
+import { isOwner, type P2Principal, SERVER } from "../runtime/principals.ts";
 import { takeProcessLock } from "../runtime/process-lock.ts";
 import {
 	Authenticators,
@@ -493,11 +493,10 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 	const closeDevChannel = dev && !supervised ? await serveDevChannel(dataDir, execute) : undefined;
 
 	/**
-	 * Who sent a request: an owner session cookie (a local one only on loopback), a guest cookie, a Radius user. An owner
-	 * wins over a guest cookie in the same browser. Loopback alone proves nothing (any user of the machine reaches it):
-	 * the local owner is whoever proved to run as the server's user (`src/runtime/local-owner.ts`) or redeemed an owner
-	 * link on loopback, and holds that local session cookie. Another site's requests lose every principal in
-	 * `resolveAccess`.
+	 * Who sent a request: an owner session cookie (a local one only on loopback) or a Radius owner. Loopback alone proves
+	 * nothing (any user of the machine reaches it): the local owner is whoever proved to run as the server's user
+	 * (`src/runtime/local-owner.ts`) or redeemed an owner link on loopback, and holds that local session cookie. Another
+	 * site's requests lose every principal in `resolveAccess`.
 	 */
 	const authenticate = async (
 		request: IncomingMessage,
@@ -526,7 +525,7 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 	/**
 	 * A browser request another site made (Fetch Metadata: cross-site, or same-site such as a page on another local
 	 * port, whose cookies SameSite does not separate) gets no principal from any credential: no fetch, module, upload
-	 * or WebSocket of a foreign page can read or drive p2 with the owner's or a guest's cookie. Only a top-level
+	 * or WebSocket of a foreign page can read or drive p2 with the owner's cookie. Only a top-level
 	 * navigation to an app page authenticates, so links into p2 open it normally. Radius-relayed requests are
 	 * authenticated per channel by Radius (and framed by its shell), not by browser cookies; requests without Fetch
 	 * Metadata (the TUI, scripts) are unaffected.
@@ -606,10 +605,7 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 					return;
 				}
 				if (path === "/__p2_tui" || /^\/__p2_tui\/[a-f0-9]{64}\.mjs$/.test(path)) {
-					if (
-						(isOwner(principal) || isGuest(principal)) &&
-						(request.method === "GET" || request.method === "HEAD")
-					) {
+					if (isOwner(principal) && (request.method === "GET" || request.method === "HEAD")) {
 						const bundle = await getTuiBundle();
 						const tui = tuiManifest(bundle);
 						if (path !== "/__p2_tui" && path !== tui.bundle) {
@@ -624,11 +620,7 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 						response.end(request.method === "HEAD" ? undefined : manifest ? JSON.stringify(tui) : bundle.source);
 						return;
 					}
-					if (isGuest(principal)) {
-						response.writeHead(403);
-						response.end();
-					} else
-						signIn(request, response, 401, signInStateFor((await host.registry(SignInStates, ctx)).value) ?? {});
+					signIn(request, response, 401, signInStateFor((await host.registry(SignInStates, ctx)).value) ?? {});
 					return;
 				}
 				const route = findRoute((await host.registry(Routes, ctx)).value, request.method ?? "GET", path);
@@ -644,22 +636,17 @@ export async function startServer(options: ServerOptions = {}): Promise<P2Server
 					);
 					if (cookies.length) response.setHeader("Set-Cookie", cookies);
 				}
-				if (isOwner(principal) || (isGuest(principal) && (await web?.guestMayLoad(request, principal)))) {
+				if (isOwner(principal)) {
 					if (web !== undefined) return web.handle(request, response);
 					response.writeHead(404, { "Content-Type": "text/plain" });
 					response.end(t("notFound"));
 					return;
 				}
-				if (isGuest(principal)) {
-					response.writeHead(403, { "Content-Type": "text/plain" });
-					response.end(t("forbidden"));
-					return;
-				}
 				request.resume();
-				// A Radius user is signed in already; owner sign-in is not for them.
+				// A Radius user other than the owner has no access: p2 shares nothing.
 				if (origin.relayUser !== undefined) {
 					response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-					response.end(`${t("notShared")}\n`);
+					response.end(`${t("forbidden")}\n`);
 					return;
 				}
 				// A link from another site may arrive without the owner's cookie (Chrome launching an installed app sent

@@ -2,7 +2,6 @@
 // session actions on its rows.
 
 import {
-	Access,
 	BACKGROUND_CONTEXT,
 	contribute,
 	defineFacet,
@@ -168,20 +167,18 @@ function Sidebar() {
 	const nav = useNavigation();
 	const service = useObject(Sessions, {});
 	const catalog = liveIn(service, "owner");
-	const access = useObject(Access, {});
-	const guest = useReadable(keptIn(access, "guest")?.grant);
-	// As the server last said (kept across starts): unread marks and search hold without waiting for Access.
+	// As the server last said (kept across starts): unread marks and search hold without waiting for the catalog.
 	const owner = useOwner();
 	const status = keptIn(useObject(SessionStatus, {}), "reader");
 	const agents = keptIn(useObject(Subagents, {}), "reader");
 	const { fail } = useComposerState();
-	const [list, edit] = useOptimisticCall(useReadable(keptIn(service, "owner", "guest")?.sessions), applyRow, fail);
+	const [list, edit] = useOptimisticCall(useReadable(keptIn(service, "owner")?.sessions), applyRow, fail);
 	const statuses = useReadable(status?.statuses);
 	const children = useReadable(agents?.children);
 	useEffect(() => {
 		if (list) rememberMains(list);
 	}, [list]);
-	// Unread answers are the owner's (any device); guests see none and mark nothing.
+	// Unread answers are the owner's (any device).
 	const marks = useObject(SessionReads, owner ? {} : undefined);
 	const answers = useReadable(marks?.answers);
 	const reads = useReadable(marks?.reads);
@@ -335,7 +332,6 @@ function Sidebar() {
 		<DrawerRowsContext.Provider value={rows}>
 			<Drawer
 				sessions={folders}
-				guest={guest}
 				sandboxes={sandboxes}
 				activeId={route.session}
 				conversationId={route.conversation}
@@ -377,7 +373,6 @@ function Sidebar() {
 							catalog.pin({ id: viewed.id, pinned: !viewed.pinned }, BACKGROUND_CONTEXT),
 						)
 					}
-					onShare={() => openLayer({ kind: "sheet", name: "share" })}
 					onCwd={() => openLayer(directoryPickerLayer(viewed.env ?? null, viewed.cwd))}
 					reindex={rebuilds.find((each) => each.session === viewed.id)}
 					onReindex={

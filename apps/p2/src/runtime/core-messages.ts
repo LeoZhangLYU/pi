@@ -10,7 +10,6 @@ export const coreMessages = defineMessages("p2.core", {
 		invalidOrigin: "Invalid origin",
 		notFound: "Not found",
 		forbidden: "Forbidden",
-		notShared: "Nothing on this brain is shared with you. Ask its owner for a share link.",
 		uiUnavailable: "Could not load the UI",
 	},
 	"zh-CN": {
@@ -20,7 +19,6 @@ export const coreMessages = defineMessages("p2.core", {
 		invalidOrigin: "来源无效",
 		notFound: "未找到",
 		forbidden: "无权访问",
-		notShared: "这个 brain 没有向你分享任何内容，请向所有者索取分享链接。",
 		uiUnavailable: "无法加载界面",
 	},
 });

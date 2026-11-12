@@ -84,7 +84,7 @@ function NativePanel({
 	const workspace = useObject(Workspace, { session, conversation });
 	// Only to send review comments: a method-only reference (the chat view holds the state when it is open).
 	const chat = useObject(Chat, { session, conversation });
-	const rows = useReadable(liveIn(useObject(Sessions, {}), "owner", "guest")?.sessions);
+	const rows = useReadable(liveIn(useObject(Sessions, {}), "owner")?.sessions);
 	const children = useReadable(liveIn(useObject(Subagents, {}), "reader")?.children);
 	// Where the viewed conversation works: a subagent may have its own location (e.g. a git worktree, another machine).
 	const location = conversationLocation(

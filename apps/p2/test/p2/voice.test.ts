@@ -10,12 +10,11 @@ import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it, mock } from "node:test";
 import type { ConversationView } from "@earendil-works/pi-durable";
-import { BACKGROUND_CONTEXT, follow, whenLive } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT, follow } from "@p2/app/v1";
 import { WebSocket } from "ws";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { ChatMode, spokenMention } from "../../plugins/chat-mode/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { BargeInDetector, type BargeInPhase, Pcm16kResampler } from "../../plugins/voice/barge-in.ts";
 import { languagesOf, resolved } from "../../plugins/voice/choice.ts";
 import { VoiceMode, VoiceService } from "../../plugins/voice/contract.ts";
@@ -33,7 +32,7 @@ import { isStopCommand, SpeechChunker, speakable } from "../../plugins/voice/spe
 import { PendingTranscripts, type TranscriptTarget, voiceMessage } from "../../plugins/voice/transcripts.ts";
 import voiceWorker, { VOICE_PROMPT, voicePrompt } from "../../plugins/voice/worker.ts";
 import { chatModeHost } from "./chat-mode-host.ts";
-import { ChordError, expectChord, type Fixture, holdIn, http, poll, startFixture, until } from "./helpers.ts";
+import { ChordError, type Fixture, holdIn, http, poll, startFixture, until } from "./helpers.ts";
 import { fakeSpeechService, VOICES } from "./voice-service.ts";
 
 describe("voice speech text", () => {
@@ -676,21 +675,12 @@ describe("voice in chat mode", () => {
 		assert.deepEqual(calls, ["send lunch?", "stop", "send @pi which place?"]);
 	});
 
-	it("places spoken chat as the speaker's chat entry, and a spoken address as a mention that Pi answers", async (t) => {
+	it("places spoken chat as the owner's chat entry, and a spoken address as a mention that Pi answers", async (t) => {
 		const fixture = await chatModeHost();
 		t.after(() => fixture.close());
 		const OWNER = { kind: "owner", access: "local" } as const;
-		const ALICE = {
-			kind: "guest",
-			id: "alice",
-			name: "Alice",
-			home: "s1",
-			sessions: { s1: "full" },
-			revision: 1,
-		} as const;
 		const where = { session: "s1", conversation: 1 };
 		const owner = await holdIn(fixture.client(OWNER), Chat, where, "participant");
-		const alice = await holdIn(fixture.client(ALICE), Chat, where, "participant");
 		const mode = await holdIn(fixture.client(OWNER), ChatMode, where, "owner");
 		await mode.set({ enabled: true }, BACKGROUND_CONTEXT);
 		await until(mode.enabled, (value) => value === true);
@@ -698,30 +688,24 @@ describe("voice in chat mode", () => {
 			view?.entries.some((entry) => entry.model?.[0]?.role === "assistant") ?? false;
 		// What the voice engine sends: the transcript as `voiceMessage` makes it.
 		await owner.send({ text: voiceMessage("lunch first?", true).text, requestId: "1" }, BACKGROUND_CONTEXT);
-		await alice.send({ text: voiceMessage("Pie sounds good", true).text, requestId: "2" }, BACKGROUND_CONTEXT);
-		const chatted = await until(
-			owner.view,
-			(view) => (view?.entries ?? []).filter((entry) => entry.kind === "chat.message").length === 2,
+		const chatted = await until(owner.view, (view) =>
+			Boolean(view?.entries.some((entry) => entry.kind === "chat.message")),
 		);
 		assert.deepEqual(
 			chatted?.entries.filter((entry) => entry.kind === "chat.message").map((entry) => entry.data),
-			[
-				{ author: { kind: "owner", id: "owner", name: "Owner" }, text: "lunch first?", attachments: [] },
-				{ author: { kind: "guest", id: "alice", name: "Alice" }, text: "Pie sounds good", attachments: [] },
-			],
+			[{ author: { kind: "owner", id: "owner", name: "Owner" }, text: "lunch first?", attachments: [] }],
 		);
 		assert(!answered(chatted), "no run for chat");
-		await alice.send({ text: voiceMessage("Hey Pi, which place?", true).text, requestId: "3" }, BACKGROUND_CONTEXT);
+		await owner.send({ text: voiceMessage("Hey Pi, which place?", true).text, requestId: "2" }, BACKGROUND_CONTEXT);
 		const view = await until(owner.view, answered);
 		assert.deepEqual(view?.entries.find((entry) => entry.kind === "chat.mention")?.data, {
-			author: { kind: "guest", id: "alice", name: "Alice" },
+			author: { kind: "owner", id: "owner", name: "Owner" },
 			text: "@pi Hey Pi, which place?",
 			attachments: [],
 			included: chatted?.entries.filter((entry) => entry.kind === "chat.message").map((entry) => entry.id),
 		});
 	});
 });
-
 describe("voice choice against the service", () => {
 	it("keeps a language the engine speaks, else falls back to its default; lists English and Deutsch first", () => {
 		const supertonic = VOICES.engines[0];
@@ -758,53 +742,21 @@ describe("voice prompt language", () => {
 });
 
 describe("voice mode's switch and voice", () => {
-	it("keeps the owner's switch and voice; a read/write guest switches only its own and cannot choose", async (t) => {
+	it("keeps the owner's switch and voice", async (t) => {
 		const fixture = await chatModeHost({ facet: voiceWorker });
 		t.after(() => fixture.close());
 		const where = { session: "s1", conversation: 1 };
 		const owner = await holdIn(fixture.client({ kind: "owner", access: "local" }), VoiceMode, where, "owner");
-		const alice = await holdIn(
-			fixture.client({
-				kind: "guest",
-				id: "alice",
-				name: "Alice",
-				home: "s1",
-				sessions: { s1: "full" },
-				revision: 1,
-			}),
-			VoiceMode,
-			where,
-			"participant",
-		);
 		await owner.set({ enabled: true }, BACKGROUND_CONTEXT);
 		// The answer follows its state: the owner's switch and voice are on the page when each call resolves.
 		assert.equal(owner.enabled.value, true);
 		await owner.choose({ engine: "kokoro", voice: "kokoro-af_heart", speed: 1, language: "de" }, BACKGROUND_CONTEXT);
 		assert.equal(owner.voice.value?.voice, "kokoro-af_heart");
-		// The guest sees the owner's choice, language included.
-		assert.equal((await until(alice.voice, (voice) => voice?.voice === "kokoro-af_heart"))?.language, "de");
-		assert.equal(alice.enabled.value, false, "a guest's switch is its own");
-		await alice.set({ enabled: true }, BACKGROUND_CONTEXT);
-		assert.equal(alice.enabled.value, true);
-		// The guest turning its microphone off leaves the owner's voice mode on.
-		await alice.set({ enabled: false }, BACKGROUND_CONTEXT);
-		assert.equal(alice.enabled.value, false);
-		assert.equal(owner.enabled.value, true);
-		// A reference carries every variant's members; the participant's binding refuses the owner's (cast: the type has
-		// only the participant's).
-		const asOwner = alice as unknown as typeof owner;
-		await expectChord(
-			asOwner.choose({ engine: "kokoro", voice: "kokoro-af_heart", speed: 1, language: "de" }, BACKGROUND_CONTEXT),
-			"invalid",
-		);
-		// A view-only guest has no voice mode.
-		const bob = fixture
-			.client({ kind: "guest", id: "bob", name: "Bob", home: "s1", sessions: { s1: "view" }, revision: 1 })
-			.hold(VoiceMode, where, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(bob), "forbidden");
+		await owner.set({ enabled: false }, BACKGROUND_CONTEXT);
+		assert.equal(owner.enabled.value, false);
+		assert.equal(owner.voice.value?.language, "de", "the voice choice stays");
 	});
 });
-
 describe("voice routes and mode", () => {
 	let fixture: Fixture;
 	let speech: Awaited<ReturnType<typeof fakeSpeechService>>;
@@ -836,32 +788,17 @@ describe("voice routes and mode", () => {
 		service.release();
 	});
 
-	it("bridges the conversation's room: p2's identity, the owner's commands, speech for everyone", async () => {
+	it("bridges the conversation's room: p2's identity and the owner's commands", async () => {
 		const port = fixture.server.port;
 		const owner = fixture.browser();
 		const session = (
 			await (await holdIn(owner, Sessions, {}, "owner")).create({ cwd: fixture.workspace }, BACKGROUND_CONTEXT)
 		).id;
-		const sharing = owner.hold(Sharing, { session }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "full" }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => (value?.length ?? 0) >= 2);
-		const headers = { Host: "share.test", Origin: "https://share.test", "Content-Type": "application/json" };
-		const join = async (mode: "full" | "view", name: string) => {
-			const joined = await http(port, "/join", {
-				method: "POST",
-				headers,
-				body: JSON.stringify({ token: links?.find((link) => link.mode === mode)?.token, name }),
-			});
-			return { ...headers, Cookie: String(joined.headers["set-cookie"]).split(";")[0] ?? "" };
-		};
-		const full = await join("full", "Alice");
-		const view = await join("view", "Bob");
 		const path = `/voice/room?session=${session}&conversation=1`;
 		// What a browser claims about itself is never passed on.
 		const spoofed = { "X-Room": "p2-other-room", "X-Participant-Id": "mallory", "X-Participant-Role": "owner" };
-		const join_ = async (as: Record<string, string>) => {
-			const socket = new WebSocket(`ws://127.0.0.1:${port}${path}`, { headers: { ...as, ...spoofed } });
+		const join_ = async (as: Record<string, string>, url = path) => {
+			const socket = new WebSocket(`ws://127.0.0.1:${port}${url}`, { headers: { ...as, ...spoofed } });
 			const texts: { type: string; id?: string; code?: string; duplicate?: boolean; participant?: string }[] = [];
 			const frames: Buffer[] = [];
 			socket.on("message", (data: Buffer, binary: boolean) => {
@@ -873,9 +810,8 @@ describe("voice routes and mode", () => {
 			return { socket, texts, frames };
 		};
 		const ownerRoom = await join_({ Cookie: fixture.owner.cookie });
-		const guestRoom = await join_(full);
 		const room = `p2-${session}-1`;
-		const [ownerHeaders, guestHeaders] = speech.upgrades.slice(-2);
+		const ownerHeaders = speech.upgrades.at(-1);
 		assert.deepEqual(
 			{
 				room: ownerHeaders?.["x-room"],
@@ -886,14 +822,9 @@ describe("voice routes and mode", () => {
 			},
 			{ room, id: "owner", name: "Owner", role: "owner", auth: "Bearer secret-token" },
 		);
-		assert.equal(guestHeaders?.["x-room"], room);
-		assert.equal(guestHeaders?.["x-participant-role"], "guest");
-		assert.equal(guestHeaders?.["x-participant-name"], "Alice");
-		const guestId = String(guestHeaders?.["x-participant-id"]);
-		assert.match(guestId, /^[A-Za-z0-9_-]+$/);
-		assert.notEqual(guestId, "mallory");
+		assert.notEqual(ownerHeaders?.["x-participant-id"], "mallory");
 
-		// The owner's tabs say a sentence once: the repeat is the room's duplicate. Everyone hears it.
+		// The owner's tabs say a sentence once: the repeat is the room's duplicate.
 		ownerRoom.socket.send(JSON.stringify({ type: "speak", id: "17-0", text: "Hello there." }));
 		ownerRoom.socket.send(JSON.stringify({ type: "speak", id: "17-0", text: "Hello there." }));
 		await poll(() => ownerRoom.texts.filter((event) => event.type === "speak_ack").length === 2, 5000, "acks");
@@ -905,70 +836,53 @@ describe("voice routes and mode", () => {
 			speech.spoken.filter((said) => said.room === room).map((said) => said.id),
 			["17-0"],
 		);
-		await poll(() => guestRoom.texts.some((event) => event.type === "tts_done"), 5000, "guest hears it");
-		const heard = guestRoom.frames.map((frame) => parseRoomFrame(new Uint8Array(frame)));
-		assert(heard.every((frame) => frame?.kind === 1 && frame.id === "17-0"));
-		assert.equal(
-			heard.reduce((sum, frame) => sum + (frame?.pcm.byteLength ?? 0), 0),
-			0.3 * 16000 * 2,
-		);
-
-		// A guest may only reset its own microphone; anything else stops at p2.
-		const before = speech.commands.length;
-		guestRoom.socket.send(JSON.stringify({ type: "speak", id: "x-0", text: "I am Pi now." }));
-		guestRoom.socket.send(JSON.stringify({ type: "config", voice: "kokoro-af_heart" }));
-		guestRoom.socket.send(JSON.stringify({ type: "reset" }));
-		await poll(() => guestRoom.texts.filter((event) => event.code === "forbidden").length === 2, 5000, "refusals");
-		await poll(() => speech.commands.length === before + 1, 5000, "reset passed");
-		assert.deepEqual(speech.commands.at(-1), { from: guestId, command: { type: "reset" } });
 		// The owner's language reaches the room; a malformed one stops at p2.
 		ownerRoom.socket.send(JSON.stringify({ type: "config", language: "de" }));
 		ownerRoom.socket.send(JSON.stringify({ type: "config", language: "Deutsch" }));
 		await poll(() => speech.commands.some(({ command }) => command.language === "de"), 5000, "language passed");
 		await poll(() => ownerRoom.texts.some((event) => event.code === "invalid_message"), 5000, "bad language");
 		assert(!speech.commands.some(({ command }) => command.language === "Deutsch"));
-		// Everyone's own pause before sending passes, within 0.5-2 s.
-		guestRoom.socket.send(JSON.stringify({ type: "vad", silence: 1.2 }));
-		guestRoom.socket.send(JSON.stringify({ type: "vad", silence: 3 }));
-		ownerRoom.socket.send(JSON.stringify({ type: "vad", silence: 0.5 }));
-		ownerRoom.socket.send(JSON.stringify({ type: "vad", silence: 0.4 }));
-		// reset, the language and the two valid pauses passed.
-		await poll(() => speech.commands.length === before + 4, 5000, "pauses passed");
-		await poll(() => guestRoom.texts.filter((event) => event.code === "forbidden").length === 3, 5000, "guest range");
-		await poll(() => ownerRoom.texts.some((event) => event.code === "invalid_message"), 5000, "owner range");
-		await poll(() => guestRoom.texts.some((event) => event.type === "vad"), 5000, "guest's pause acknowledged");
-		assert.deepEqual(speech.commands.slice(-2), [
-			{ from: guestId, command: { type: "vad", silence: 1.2 } },
-			{ from: "owner", command: { type: "vad", silence: 0.5 } },
-		]);
-		// The guest's microphone reaches the others, as the guest's.
-		guestRoom.socket.send(Buffer.alloc(640));
-		const relayed = () =>
-			ownerRoom.frames.map((frame) => parseRoomFrame(new Uint8Array(frame))).find((frame) => frame?.kind === 2);
-		await poll(() => relayed() !== undefined, 5000, "relayed audio");
-		assert.equal(relayed()?.id, guestId);
-		assert.equal(relayed()?.pcm.byteLength, 640);
+		// The owner's own pause before sending passes, within 0.5-2 s.
+		const before = speech.commands.length;
+		ownerRoom.socket.send(JSON.stringify({ type: "vad", silence: 1.2 }));
+		ownerRoom.socket.send(JSON.stringify({ type: "vad", silence: 3 }));
+		await poll(() => speech.commands.length === before + 1, 5000, "pause passed");
+		await poll(
+			() => ownerRoom.texts.filter((event) => event.code === "invalid_message").length === 2,
+			5000,
+			"pause range",
+		);
+		assert.deepEqual(speech.commands.at(-1), { from: "owner", command: { type: "vad", silence: 1.2 } });
 		ownerRoom.socket.close();
-		guestRoom.socket.close();
 
 		const status = async (url: string, as: Record<string, string>) => {
 			const socket = new WebSocket(`ws://127.0.0.1:${port}${url}`, { headers: as });
-			socket.on("error", () => {});
-			const [, response] = (await once(socket, "unexpected-response")) as [unknown, { statusCode: number }];
-			return response.statusCode;
+			return new Promise<number>((resolve, reject) => {
+				socket.on("unexpected-response", (_request, response) => {
+					response.resume();
+					socket.terminate();
+					resolve(response.statusCode ?? 0);
+				});
+				socket.on("error", (error: Error) => {
+					const refused = /Unexpected server response: (\d+)/.exec(error.message);
+					if (refused) resolve(Number(refused[1]));
+					else reject(error);
+				});
+				socket.on("open", () => {
+					socket.close();
+					resolve(101);
+				});
+			});
 		};
-		assert.equal(await status(path, view), 403, "view-only guests have no voice");
-		assert.equal(await status(`/voice/room?session=other-session&conversation=1`, full), 403, "another session's");
 		const local = { Cookie: fixture.owner.cookie };
 		assert.equal(await status("/voice/room?conversation=1", local), 400);
 		assert.equal(await status(`/voice/room?session=${session}&conversation=0`, local), 400);
 		assert.equal(await status(path, {}), 403, "loopback alone is nobody");
 
-		// The engines for both (pushed live); a sample for the owner only; logs for both, the guest's marked as such.
-		const alice = await holdIn(fixture.client(full).host, VoiceService, {}, "talker");
-		assert.deepEqual(await until(alice.voices, (value) => value !== null), VOICES);
-		alice.release();
-		await expectChord(whenLive(fixture.client(view).host.hold(VoiceService, {}, BACKGROUND_CONTEXT)), "forbidden");
+		// The engines (pushed live); a sample and logs for the owner.
+		const talker = await holdIn(fixture.client({ Cookie: fixture.owner.cookie }).host, VoiceService, {}, "talker");
+		assert.deepEqual(await until(talker.voices, (value) => value !== null), VOICES);
+		talker.release();
 		const origin = {
 			Origin: `http://127.0.0.1:${port}`,
 			"Content-Type": "application/json",
@@ -985,19 +899,14 @@ describe("voice routes and mode", () => {
 			{ voice: speech.samples.at(-1)?.voice, language: speech.samples.at(-1)?.language },
 			{ voice: "supertonic-F1", language: "de" },
 		);
-		assert.equal(
-			(await http(port, "/voice/sample", { method: "POST", headers: full, body: '{"speed":1}' })).status,
-			403,
-		);
 		const lines: string[] = [];
 		const log = mock.method(console, "log", (line: unknown) => {
 			lines.push(String(line));
 		});
 		try {
 			const batch = JSON.stringify({ client: "abc", events: [{ t: 0, message: "hello" }] });
-			assert.equal((await http(port, "/voice/log", { method: "POST", headers: full, body: batch })).status, 204);
-			assert.equal((await http(port, "/voice/log", { method: "POST", headers: view, body: batch })).status, 403);
-			assert.match(lines.find((line) => line.startsWith("[voice")) ?? "", /^\[voice guest:\S+ abc\] /);
+			assert.equal((await http(port, "/voice/log", { method: "POST", headers: origin, body: batch })).status, 204);
+			assert.match(lines.find((line) => line.startsWith("[voice")) ?? "", /^\[voice abc\] /);
 		} finally {
 			log.mock.restore();
 		}

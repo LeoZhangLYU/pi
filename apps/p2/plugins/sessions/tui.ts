@@ -173,7 +173,7 @@ export class SessionsSurface implements TuiSurface {
 		[this.shownRows, this.editing] = this.scope.optimistic(() => this.received, applyRow);
 		this.service = this.scope.watch(Sessions, {}, (ref, follow) => {
 			this.owner = ref.variant === "owner";
-			const viewer = liveIn(ref, "owner", "guest");
+			const viewer = liveIn(ref, "owner");
 			if (!viewer) return;
 			follow(viewer.sessions, (rows) => {
 				this.received = rows;
@@ -181,7 +181,7 @@ export class SessionsSurface implements TuiSurface {
 				this.rebuild();
 			});
 			if (ref.variant === "owner") {
-				// Unread answers are the owner's (any device); guests see none.
+				// Unread answers are the owner's (any device).
 				this.marks = this.scope.watch(SessionReads, {}, (reads, followReads) => {
 					followReads(reads.answers, (answers) => {
 						this.answers = answers;
@@ -204,7 +204,7 @@ export class SessionsSurface implements TuiSurface {
 				});
 			}
 		});
-		// Owners and guests are readers (a guest's view holds its granted sessions, without error texts).
+		// The owner is the reader (the only person p2 admits).
 		this.scope.watch(SessionStatus, {}, (ref, follow) => {
 			if (ref.variant === "reader")
 				follow(ref.statuses, (statuses) => {

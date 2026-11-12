@@ -8,10 +8,9 @@ import { ArtifactContent, ArtifactList, MAX_ARTIFACT_PREVIEW } from "../../plugi
 import { MAX_ARTIFACT_BYTES, saveArtifact } from "../../plugins/artifacts/store.ts";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import type { Host, RefIn } from "../../src/runtime/chord.ts";
 import { Hosts } from "../../src/runtime/server.ts";
-import { expectChord, type Fixture, holdIn, http, settled, startFixture, until } from "./helpers.ts";
+import { type Fixture, holdIn, settled, startFixture, until } from "./helpers.ts";
 
 const results = (view: ConversationView | null | undefined): ToolResultMessage[] =>
 	(view?.entries ?? []).flatMap((entry) =>
@@ -19,7 +18,7 @@ const results = (view: ConversationView | null | undefined): ToolResultMessage[]
 			(message): message is ToolResultMessage => message.role === "toolResult" && message.toolName === "artifact",
 		),
 	);
-const TUNNEL = { Host: "share.test", Origin: "https://share.test" };
+const _TUNNEL = { Host: "share.test", Origin: "https://share.test" };
 
 describe("artifacts (fake provider)", () => {
 	let fixture: Fixture;
@@ -104,47 +103,6 @@ describe("artifacts (fake provider)", () => {
 			(await fixture.http(`${url("demo", 1)}&download=1`)).body,
 			(await fixture.http(`${url("demo", 2)}&download=1`)).body,
 		);
-	});
-
-	it("authorizes guests per session, including reads of the artifact index", async () => {
-		const sharing = owner.hold(Sharing, { session }, BACKGROUND_CONTEXT);
-		await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-		const links = await until(sharing.links, (value) => Boolean(value?.length));
-		const joined = await http(fixture.server.port, "/join", {
-			method: "POST",
-			headers: { ...TUNNEL, "Content-Type": "application/json" },
-			body: JSON.stringify({ token: links?.[0]?.token, name: "Reader" }),
-		});
-		assert.equal(joined.status, 200);
-		const cookie = String(joined.headers["set-cookie"]).split(";")[0]!;
-		const headers = { ...TUNNEL, Cookie: cookie };
-		assert.equal((await http(fixture.server.port, url(), { headers })).status, 200);
-		assert.equal((await http(fixture.server.port, url("demo", 1, other), { headers })).status, 403);
-		assert.equal((await http(fixture.server.port, url(), { headers: TUNNEL })).status, 403);
-		const guest = fixture.client(headers).host;
-		const index = guest.hold(ArtifactList, { session, conversation: 1 }, BACKGROUND_CONTEXT);
-		await until(index.artifacts, (value) => value?.length === 2);
-		const refused = guest.hold(ArtifactList, { session: other, conversation: 1 }, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(refused), "forbidden");
-		refused.release();
-		// The TUI's inline view: the same authority as the route.
-		const content = guest.hold(ArtifactContent, { session }, BACKGROUND_CONTEXT);
-		await whenLive(content);
-		assert.equal(content.variant, "reader");
-		if (content.variant === "reader") {
-			const read = await content.read({ name: "demo", version: 1 }, BACKGROUND_CONTEXT);
-			assert.equal(read.content, "<!doctype html><title>Demo</title><h1>Artifact demo</h1>");
-			assert.equal(read.info.type, "html");
-			assert.equal(read.truncated, false);
-			await assert.rejects(content.read({ name: "demo", version: 99 }, BACKGROUND_CONTEXT), /not found/i);
-		}
-		content.release();
-		const elsewhere = guest.hold(ArtifactContent, { session: other }, BACKGROUND_CONTEXT);
-		await expectChord(whenLive(elsewhere), "forbidden");
-		elsewhere.release();
-		index.release();
-		await guest.close(BACKGROUND_CONTEXT);
-		sharing.release();
 	});
 
 	it("carries inline in the result details only, and keeps the index and stored version unchanged", async () => {

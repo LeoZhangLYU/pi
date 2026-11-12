@@ -74,12 +74,12 @@ async function liveRef<C extends Contract, const V extends string>(ref: Held<C>,
 	return ref as unknown as HeldIn<C, V>;
 }
 
-/** The sessions to open: active ones with subagents or shares, and the most recently active others. */
+/** The sessions to open: active ones with subagents, and the most recently active others. */
 function chosen(report: DataReport): string[] {
 	const active = Object.entries(report.sessions)
 		.filter(([, session]) => !session.archived)
 		.sort(([, a], [, b]) => b.updatedAt - a.updatedAt);
-	const special = active.filter(([, session]) => session.subagents.length > 0 || session.shares.links.length > 0);
+	const special = active.filter(([, session]) => session.subagents.length > 0);
 	return [...new Set([...active.slice(0, NEWEST), ...special].map(([id]) => id))];
 }
 

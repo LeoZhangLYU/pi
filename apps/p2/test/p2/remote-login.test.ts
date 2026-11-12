@@ -10,7 +10,7 @@ import { type LoginState, ProviderLogin } from "../../plugins/login/contract.ts"
 import loginServer from "../../plugins/login/server.ts";
 import { ModelConfig, ModelResources } from "../../plugins/models/contract.ts";
 import { Resources } from "../../plugins/models/resources.ts";
-import { expectChord, nativeFacet, testHost, until } from "./helpers.ts";
+import { nativeFacet, testHost, until } from "./helpers.ts";
 
 for (const access of ["local", "relay", "device"] as const)
 	for (const method of ["device_code", "device-code", undefined] as const)
@@ -145,24 +145,6 @@ for (const access of ["local", "relay", "device"] as const)
 			assert.equal(resources.snapshot().credentials[0]?.type, "api_key");
 			assert(!JSON.stringify(seen).includes("private-fixture"));
 			assert(!JSON.stringify(seen).includes("private-pasted-code"));
-			const guest = fixture.client({
-				kind: "guest",
-				id: "g",
-				name: "Guest",
-				home: "s",
-				sessions: { s: "full" },
-				revision: 1,
-			});
-			const denied = guest.hold(ProviderLogin, {}, BACKGROUND_CONTEXT);
-			await expectChord(whenLive(denied), "forbidden");
-			await expectChord(denied.start({ providerId: "faux", authType: "oauth" }, BACKGROUND_CONTEXT), "forbidden");
-			await expectChord(
-				denied.answer({ attemptId: "none", promptId: "none", value: "none" }, BACKGROUND_CONTEXT),
-				"forbidden",
-			);
-			await expectChord(denied.cancel({ attemptId: "none" }, BACKGROUND_CONTEXT), "forbidden");
-			await expectChord(denied.logout({ providerId: "faux" }, BACKGROUND_CONTEXT), "forbidden");
-			await expectChord(denied.refresh({ providerId: "faux" }, BACKGROUND_CONTEXT), "forbidden");
 			await login.start({ providerId: "faux", authType: "api_key" }, BACKGROUND_CONTEXT);
 			const unfinished = await until(
 				login.login,

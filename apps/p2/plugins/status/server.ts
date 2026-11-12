@@ -5,7 +5,6 @@ import {
 	defineTypedState,
 	deriveTyped,
 	forbidden,
-	isGuest,
 	isOwner,
 	isWorker,
 	PluginError,
@@ -102,21 +101,7 @@ export default defineFacet((host) => {
 				members: { report: (report, ctx) => store.report({ ...report, session, generation }, ctx) },
 			};
 		}
-		if (isGuest(principal)) {
-			// As in Pi Mobile: whether it runs, its work and spend, never the worker's error text (paths, stacks).
-			const statusesView = deriveTyped(self, [store.statuses], ([statuses]) =>
-				Object.fromEntries(
-					Object.keys(principal.sessions).flatMap((session) => {
-						const status = statuses[session];
-						if (status === undefined) return [];
-						const { running, tasks, busy, usage } = status;
-						return [[session, { running, tasks, busy, ...(usage === undefined ? {} : { usage }) }]];
-					}),
-				),
-			);
-			return { variant: "reader", members: { statuses: statusesView } };
-		}
-		if (!isOwner(principal)) throw forbidden("owners and guests only");
+		if (!isOwner(principal)) throw forbidden("owners only");
 		return { variant: "reader", members: { statuses: store.statuses } };
 	});
 });

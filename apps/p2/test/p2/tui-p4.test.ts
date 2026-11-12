@@ -79,7 +79,7 @@ const viewOf = (entries: EntryRecord[] = [], docs: Record<string, unknown> = {})
 type Calls = Record<string, unknown[]>;
 
 /** Server and worker stubs that record every call; `sessions` is the catalog the owner sees. */
-function stubs(calls: Calls, sessions: Session[], options: { view?: ConversationView; owner?: boolean } = {}) {
+function stubs(calls: Calls, sessions: Session[], options: { view?: ConversationView } = {}) {
 	const record = (name: string, args: unknown) => {
 		calls[name] = [...(calls[name] ?? []), args];
 	};
@@ -97,7 +97,6 @@ function stubs(calls: Calls, sessions: Session[], options: { view?: Conversation
 				const defaultCwd = self.state("/work");
 				const defaultEnv = self.state(null);
 				catalog = sessionsState;
-				if (options.owner === false) return { variant: "guest", sessions: sessionsState };
 				return {
 					variant: "owner",
 					sessions: sessionsState,
@@ -147,7 +146,6 @@ function stubs(calls: Calls, sessions: Session[], options: { view?: Conversation
 			(_input, _principal, self) => {
 				// As the real server (plugins/models/server.ts): the catalog is the owner's.
 				record("models", null);
-				if (options.owner === false) throw forbidden("models are owner-only");
 				return {
 					variant: "owner",
 					models: self.state([
@@ -321,19 +319,18 @@ async function setup(
 	t: { after(fn: () => unknown): void },
 	options: {
 		view?: ConversationView;
-		role?: "owner" | "guest";
 		sessions?: Session[];
 		screen?: "chat" | "sessions";
 	} = {},
 ) {
 	const calls: Calls = {};
 	const rows = options.sessions ?? [session("s")];
-	const { server, worker } = stubs(calls, rows, { view: options.view, owner: options.role !== "guest" });
+	const { server, worker } = stubs(calls, rows, { view: options.view });
 	const fixture = await topology(t, {
 		server,
 		worker,
 		facets: [tuiCoreFacet, chatTui, modelsTui, sessionsTui, statusTui, subagentsTui, searchTui],
-		role: options.role ?? "owner",
+		role: "owner",
 		columns: 100,
 	});
 	fixture.runtime.navigate(options.screen ?? "chat", rows[0]?.id);
@@ -392,29 +389,6 @@ test("Shift+Tab cycles the model's thinking levels; Ctrl+P cycles the scope with
 	send(CTRL_S);
 	await poll(() => (calls.setEnabledModels?.length ?? 0) === 1);
 	assert.deepEqual(calls.setEnabledModels?.[0], { patterns: ["faux/faux-2"] });
-});
-
-test("guests see the model read-only: no selector, no cycling, never the owner's catalog", async (t) => {
-	const { screen, send, calls, runtime } = await setup(t, { role: "guest" });
-	await poll(async () => (await screen()).includes("faux-1"));
-	// No surface or command asks for the owner-only Models (the footer uses Chat.model).
-	await new Promise((resolve) => setTimeout(resolve, 1500));
-	assert.equal(calls.models, undefined, "guests never acquire Models");
-	assert(!runtime.notices.some((notice) => /owner-only/.test(notice.text)));
-	send("\x0c");
-	await poll(() => runtime.notices.some((notice) => /only the owner changes it/.test(notice.text)));
-	send(SHIFT_TAB);
-	send(CTRL_P);
-	await new Promise((resolve) => setTimeout(resolve, 100));
-	assert.equal(calls.configure, undefined);
-	// A known command that is not theirs is refused, not sent as a message.
-	typed(send, "/new-context x");
-	send(ENTER);
-	await poll(() => runtime.notices.some((notice) => /\/new-context is not available here/.test(notice.text)));
-	assert.equal(calls.send, undefined);
-	assert.equal(calls.reset, undefined);
-	// The footer's denominator comes from the guest-safe model metadata.
-	assert.match(await screen(), /\d+\.\d%\/1\.0k/);
 });
 
 test("session selector: scopes, threaded subagents, message hits, archive and restore, rename, pin", async (t) => {

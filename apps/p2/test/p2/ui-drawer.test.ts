@@ -1,20 +1,13 @@
 // Browser interactions for the faithful mobile drawer and new-session surface. All providers and data are disposable.
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { request } from "node:http";
-import { createServer } from "node:https";
-import { connect } from "node:net";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Duplex } from "node:stream";
 import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { Models } from "../../plugins/models/contract.ts";
 import { Catalog, Sessions } from "../../plugins/sessions/contract.ts";
-import { Sharing } from "../../plugins/sharing/contract.ts";
 import { SessionStatus } from "../../plugins/status/contract.ts";
 import { Subagents } from "../../plugins/subagents/contract.ts";
 import { SessionTree } from "../../plugins/tree/contract.ts";
@@ -440,136 +433,6 @@ describe("drawer and new-session parity", { skip: !browserTests }, () => {
 		} finally {
 			await browser.evaluate(`document.documentElement.removeAttribute('dir')`);
 			await browser.call("Emulation.setTouchEmulationEnabled", { enabled: false });
-		}
-	});
-});
-
-describe("guest drawer in Chromium", { skip: !browserTests }, () => {
-	it("shows only the shared session, guest identity and theme; no owner actions or search", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "p2-guest-browser-"));
-		const key = join(directory, "key.pem"),
-			cert = join(directory, "cert.pem");
-		execFileSync(
-			"openssl",
-			[
-				"req",
-				"-x509",
-				"-newkey",
-				"rsa:2048",
-				"-nodes",
-				"-keyout",
-				key,
-				"-out",
-				cert,
-				"-days",
-				"1",
-				"-subj",
-				"/CN=guest.test",
-			],
-			{ stdio: "ignore" },
-		);
-		let fixture: Fixture | undefined;
-		const sockets = new Set<Duplex>();
-		const proxy = createServer({ key: readFileSync(key), cert: readFileSync(cert) }, (incoming, response) => {
-			const upstream = request(
-				{
-					hostname: "127.0.0.1",
-					port: fixture!.server.port,
-					path: incoming.url,
-					method: incoming.method,
-					headers: incoming.headers,
-				},
-				(result) => {
-					response.writeHead(result.statusCode ?? 502, result.headers);
-					result.pipe(response);
-				},
-			);
-			upstream.on("error", () => {
-				response.writeHead(502);
-				response.end();
-			});
-			incoming.pipe(upstream);
-		});
-		proxy.on("connection", (socket) => {
-			sockets.add(socket);
-			socket.on("close", () => sockets.delete(socket));
-		});
-		proxy.on("upgrade", (incoming, socket, head) => {
-			const upstream = connect(fixture!.server.port, "127.0.0.1", () => {
-				upstream.write(
-					`${incoming.method} ${incoming.url} HTTP/1.1\r\n${incoming.rawHeaders.reduce((out, value, i, all) => (i % 2 === 0 ? `${out}${value}: ${all[i + 1]}\r\n` : out), "")}\r\n`,
-				);
-				if (head.length) upstream.write(head);
-				socket.pipe(upstream);
-				upstream.pipe(socket);
-			});
-			upstream.on("error", () => socket.destroy());
-			socket.on("error", () => upstream.destroy());
-			socket.on("close", () => upstream.destroy());
-		});
-		await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
-		const address = proxy.address();
-		assert(address && typeof address === "object");
-		const host = `guest.test:${address.port}`;
-		let browser: Browser | undefined;
-		try {
-			fixture = await startFixture({ web: true, allowedHosts: [host] });
-			const owner = fixture.browser(),
-				sessions = await holdIn(owner, Sessions, {}, "owner");
-			const shared = await sessions.create({ cwd: fixture.workspace, title: "Shared visible" }, BACKGROUND_CONTEXT);
-			await sessions.create({ cwd: fixture.workspace, title: "Private hidden" }, BACKGROUND_CONTEXT);
-			const sharing = owner.hold(Sharing, { session: shared.id }, BACKGROUND_CONTEXT);
-			await sharing.link({ mode: "view" }, BACKGROUND_CONTEXT);
-			const links = await until(sharing.links, (links) => Boolean(links?.length));
-			assert(links?.[0]);
-			browser = await Browser.start([
-				"--ignore-certificate-errors",
-				"--no-proxy-server",
-				"--host-resolver-rules=MAP guest.test 127.0.0.1",
-			]);
-			await browser.metrics(390, 844);
-			await browser.open(links[0].url);
-			await browser.wait(`document.querySelector('#join #name') && document.querySelector('#join button')`);
-			await browser.evaluate(setInput("#name", "Guest browser"));
-			await browser.click("#join button");
-			await browser.wait(
-				`document.querySelector('nav[aria-label="Shared session"]') && !document.querySelector('.offline')`,
-			);
-			await browser.click(".topbar button[aria-label=Sessions]");
-			await browser.wait(`document.querySelector('.drawer').getBoundingClientRect().left>=-1`);
-			const state = await browser.evaluate<{
-				identity: string;
-				titles: string[];
-				ownerButtons: number;
-				search: boolean;
-			}>(
-				`(()=>{const n=document.querySelector('nav[aria-label="Shared session"]');return {identity:n.querySelector('.empty-note').textContent,titles:[...n.querySelectorAll('.session-title')].map(e=>e.textContent),ownerButtons:n.querySelectorAll('.new-session,.foot-button,.collapse-sidebar').length,search:Boolean(n.querySelector('.search'))};})()`,
-			);
-			assert.match(state.identity, /Joined as Guest browser\s*Read-only/);
-			assert.deepEqual(state.titles, ["Shared visible"]);
-			assert.equal(state.ownerButtons, 0);
-			assert.equal(state.search, false);
-			await browser.click('nav[aria-label="Shared session"] .theme-toggle');
-			await browser.wait(`document.documentElement.dataset.theme==='light'`);
-			// A shared session installs as a home-screen app too, and can poll the current bundle manifest.
-			const fetched = await browser.evaluate<{ manifest: number; icon: number; bundle: number; title: string }>(
-				`Promise.all(['/manifest.webmanifest','/icons/icon-192.png','/__p2_web'].map((path)=>fetch(path).then((r)=>r.status))).then(([manifest,icon,bundle])=>({manifest,icon,bundle,title:document.title}))`,
-			);
-			assert.deepEqual(fetched, { manifest: 200, icon: 200, bundle: 200, title: "Pi" });
-			assert.equal(
-				await browser.evaluate<string>(`document.querySelector('link[rel=manifest]').getAttribute('href')`),
-				"/manifest.webmanifest",
-			);
-			// The owner resets the link: the page says so (Pi Mobile's text) instead of reconnecting forever.
-			await sharing.link({ mode: "view", reset: true }, BACKGROUND_CONTEXT);
-			await browser.wait(`document.querySelector('.toast')?.textContent === 'This share has ended.'`);
-			assert.equal(await browser.evaluate<number>(`document.querySelectorAll('.messages .user').length`), 0);
-		} finally {
-			await browser?.close();
-			await fixture?.close();
-			for (const socket of sockets) socket.destroy();
-			await new Promise<void>((resolve) => proxy.close(() => resolve()));
-			rmSync(directory, { recursive: true, force: true });
 		}
 	});
 });

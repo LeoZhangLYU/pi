@@ -1,7 +1,6 @@
 // Voice mode of one conversation, served by each session worker (worker.ts). One voice per conversation, the
 // owner's: the owner switches voice mode (the agent's prompt then asks for short spoken answers) and chooses the
-// engine, voice and speed everyone hears. A read/write guest switches only its own microphone (its transcripts are its
-// messages) and sees the owner's choice; it never changes what the owner set.
+// engine, voice and speed.
 
 import { bool, nul, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { local, method, param, remote, serverHost, sessionHost } from "@p2/app/v1";
@@ -41,7 +40,7 @@ export const VoiceMode = remote("p2.voice-mode", {
 				choose: method(VoiceChoiceSchema),
 			},
 		},
-		/** A read/write guest. */
+		/** Dead since sharing was removed: released histories keep the variant, the worker never serves it. */
 		participant: {
 			state: {
 				/** This guest's own microphone switch. */
@@ -72,7 +71,7 @@ export const VoiceServiceStore = local("p2.voice-service-store", {
 	members: { ...service, refresh: method() },
 });
 
-/** Whether voice mode is available, for those who may talk: the owner and read/write guests. */
+/** Whether voice mode is available, for the owner who talks. */
 export const VoiceService = remote("p2.voice-service", {
 	/** 2: engines list their languages (see VoiceMode's version). */
 	version: 2,

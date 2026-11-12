@@ -22,10 +22,6 @@
 					"archived": false
 				}
 			],
-			"shares": {
-				"links": [],
-				"guests": []
-			},
 			"artifacts": {
 				"demo": 1
 			},
@@ -44,10 +40,6 @@
 				}
 			},
 			"subagents": [],
-			"shares": {
-				"links": ["view"],
-				"guests": ["view"]
-			},
 			"artifacts": {},
 			"uploads": 1,
 			"downloads": 0
@@ -64,10 +56,6 @@
 				}
 			},
 			"subagents": [],
-			"shares": {
-				"links": [],
-				"guests": []
-			},
 			"artifacts": {},
 			"uploads": 0,
 			"downloads": 0
