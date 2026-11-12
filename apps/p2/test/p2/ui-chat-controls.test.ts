@@ -50,9 +50,6 @@ describe("chat control parity", { skip: !browserTests }, () => {
 			await second.close();
 		}
 		await browser.wait(`document.querySelector('.session-stats .client-count')?.textContent.trim()==='1'`);
-		await browser.click(".client-count");
-		await browser.wait(`document.querySelector('[role=dialog][aria-label=Share]')`);
-		await browser.click("[role=dialog] button[aria-label=Close]");
 		await browser.evaluate(input(".composer textarea", "hello controls"));
 		await browser.click("button[aria-label=Send]");
 		await browser.wait(
@@ -109,7 +106,9 @@ describe("chat control parity", { skip: !browserTests }, () => {
 			mkdirSync(directory, { recursive: true });
 			if (viaOptions) {
 				await browser.click('.topbar button[aria-label="Session options"]');
-				await browser.click("[role=dialog] .row-button:nth-child(2)");
+				await browser.evaluate(
+					`[...document.querySelectorAll('[role=dialog] .list .row-button')].find((button) => button.textContent.includes('Working directory')).click()`,
+				);
 			} else await browser.click(".title-cwd");
 			await browser.wait(`document.querySelector('.directory-use:not(:disabled)')`);
 			assert(

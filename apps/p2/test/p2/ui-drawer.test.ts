@@ -257,6 +257,7 @@ describe("drawer and new-session parity", { skip: !browserTests }, () => {
 	});
 
 	it("preserves rename, pin and archive after moving actions out of session rows", async () => {
+		await browser.metrics(1280, 900);
 		const sessions = await holdIn(fixture.browser(), Sessions, {}, "owner");
 		const session = await sessions.create({ cwd: fixture.workspace, title: "Options original" }, BACKGROUND_CONTEXT);
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${session.id}`);
@@ -266,7 +267,9 @@ describe("drawer and new-session parity", { skip: !browserTests }, () => {
 		await browser.click("[role=dialog] button[type=submit]");
 		await browser.wait(`document.querySelector('.topbar h1')?.textContent==='Options renamed'`);
 		await browser.click('.main button[aria-label="Session options"]');
-		await browser.click("[role=dialog] .list .row-button:nth-child(3)");
+		await browser.evaluate(
+			`[...document.querySelectorAll('[role=dialog] .list .row-button')].find((button) => button.textContent.trim() === 'Pin to top').click()`,
+		);
 		await until(sessions.sessions, (list) => Boolean(list?.find((row) => row.id === session.id)?.pinned));
 		await browser.click("[role=dialog] .row-button.danger");
 		await browser.wait(`location.pathname==='/' && !document.querySelector('[role=dialog]')`);

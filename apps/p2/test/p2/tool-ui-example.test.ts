@@ -123,13 +123,9 @@ test(
 			);
 			assert.match(steps[0] ?? "", /^word_countThe quick brown fox✓/);
 			assert.match(steps[1] ?? "", /^word_count✗ empty text/);
-			// The detail: the tool's own, under the tool's words.
+			// The detail: the tool's own, inline under the step (the sheet keeps the activity's step count and time).
 			await browser.click("[data-testid=step] button");
 			await browser.wait("document.querySelector('[data-testid=word-count]')");
-			assert.equal(
-				await browser.evaluate("document.querySelector('.sheet-head h2').textContent"),
-				"Counted words in The quick brown fox",
-			);
 			assert.equal(
 				await browser.evaluate("document.querySelector('[data-testid=word-count]').textContent"),
 				"9 words, 2 lines",

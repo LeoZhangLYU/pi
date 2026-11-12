@@ -191,7 +191,7 @@ describe("clients through a public-origin proxy", { skip: !browserTests }, () =>
 	it("a signed-out visitor gets only the sign-in page, never the app or a connection", async () => {
 		const { browser, requests, websockets } = await startBrowser();
 		await browser.open(origin);
-		await browser.wait('document.querySelector("#sign-in #token")');
+		await browser.wait('document.querySelector("#recovery #token")');
 		assertPublicOnly(requests, websockets);
 		assert.equal(websockets.length, 0);
 		assert(!requests.some((url) => new URL(url).pathname.startsWith("/__p2_web/")));

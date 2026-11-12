@@ -74,7 +74,20 @@ describe("phone gestures across a live plugin reload", { skip: !browserTests }, 
 		);
 		await sleep(300);
 		// The drawer: a swipe toward the inline end on the chat opens it, one back on the drawer closes it.
-		await drag(60, 400, 330, 400);
+		// Start where the chat itself is under the finger: the activity wheel owns horizontal drags.
+		const start = await browser.evaluate<{ x: number; y: number } | null>(
+			`(() => {
+				const main = document.querySelector('main');
+				for (let y = 100; y < innerHeight - 120; y += 16) {
+					const e = document.elementFromPoint(60, y);
+					if (e && main.contains(e) && !e.closest('.activity-ticker') && !e.closest('input, textarea, select, [contenteditable]'))
+						return { x: 60, y };
+				}
+				return null;
+			})()`,
+		);
+		assert.ok(start, `${when}: a chat spot for the drawer swipe`);
+		await drag(start.x, start.y, start.x + 270, start.y);
 		await browser
 			.wait("document.querySelector('.app.drawer-open') && !document.querySelector('.drawer').style.transform")
 			.catch(() => assert.fail(`${when}: the swipe opens the drawer`));

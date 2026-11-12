@@ -465,11 +465,18 @@ describe("Pi Mobile audit fixes in the browser", { skip: !browserTests }, () => 
 		await browser.metrics(1280, 900);
 		await browser.open(url(`/s/${session.id}`));
 		await browser.wait(`document.querySelector('.composer textarea') && !document.querySelector('.offline')`);
+		await browser.evaluate(
+			`[...document.querySelectorAll('.foot-button')].find((e) => e.textContent === 'Settings').click()`,
+		);
+		await browser.wait(`document.querySelector('[role=dialog][aria-label=Settings]')`);
 		assert.equal(
 			await browser.evaluate<string>(
-				`[...document.querySelectorAll('.foot-button')].find((e) => e.textContent === 'Envs')?.title`,
+				`[...document.querySelectorAll('.foot-button')].find((e) => e.textContent === 'Environments')?.title`,
 			),
 			"Remote environments",
+		);
+		await browser.evaluate(
+			`document.querySelector('[role=dialog][aria-label=Settings] button[aria-label=Close]').click()`,
 		);
 		await sessions.archive({ id: session.id }, BACKGROUND_CONTEXT);
 		await browser.wait(

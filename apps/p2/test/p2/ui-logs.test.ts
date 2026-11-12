@@ -32,6 +32,11 @@ test(
 		await browser.call("Runtime.enable");
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/`);
 		try {
+			await browser.wait(`[...document.querySelectorAll('.foot-button')].some(e=>e.textContent==='Settings')`);
+			await browser.evaluate(
+				`[...document.querySelectorAll('.foot-button')].find(e=>e.textContent==='Settings').click()`,
+			);
+			await browser.wait(`document.querySelector('[role=dialog][aria-label=Settings]')`);
 			await browser.wait(`[...document.querySelectorAll('.foot-button')].some(e=>e.textContent==='Logs')`);
 		} catch (error) {
 			console.error(await browser.evaluate("document.body.innerText"), errors);

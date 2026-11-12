@@ -176,9 +176,10 @@ describe("web host", () => {
 					frameTree: { childFrames?: { frame: { url: string; unreachableUrl?: string } }[] };
 				};
 				const child = tree.frameTree.childFrames?.[0]?.frame;
-				assert.ok(child, "the framer has its iframe");
+				// A frame refused by `frame-ancestors` never reaches the app: current Chromium does not create the
+				// child frame at all; older versions keep a chrome-error frame or an unreachable URL.
 				assert.ok(
-					child.url.startsWith("chrome-error:") || child.unreachableUrl !== undefined,
+					child === undefined || child.url.startsWith("chrome-error:") || child.unreachableUrl !== undefined,
 					JSON.stringify(child),
 				);
 			} finally {

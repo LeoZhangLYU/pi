@@ -157,7 +157,13 @@ describe("incoming messages", { skip: !browserTests }, () => {
 			`${long}.querySelector('.incoming-body').textContent.includes('Line 30') && !${long}.querySelector('.incoming-body.clamped')`,
 		);
 		// The headers open where the message came from.
+		await browser.evaluate(
+			`document.querySelector("[data-from=agent] button.incoming-from").scrollIntoView({block:"center"})`,
+		);
 		await browser.click("[data-from=agent] button.incoming-from");
+		await browser.evaluate(
+			`document.querySelector("[data-from=session] button.incoming-from").scrollIntoView({block:"center"})`,
+		);
 		await browser.click("[data-from=session] button.incoming-from");
 		assert.deepEqual(await browser.evaluate("window.opened"), ["conversation:2", "session:session-b"]);
 	});

@@ -206,7 +206,7 @@ describe("foreign browser requests", () => {
 				await fresh.open(`${foreignOrigin}/`);
 				await fresh.click("#open");
 				// (The sign-in page reloads itself once from p2's origin: evaluating may hit the navigation.)
-				const signInShown = `location.origin === ${JSON.stringify(p2)} && Boolean(document.querySelector("#sign-in"))`;
+				const signInShown = `location.origin === ${JSON.stringify(p2)} && Boolean(document.querySelector("#recovery"))`;
 				await poll(() => fresh.evaluate<boolean>(signInShown).catch(() => false), 30_000, "the sign-in page");
 			} finally {
 				await owner.close();

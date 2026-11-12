@@ -53,6 +53,9 @@ export { Slots, ToolActivities, webCoreFacet } from "./web-core.ts";
 
 export const HostContext = createContext<Host | undefined>(undefined);
 
+/** No host to follow: the first catalog, as before `startLanguage` follows one. */
+const NO_LANGUAGE = { subscribe: () => () => {}, read: () => undefined };
+
 export function useHost(): Host {
 	const host = useContext(HostContext);
 	if (host === undefined) throw new Error("no chord2 host in context");
@@ -62,12 +65,13 @@ export function useHost(): Host {
 /**
  * `messages` in the language of the page's host (the user's pick, else the device's, matched against the catalogs),
  * with its locale; re-renders when the locale or a translation changes. Before `startLanguage` follows a language, `t`
- * renders the first catalog and `locale` is `undefined`.
+ * renders the first catalog and `locale` is `undefined`. Without a host (a component fixture) it does the same.
  */
 export function useMessages<N extends string, M>(
 	messages: Messages<N, M>,
 ): { readonly t: Translator<N, M>; readonly locale: string | undefined } {
-	const state = hostLanguage(useHost());
+	const host = useContext(HostContext);
+	const state = useMemo(() => (host === undefined ? NO_LANGUAGE : hostLanguage(host)), [host]);
 	const language = useSyncExternalStore(state.subscribe, state.read, state.read);
 	return useMemo(() => ({ t: messages.in(language), locale: language?.locale }), [messages, language]);
 }
@@ -119,13 +123,14 @@ export function SlotList({ prefix }: { prefix: string }) {
 let shownModals = 0;
 
 /** Counts the caller as a modal layer on screen while it is mounted. */
-export function useShownModal(): void {
+export function useShownModal(shown = true): void {
 	useLayoutEffect(() => {
+		if (!shown) return;
 		shownModals++;
 		return () => {
 			shownModals--;
 		};
-	}, []);
+	}, [shown]);
 }
 
 /** Whether a modal layer (a sheet, a viewer) is on screen. */
@@ -179,7 +184,7 @@ export function Sheet({
 	const body = useRef<HTMLDivElement>(null);
 	const section = useRef<HTMLElement>(null);
 	const scrim = useRef<HTMLButtonElement>(null);
-	useShownModal();
+	useShownModal(!hidden);
 	useScrollMemory(body);
 	// Phones: a downward drag on the grip or header closes the sheet (src/web/sheet-swipe.ts).
 	useSheetSwipe(section, scrim, onClose);
@@ -195,13 +200,13 @@ export function Sheet({
 	}, [hidden, onClose]);
 	// Footer sheets may be mounted inside the translated phone drawer. A portal keeps their fixed layout
 	// relative to the viewport, as in Pi Mobile's app-level sheets, instead of the hidden drawer.
+	const dialog = hidden ? {} : ({ role: "dialog", "aria-modal": "true" } as const);
 	return createPortal(
 		<div className="sheet-layer" hidden={hidden}>
 			<button type="button" className="scrim" aria-label="Close" onClick={onClose} ref={scrim} />
 			<section
 				className={`sheet ${className ?? ""}`}
-				role="dialog"
-				aria-modal="true"
+				{...dialog}
 				aria-label={title}
 				data-testid={testId}
 				ref={section}

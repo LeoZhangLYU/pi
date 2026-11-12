@@ -62,6 +62,7 @@ describe("haptics", { skip: !browserTests }, () => {
 		chat.release();
 		await browser.wait("document.querySelector('[data-testid=activity][data-state=done]')");
 		// The send's tap, then the selection generator prepared once and a tick per step rolling in.
+		await browser.wait(`window.__haptics.filter((call) => call === "selectionChanged").length >= 2`);
 		const rolled = await browser.evaluate<string[]>("window.__haptics");
 		assert.equal(rolled[0], "impact:LIGHT");
 		assert.equal(rolled.filter((call) => call === "selectionStart").length, 1);

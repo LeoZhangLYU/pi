@@ -209,7 +209,7 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		assert(!(await browser.evaluate<boolean>('Boolean(document.querySelector("#owner-token"))')));
 		assert(
 			await browser.evaluate<boolean>(
-				'[...document.querySelectorAll("[role=dialog] button")].some(button => button.textContent.trim() === "Sign out on this device")',
+				'[...document.querySelectorAll("[role=dialog] button")].some(button => button.textContent.trim() === "Sign out this device")',
 			),
 		);
 		await browser.evaluate('document.querySelector("[role=dialog] button[aria-label=Close]").click()');
@@ -443,7 +443,8 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		await browser.evaluate(
 			'[...document.querySelectorAll("[role=dialog] button")].find(button => button.textContent.trim() === "Sign out this device").click()',
 		);
-		await browser.wait('location.pathname === "/owner" && Boolean(document.querySelector("#sign-in"))');
+		// The fixture has no owner password, so the sign-in page offers the recovery form (the password form is absent).
+		await browser.wait('location.pathname === "/owner" && Boolean(document.querySelector("#recovery"))');
 		const after = (await browser.call("Network.getCookies", { urls: [origin] })) as { cookies: { name: string }[] };
 		assert(!after.cookies.some((entry) => entry.name === `p2_owner_${fixture.server.port}`));
 	});

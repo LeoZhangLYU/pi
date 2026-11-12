@@ -137,6 +137,8 @@ export const envsMessages = defineMessages("p2.envs", {
 			`Moving to ${target} gives this session's tools sandbox ${env}'s folders and allowed hosts instead.`,
 		moveToHost: (target: string, env: string) =>
 			`Moving to ${target} lets this session's tools run directly on ${env}, with its full network access and files.`,
+		moveToHostDevice: (target: string) =>
+			`Moving to ${target} lets this session's tools run directly on this device, with its full network access and files.`,
 		filesStay: "Files written in the sandbox stay in its folders.",
 		moveOut: "Move out",
 		useLocation: (label: string) => `Use ${label}`,
@@ -278,6 +280,8 @@ export const envsMessages = defineMessages("p2.envs", {
 			`移到 ${target} 后，此 Session 的 Tool 将改用 Sandbox ${env} 的文件夹和允许主机。`,
 		moveToHost: (target, env) =>
 			`移到 ${target} 后，此 Session 的 Tool 将直接在 ${env} 上运行，拥有其完整的网络访问和文件。`,
+		moveToHostDevice: (target) =>
+			`移到 ${target} 后，此 Session 的 Tool 将直接在本机运行，拥有其完整的网络访问和文件。`,
 		filesStay: "在沙箱中写入的文件会留在它的文件夹里。",
 		moveOut: "移出",
 		useLocation: (label) => `使用 ${label}`,

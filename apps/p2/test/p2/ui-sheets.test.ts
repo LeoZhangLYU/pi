@@ -68,10 +68,12 @@ describe("sheet parity", { skip: !browserTests }, () => {
 	};
 	const openProviders = async () => {
 		await evaluate(`document.querySelector('button[aria-label=Sessions]').click()`);
-		await wait(`[...document.querySelectorAll('button')].some(e=>e.textContent==='Providers')`);
+		await wait(`[...document.querySelectorAll('button')].some(e=>e.textContent==='Settings')`);
+		await evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Settings').click()`);
+		await wait(`document.querySelector('[role=dialog][aria-label=Settings]')`);
 		await evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Providers').click()`);
 		await wait(`document.querySelector('[role=dialog][aria-label=Providers] .row-button')`);
-		await evaluate(`document.querySelector('[role=dialog] .row-button').click()`);
+		await evaluate(`document.querySelector('[role=dialog][aria-label=Providers] .row-button').click()`);
 		await wait(`document.querySelector('.provider-detail')`);
 	};
 	before(async () => {
@@ -183,7 +185,11 @@ describe("sheet parity", { skip: !browserTests }, () => {
 			deviceScaleFactor: 1,
 			mobile: false,
 		});
-		await evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Envs').click()`);
+		await evaluate(`document.querySelector('button[aria-label=Sessions]').click()`);
+		await wait(`[...document.querySelectorAll('button')].some(e=>e.textContent==='Settings')`);
+		await evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Settings').click()`);
+		await wait(`document.querySelector('[role=dialog][aria-label=Settings]')`);
+		await evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Environments').click()`);
 		await wait(`document.querySelector('[role=dialog][aria-label=Environments] .empty-note')`);
 		await click("Add environment");
 		await wait(`document.querySelector('.env-form')`);

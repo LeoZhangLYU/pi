@@ -45,7 +45,11 @@ describe("sandbox UI", { skip: !browserTests }, () => {
 	it("lists a sandbox under its host and edits its folders and allowed hosts", async () => {
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/`);
 		await browser.wait(`document.querySelector('textarea') && !document.querySelector('.offline')`);
-		await browser.evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Envs').click()`);
+		await browser.evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Settings').click()`);
+		await browser.wait(`document.querySelector('[role=dialog][aria-label=Settings]')`);
+		await browser.evaluate(
+			`[...document.querySelectorAll('button')].find(e=>e.textContent==='Environments').click()`,
+		);
 		await browser.wait(`document.querySelector('[role=dialog][aria-label=Environments] .env-sandbox svg')`);
 		const rows = await browser.evaluate<string[]>(
 			`[...document.querySelectorAll('[role=dialog] .env-group .row-button')].map(e=>e.textContent)`,
@@ -99,7 +103,7 @@ describe("sandbox UI", { skip: !browserTests }, () => {
 		await browser.wait(`document.querySelector('[role=dialog] .env-group > .row-button')`);
 		await browser.evaluate(`document.querySelector('[role=dialog] .env-group > .row-button').click()`);
 		await browser.wait(`document.querySelector('[role=dialog]').textContent.includes('Sandboxes on host1')`);
-		await press("Add sandbox");
+		await press("Add sandbox on host1");
 		await browser.wait(`document.querySelector('[role=dialog][aria-label="New sandbox"] .env-form select')`);
 		assert.equal(await browser.evaluate<string>(`document.querySelector('.env-form select').value`), "host1");
 		await browser.evaluate(`document.querySelector('[role=dialog] button[aria-label=Close]').click()`);

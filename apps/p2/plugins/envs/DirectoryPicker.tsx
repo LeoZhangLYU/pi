@@ -206,7 +206,9 @@ export function DirectoryPicker({
 							<p>
 								{sandbox
 									? t("moveIntoSandbox", locationLabel(env, listing.path), env ?? "")
-									: t("moveToHost", locationLabel(env, listing.path), env ?? "")}
+									: env
+										? t("moveToHost", locationLabel(env, listing.path), env)
+										: t("moveToHostDevice", locationLabel(env, listing.path))}
 							</p>
 							<p className="muted small">{t("filesStay")}</p>
 							<div className="inline-form">

@@ -84,12 +84,16 @@ function SettingsSheet({ shown, onClose }: { shown: boolean; onClose: () => void
 	);
 }
 
+/** The sheets the Settings sheet's slots render: opened directly, they still need it mounted for their slot. */
+const SETTINGS_ENTRIES = new Set(["settings", "providers", "mcp", "envs", "devices", "ports", "voice", "logs"]);
+
 /** The drawer footer's owner entries behind one Settings button. */
 function SettingsButton() {
 	const { t } = useMessages(sessionsMessages);
 	const owner = useOwner();
 	const route = useRoute();
 	const settings = route.layers.findLastIndex((layer) => layer.kind === "sheet" && layer.name === "settings");
+	const mounted = route.layers.some((layer) => layer.kind === "sheet" && SETTINGS_ENTRIES.has(layer.name));
 	if (!owner) return null;
 	return (
 		<>
@@ -100,7 +104,11 @@ function SettingsButton() {
 			>
 				{t("settings")}
 			</button>
-			{settings >= 0 && <SettingsSheet shown={settings === route.layers.length - 1} onClose={closeLayers} />}
+			{/* Mounted while Settings or one of its entries is open: an entry may be opened directly (the
+			    new-session hero's provider sign-in) and its sheet still needs the slot that renders it. */}
+			{mounted && (
+				<SettingsSheet shown={settings >= 0 && settings === route.layers.length - 1} onClose={closeLayers} />
+			)}
 		</>
 	);
 }
