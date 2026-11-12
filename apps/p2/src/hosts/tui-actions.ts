@@ -66,7 +66,7 @@ export type LauncherActionOptions = {
 	suspendProcess?: () => Promise<void>;
 	platform?: string;
 	/** Called after a successful sign-out of this device's cookie (the launcher forgets it). */
-	onSignedOut?: (all: boolean) => void;
+	onSignedOut?: () => void;
 };
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -682,31 +682,26 @@ export function launcherActions(options: LauncherActionOptions): Record<string, 
 				return { message };
 			},
 		},
-		/** C (owner): `{all}` signs out this device's cookie, or every owner device. The cookie is then forgotten. */
+		/** C (owner): signs out this device's cookie. The cookie is then forgotten. */
 		signOut: {
 			kind: "C",
-			consent: (payload) => {
-				const all = record(payload)?.all;
-				if (options.role !== "owner" || typeof all !== "boolean") return undefined;
+			consent: () => {
 				// A loopback launcher signs in again with the data directory's owner key: one sign-out ends nothing.
-				if (!all && (loopback || !options.credentials.cookie)) return undefined;
+				if (options.role !== "owner" || loopback || !options.credentials.cookie) return undefined;
 				return {
-					action: all ? "Sign out ALL owner devices, this one included" : "Sign out this device",
-					facts: all
-						? [["Effect", "Every owner cookie stops working; each device needs a new owner link."]]
-						: [["Effect", "This launcher's sign-in ends; it asks for an owner link again."]],
+					action: "Sign out this device",
+					facts: [["Effect", "This launcher's sign-in ends; it asks for an owner link again."]],
 					confirmLabel: "sign out",
 				};
 			},
-			run: async (payload, context) => {
-				const all = record(payload)?.all === true;
-				const response = await request(all ? "/owner/logout-all" : "/owner/logout", {
+			run: async (_payload, context) => {
+				const response = await request("/owner/logout", {
 					method: "POST",
 					signal: AbortSignal.any([context.grant.signal, AbortSignal.timeout(10_000)]),
 				});
 				await response.body?.cancel().catch(() => {});
 				if (!response.ok) throw new Error(`The server refused (${response.status})`);
-				options.onSignedOut?.(all);
+				options.onSignedOut?.();
 				return null;
 			},
 		},

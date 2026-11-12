@@ -15,6 +15,7 @@ import {
 	closeLayers,
 	conversationRoute,
 	Drawer,
+	LanguageSetting,
 	MoreIcon,
 	navigate,
 	openLayer,
@@ -24,6 +25,7 @@ import {
 	Slot,
 	SlotList,
 	Slots,
+	ThemeSetting,
 	toggleSidebar,
 	useComposerState,
 	useConnected,
@@ -75,6 +77,8 @@ function SettingsSheet({ shown, onClose }: { shown: boolean; onClose: () => void
 				<Slot name="sidebar-foot:ports" />
 				<Slot name="sidebar-foot:voice" />
 				<Slot name="sidebar-foot:logs" />
+				<LanguageSetting />
+				<ThemeSetting />
 			</div>
 		</Sheet>
 	);

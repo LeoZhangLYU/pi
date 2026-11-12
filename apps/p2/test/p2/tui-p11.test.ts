@@ -626,11 +626,10 @@ test("/devices signs out through the launcher's consent", async (t) => {
 		return { ok: false, error: "denied" };
 	};
 	runtime.ctx.commands.run("p2.devices");
-	await poll(async () => (await screen()).includes("Sign out all devices"));
-	send(DOWN);
+	await poll(async () => (await screen()).includes("Sign out this device"));
 	send(ENTER);
 	await poll(() => grants.length === 1);
-	assert.deepEqual(grants[0], ["signOut", { all: true }]);
+	assert.deepEqual(grants[0], ["signOut", {}]);
 	await poll(() => runtime.notices.some((notice) => notice.text === "Not signed out"));
 });
 

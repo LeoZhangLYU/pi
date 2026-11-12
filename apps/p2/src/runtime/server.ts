@@ -50,7 +50,7 @@ export type ServerInfo = Static<typeof ServerInfoSchema>;
 
 /**
  * The server process (lifetime "host"): its configuration (constant), and revocation. 3: `revokeGuests` is gone with
- * the sharing plugin (no principal other than the owner exists).
+ * the sharing plugin. 4: `revokeOwners` names one device; signing out every device was removed.
  */
 const ServerV2 = local("p2.server", {
 	version: 2,
@@ -63,7 +63,9 @@ const ServerV2 = local("p2.server", {
 	},
 });
 
-export const Server = evolve(ServerV2, (e) => e.removeMethod("revokeGuests"));
+const ServerV3 = evolve(ServerV2, (e) => e.removeMethod("revokeGuests"));
+
+export const Server = evolve(ServerV3, (e) => e.args("revokeOwners", obj({ device: str() })));
 
 /** Overrides of p2's Resources (tests only): e.g. `createModels` with a fixture provider. */
 export type ServerResourceOptions = {
@@ -297,11 +299,7 @@ export function serverCore(host: Host, info: ServerInfo, parts: ServerParts): Fa
 		facet.serve(Server, () => ({
 			info: constant(info),
 			revokeOwners: async ({ device }, ctx) => {
-				if (device !== undefined) host.revoke({ device }, ctx);
-				else {
-					host.revoke({ owners: "remote" }, ctx);
-					host.revoke({ owners: "local" }, ctx);
-				}
+				host.revoke({ device }, ctx);
 				return null;
 			},
 		}));

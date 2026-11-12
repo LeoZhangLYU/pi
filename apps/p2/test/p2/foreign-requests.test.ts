@@ -127,7 +127,7 @@ describe("foreign browser requests", () => {
 					await settle("fetch", fetch(${JSON.stringify(`${p2}/owner/check`)}, { credentials: "include" }).then((r) => r.text()));
 					await settle("module", import(${JSON.stringify(`${p2}/__p2_web`)}));
 					await settle("source", fetch(${JSON.stringify(`${p2}/__p2_web`)}, { credentials: "include" }).then((r) => r.text()));
-					await fetch(${JSON.stringify(`${p2}/owner/logout-all`)}, { method: "POST", credentials: "include", mode: "no-cors" }).catch(() => {});
+					await fetch(${JSON.stringify(`${p2}/owner/logout`)}, { method: "POST", credentials: "include", mode: "no-cors" }).catch(() => {});
 					await fetch(${JSON.stringify(`${p2}/owner-token`)}, { credentials: "include", mode: "no-cors" }).catch(() => {});
 					out.socket = await new Promise((resolve) => {
 						const socket = new WebSocket(${JSON.stringify(`ws://127.0.0.1:${port}/chord`)});
@@ -187,7 +187,7 @@ describe("foreign browser requests", () => {
 				});
 				// The page's requests to p2: each carried the owner's cookie (SameSite does not separate ports), and p2
 				// authenticated none of them.
-				const paths = ["/owner/check", "/__p2_web", "/owner/logout-all", "/owner-token"];
+				const paths = ["/owner/check", "/__p2_web", "/owner/logout", "/owner-token"];
 				for (const path of paths) {
 					const requests = [...seen.values()].filter((entry) => entry.url === `${p2}${path}`);
 					// (A module import sends no cookie cross-origin; the credentialed fetch of the same URL does.)

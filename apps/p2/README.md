@@ -53,12 +53,11 @@ whoever has the owner password or can read the server's private data directory (
 
 Changing the password (another `npm run set-password` or `P2_PASSWORD` write) regenerates the account's session
 generation: password-issued sessions end on their next request, while owner-link and owner-key sessions stay valid.
-Already-open WebSockets from an old password session persist until they reconnect; **Sign out all devices** ends every
-session immediately.
+Already-open WebSockets from an old password session persist until they reconnect.
 
 **Remaining risk:** browser cookies are not port-scoped, so a browser holding the session cookie sends it to any
-`127.0.0.1:<port>` page it opens, including another local user's server. That cookie is a session, not the key: **Sign
-out all devices** ends it (and every other session). Use a separate browser profile for untrusted local servers.
+`127.0.0.1:<port>` page it opens, including another local user's server. That cookie is a session, not the key: sign
+out this device to end it. Use a separate browser profile for untrusted local servers.
 
 ## Using the owner UI from another device
 
@@ -90,11 +89,9 @@ on a remote origin are remote owners (`access: "device"`), so provider login and
 minting does not; only local owners can mint invitations. Radius
 remains a separate authenticated owner transport; a proxy marker is never authentication.
 
-**Devices → Sign out on this device** revokes this cookie, including its live connections (a local session's links
-stay: local sessions share one principal); other devices stay signed in. **Sign out all devices** rotates the
-signing key, ends every owner session, remote and local, with their live connections and outstanding links; local
-clients sign in again with the new key. Individual revocations persist in private `owner-revoked.json`.
-Already-admitted agent work continues.
+**Devices → Sign out this device** revokes this cookie, including its live connections (a local session's links
+stay: local sessions share one principal); other devices stay signed in. Individual revocations persist in private
+`owner-revoked.json`. Already-admitted agent work continues.
 
 The first deployment of signed cookies rotates the former raw-key cookie secret once (`owner-cookie-version`):
 old raw-key cookies intentionally stop working. Generate fresh owner links after deploying. Outstanding invitations

@@ -175,7 +175,7 @@ test("Devices plugin signs in a remote owner over HTTP/WS, never mints tokens fo
 	}
 });
 
-test("signed cookies expire, logout persists, all-device rotation invalidates cookies and legacy key cookies cannot forge", async (t) => {
+test("signed cookies expire, logout persists, and legacy key cookies cannot forge", async (t) => {
 	const directory = await mkdtemp(join(tmpdir(), "p2-owner-revoke-"));
 	t.after(() => rm(directory, { recursive: true, force: true }));
 	const legacy = "e".repeat(64);
@@ -203,9 +203,6 @@ test("signed cookies expire, logout persists, all-device rotation invalidates co
 	assert(!signedIn(access, one, 8788), "individual revocation survives restart");
 	assert(signedIn(access, two, 8788));
 	assert.equal(access.session(requestWith(local), 8788)?.kind, "local");
-	await access.rotate();
-	assert(!signedIn(access, two, 8788));
-	assert(!signedIn(access, local, 8788), "rotation ends local sessions too");
 	const fresh = access.cookie(8788, false);
 	assert(fresh.includes("SameSite=Lax") && !fresh.includes("Secure"));
 	const freshCookie = fresh.split(";")[0]!;
@@ -215,7 +212,7 @@ test("signed cookies expire, logout persists, all-device rotation invalidates co
 	await access.close();
 });
 
-test("sign out this device and all devices revoke live sockets as well as cookies", async (t) => {
+test("sign out this device revokes its live socket and cookie, not other devices", async (t) => {
 	const fixture = await startFixture({ allowedHosts: ["owner.test"] });
 	t.after(() => fixture.close());
 	const claim = async () => {
@@ -234,20 +231,19 @@ test("sign out this device and all devices revoke live sockets as well as cookie
 	const second = fixture.client({ ...TUNNEL, Cookie: two });
 	await whenLive(first.host.hold(Access, {}, BACKGROUND_CONTEXT));
 	await whenLive(second.host.hold(Access, {}, BACKGROUND_CONTEXT));
-	const logout = (cookie: string, all: boolean, origin = TUNNEL.Origin) =>
-		http(fixture.server.port, all ? "/owner/logout-all" : "/owner/logout", {
+	const logout = (cookie: string, origin = TUNNEL.Origin) =>
+		http(fixture.server.port, "/owner/logout", {
 			method: "POST",
 			headers: { ...TUNNEL, Origin: origin, Cookie: cookie },
 		});
-	assert.equal((await logout(one, true, "https://foreign.test")).status, 403);
-	const result = await logout(one, false);
+	assert.equal((await logout(one, "https://foreign.test")).status, 403);
+	const result = await logout(one);
 	assert.equal(result.status, 200);
 	assert(String(result.headers["set-cookie"]).includes("Max-Age=0"));
 	await poll(() => first.socket.readyState === 3);
 	assert.equal((await http(fixture.server.port, "/owner/check", { headers: { ...TUNNEL, Cookie: one } })).status, 401);
 	assert.equal((await http(fixture.server.port, "/owner/check", { headers: { ...TUNNEL, Cookie: two } })).status, 200);
-	assert.equal((await logout("wrong", true)).status, 403);
-	assert.equal((await logout(two, true)).status, 200);
+	assert.equal((await logout(two)).status, 200);
 	await poll(() => second.socket.readyState === 3);
 	assert.equal((await http(fixture.server.port, "/owner/check", { headers: { ...TUNNEL, Cookie: two } })).status, 401);
 });
@@ -367,7 +363,7 @@ test("local sign-in: a one-time, port-bound challenge answered with the data dir
 	assert.equal((await localOwnerSignIn(new URL(origin), fixture.dataDir)).kind, "signed-in");
 });
 
-test("an owner link redeemed on loopback is a local session, renewed on app loads and ended by sign-out of all devices", async (t) => {
+test("an owner link redeemed on loopback is a local session, renewed on app loads and ended on sign-out", async (t) => {
 	const fixture = await startFixture({ web: true });
 	t.after(() => fixture.close());
 	const port = fixture.server.port;
@@ -392,7 +388,7 @@ test("an owner link redeemed on loopback is a local session, renewed on app load
 	assert.equal(id(renewed), id(cookie));
 	assert.equal((await http(port, "/owner/check", { headers: { Cookie: cookie } })).headers["set-cookie"], undefined);
 	assert.equal((await http(port, "/", { headers: { Cookie: renewed.split(";")[0]! } })).status, 200);
-	// Sign-out of this local browser ends its cookie only; sign-out of all devices ends every local session too.
+	// Sign-out of this local browser ends its cookie only; other local sessions share the principal and keep their links.
 	const tui = fixture.client({ Cookie: fixture.owner.cookie });
 	await whenLive(tui.host.hold(Access, {}, BACKGROUND_CONTEXT));
 	const logout = (path: string, value: string) =>
@@ -401,10 +397,6 @@ test("an owner link redeemed on loopback is a local session, renewed on app load
 	assert.equal((await http(port, "/owner/check", { headers: { Cookie: cookie } })).status, 401);
 	assert.equal((await http(port, "/owner/check", { headers: { Cookie: fixture.owner.cookie } })).status, 200);
 	assert.equal(tui.socket.readyState, 1, "other local sessions keep their links");
-	assert.equal((await logout("/owner/logout-all", fixture.owner.cookie)).status, 200);
-	await poll(() => tui.socket.readyState === 3);
-	assert.equal((await http(port, "/owner/check", { headers: { Cookie: fixture.owner.cookie } })).status, 401);
-	assert.equal((await localOwnerSignIn(new URL(origin), fixture.dataDir)).kind, "signed-in", "the new key signs in");
 });
 
 test("npm run owner-link mints a private fragment link from the running device path without a browser", async (t) => {

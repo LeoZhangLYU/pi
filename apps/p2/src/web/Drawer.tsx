@@ -15,20 +15,7 @@ export type SessionSummary = Session & {
 
 import { useMessages } from "../runtime/web.tsx";
 import { requestReveal } from "./Chat.tsx";
-import {
-	BranchIcon,
-	ChevronIcon,
-	FolderIcon,
-	LockIcon,
-	MoonIcon,
-	PencilIcon,
-	PinIcon,
-	PlusIcon,
-	SearchIcon,
-	SunIcon,
-	SystemThemeIcon,
-} from "./icons.tsx";
-import { LanguageButton } from "./LanguageButton.tsx";
+import { BranchIcon, ChevronIcon, FolderIcon, LockIcon, PencilIcon, PinIcon, PlusIcon, SearchIcon } from "./icons.tsx";
 import { webMessages } from "./messages.ts";
 import { PiLogo } from "./PiLogo.tsx";
 import { getTheme, setTheme, subscribeTheme, type ThemePreference } from "./theme.ts";
@@ -50,31 +37,31 @@ function ago(time: number): string {
 	return new Date(time).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-const THEMES: Record<
-	ThemePreference,
-	{ labelKey: "themeSystem" | "themeLight" | "themeDark"; icon: ReactNode; next: ThemePreference }
-> = {
-	system: { labelKey: "themeSystem", icon: <SystemThemeIcon />, next: "light" },
-	light: { labelKey: "themeLight", icon: <SunIcon />, next: "dark" },
-	dark: { labelKey: "themeDark", icon: <MoonIcon />, next: "system" },
-};
+const THEMES: Record<ThemePreference, { labelKey: "themeSystem" | "themeLight" | "themeDark"; next: ThemePreference }> =
+	{
+		system: { labelKey: "themeSystem", next: "light" },
+		light: { labelKey: "themeLight", next: "dark" },
+		dark: { labelKey: "themeDark", next: "system" },
+	};
 
 /** Cycles System → Light → Dark; the choice is kept per browser. */
-function ThemeButton() {
+export function ThemeSetting() {
 	const { t } = useMessages(webMessages);
 	const theme = useSyncExternalStore(subscribeTheme, getTheme, getTheme);
-	const { labelKey, icon, next } = THEMES[theme];
+	const { labelKey, next } = THEMES[theme];
 	const label = t(labelKey);
 	const nextLabel = t(THEMES[next].labelKey);
 	return (
 		<button
 			type="button"
-			className="icon-button theme-toggle"
+			className="foot-button"
 			onClick={() => setTheme(next)}
 			aria-label={t("themeSwitch", label, nextLabel)}
 			title={t("themeTitle", label)}
 		>
-			{icon}
+			<span>{t("theme")}</span>
+			<span className="spacer" />
+			<small className="row-value">{label}</small>
 		</button>
 	);
 }
@@ -520,9 +507,6 @@ export const Drawer = memo(function Drawer({
 						</button>
 					</>
 				)}
-				<span className="spacer" />
-				<LanguageButton />
-				<ThemeButton />
 			</div>
 		</nav>
 	);

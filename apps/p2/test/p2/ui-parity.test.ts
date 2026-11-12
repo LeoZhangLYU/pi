@@ -408,7 +408,7 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		}
 	});
 
-	it("redeems a fragment owner link, removes the token and signs out all devices from the Devices sheet", async () => {
+	it("redeems a fragment owner link, removes the token and signs out this device from the Devices sheet", async () => {
 		const { token } = JSON.parse((await fixture.http("/owner-token")).body) as { token: string };
 		const origin = `http://127.0.0.1:${fixture.server.port}`;
 		await browser.open(`${origin}/owner#${token}`);
@@ -441,13 +441,7 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		);
 		await browser.wait('Boolean(document.querySelector("[role=dialog][aria-label=Devices]"))');
 		await browser.evaluate(
-			'[...document.querySelectorAll("[role=dialog] button")].find(button => button.textContent.trim() === "Sign out all devices").click()',
-		);
-		await browser.wait(
-			'[...document.querySelectorAll("[role=dialog] button")].some(button => button.textContent.trim() === "Confirm sign out all devices")',
-		);
-		await browser.evaluate(
-			'[...document.querySelectorAll("[role=dialog] button")].find(button => button.textContent.trim() === "Confirm sign out all devices").click()',
+			'[...document.querySelectorAll("[role=dialog] button")].find(button => button.textContent.trim() === "Sign out this device").click()',
 		);
 		await browser.wait('location.pathname === "/owner" && Boolean(document.querySelector("#sign-in"))');
 		const after = (await browser.call("Network.getCookies", { urls: [origin] })) as { cookies: { name: string }[] };

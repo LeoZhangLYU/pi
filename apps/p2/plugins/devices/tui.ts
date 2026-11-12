@@ -1,6 +1,6 @@
-// `/devices` in the TUI (p2-tui-port.md P11g), after the web's Devices sheet (owner): signing out this device or all
-// devices. Signing out is the launcher's: the TUI's sign-in cookie lives there, never in this worker, so it is a C
-// launcher action (`signOut`, section 3.2) whose consent UI shows the scope ("all devices, this one included").
+// `/devices` in the TUI (p2-tui-port.md P11g), after the web's Devices sheet (owner): signing out this device. Signing
+// out is the launcher's: the TUI's sign-in cookie lives there, never in this worker, so it is a C launcher action
+// (`signOut`, section 3.2) whose consent UI shows the scope.
 
 import { contribute, defineFacet } from "@p2/app/v1";
 import type { TuiContext } from "@p2/app/v1/tui";
@@ -12,10 +12,10 @@ import { grantNotice, ListOverlay, type TuiCommand, TuiCommands } from "@p2/app/
  * loopback the launcher signs in again with the data directory's owner key, so "this device" is refused there
  * (`denied`, like declining).
  */
-async function signOut(ctx: TuiContext, all: boolean): Promise<void> {
-	const result = await ctx.grant("signOut", { all });
+async function signOut(ctx: TuiContext): Promise<void> {
+	const result = await ctx.grant("signOut", {});
 	if (!result.ok && result.error === "denied") ctx.notify("Not signed out", "warning");
-	else grantNotice(ctx, all ? "Signed out all devices" : "Signed out on this device", result);
+	else grantNotice(ctx, "Signed out this device", result);
 }
 
 function openDevices(ctx: TuiContext): void {
@@ -23,13 +23,10 @@ function openDevices(ctx: TuiContext): void {
 		"devices",
 		new ListOverlay(ctx, {
 			title: "Devices",
-			rows: () => [
-				{ key: "signout", label: "Sign out on this device" },
-				{ key: "signout-all", label: "Sign out all devices", color: "error" as const },
-			],
-			onSelect: (row) => {
+			rows: () => [{ key: "signout", label: "Sign out this device" }],
+			onSelect: () => {
 				overlay.close();
-				void signOut(ctx, row.key === "signout-all");
+				void signOut(ctx);
 			},
 			onClose: () => overlay.close(),
 		}),

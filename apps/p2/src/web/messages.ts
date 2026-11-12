@@ -264,6 +264,7 @@ export const webMessages = defineMessages("p2.web", {
 		costDetailsTitle: "Open response cost details; session total includes subagents and tools",
 		sessionCostTitle: "Session total cost: all conversations, subagents and tools",
 		// Theme
+		theme: "Theme",
 		themeSystem: "System",
 		themeLight: "Light",
 		themeDark: "Dark",
@@ -492,6 +493,7 @@ export const webMessages = defineMessages("p2.web", {
 		costDetailsTitle: "打开回复费用明细；会话总计包含 Subagent 和 Tool",
 		sessionCostTitle: "会话总费用：所有对话、Subagent 和 Tool",
 		// Theme
+		theme: "主题",
 		themeSystem: "跟随系统",
 		themeLight: "浅色",
 		themeDark: "深色",

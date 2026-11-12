@@ -21,7 +21,7 @@ export type P2Principal = OwnerPrincipal | WorkerPrincipal | ServerPrincipal | H
 
 /**
  * What revokes principals (`host.revoke`, the same on every host): one associated device's owner, every remote owner
- * (relay and devices), or every local owner session ("sign out all devices" revokes both).
+ * (relay and devices), or every local owner session.
  */
 export type Revocation = { readonly device: string } | { readonly owners: "remote" | "local" };
 

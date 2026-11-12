@@ -118,26 +118,17 @@ export default defineFacet((host) => {
 			request: IncomingMessage,
 			response: ServerResponse,
 			access: { principal: P2Principal | undefined; origin: { origin: string; port: number; remote: boolean } },
-			all: boolean,
 			ctx: Ctx,
 		) => {
 			if (!sameOriginPost(request, response, access.origin)) return;
-			if (all && !isOwner(access.principal)) {
-				request.resume();
-				response.writeHead(403);
-				response.end("Forbidden");
-				return;
-			}
 			request.resume();
 			const session = accessResource.value.session(request, access.origin.port);
 			try {
-				if (all) await accessResource.value.rotate();
-				else if (session) await accessResource.value.logout(session);
+				if (session) await accessResource.value.logout(session);
 			} finally {
 				// Local sessions share one principal: ending one leaves the others' live links alone. A remote password
 				// session is a device of its own (loopback password sessions are the shared local principal).
-				if (all) await server.revokeOwners({}, ctx);
-				else if (session && (session.kind === "device" || (session.kind === "password" && access.origin.remote)))
+				if (session && (session.kind === "device" || (session.kind === "password" && access.origin.remote)))
 					await server.revokeOwners({ device: session.id }, ctx);
 			}
 			sendJson(
@@ -214,8 +205,7 @@ export default defineFacet((host) => {
 				);
 				sendJson(response, 200, { ok: true }, { "Set-Cookie": cookie });
 			},
-			"POST /owner/logout": (request, response, access, ctx) => logout(request, response, access, false, ctx),
-			"POST /owner/logout-all": (request, response, access, ctx) => logout(request, response, access, true, ctx),
+			"POST /owner/logout": (request, response, access, ctx) => logout(request, response, access, ctx),
 			// Only a local owner's own request: no browser fetch of another origin, not even of this site.
 			"GET /owner-token": (request, response, { principal, origin }) => {
 				const site = request.headers["sec-fetch-site"];

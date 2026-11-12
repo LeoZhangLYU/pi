@@ -98,7 +98,7 @@ export class OwnerAccess {
 		return typeof token === "string" && this.redeem(this.invitations, token.trim());
 	}
 
-	/** A one-time local sign-in challenge (one minute); a restart or key rotation forgets it. */
+	/** A one-time local sign-in challenge (one minute); a restart forgets it. */
 	issueChallenge(): string {
 		return this.issue(this.challenges, CHALLENGE_LIFETIME);
 	}
@@ -181,21 +181,6 @@ export class OwnerAccess {
 			this.revoked = Object.fromEntries(Object.entries(this.revoked).filter(([, expires]) => expires > this.now()));
 			this.revoked[session.id] = session.expires;
 			await privateWrite(join(this.directory, "owner-revoked.json"), JSON.stringify(this.revoked));
-		});
-		this.operations = operation.catch(() => {});
-		return operation;
-	}
-
-	rotate(): Promise<void> {
-		const operation = this.operations.then(async () => {
-			const next = randomBytes(32).toString("hex");
-			await privateWrite(join(this.directory, "owner-key"), next);
-			this.key = next;
-			this.invitations.clear();
-			this.challenges.clear();
-			this.revoked = {};
-			await privateWrite(join(this.directory, "owner-revoked.json"), "{}");
-			await privateWrite(join(this.directory, "owner-token.txt"), `${this.issueToken()}\n`);
 		});
 		this.operations = operation.catch(() => {});
 		return operation;

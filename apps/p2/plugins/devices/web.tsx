@@ -6,12 +6,11 @@ import { devicesMessages } from "./messages.ts";
 function DevicesSheet() {
 	const { t } = useMessages(devicesMessages);
 	const [error, setError] = useState<string>();
-	const [confirmAll, setConfirmAll] = useState(false);
 	const [signingOut, setSigningOut] = useState(false);
-	const signOut = (all: boolean) => {
+	const signOut = () => {
 		setSigningOut(true);
 		setError(undefined);
-		void fetch(all ? "/owner/logout-all" : "/owner/logout", { method: "POST", credentials: "same-origin" })
+		void fetch("/owner/logout", { method: "POST", credentials: "same-origin" })
 			.then(async (response) => {
 				if (!response.ok) throw new Error(t("couldNotSignOut"));
 				// Conversations kept on this device for the owner go with the sign-in.
@@ -28,39 +27,9 @@ function DevicesSheet() {
 			<div className="stack">
 				{error && <output className="notice error">{error}</output>}
 				<div className="list">
-					<button type="button" className="text-action" disabled={signingOut} onClick={() => signOut(false)}>
+					<button type="button" className="text-action" disabled={signingOut} onClick={signOut}>
 						{t("signOutThisDevice")}
 					</button>
-					{confirmAll ? (
-						<>
-							<p className="muted small">{t("signOutAllWarning")}</p>
-							<button
-								type="button"
-								className="text-action danger"
-								disabled={signingOut}
-								onClick={() => signOut(true)}
-							>
-								{t("confirmSignOutAll")}
-							</button>
-							<button
-								type="button"
-								className="text-action"
-								disabled={signingOut}
-								onClick={() => setConfirmAll(false)}
-							>
-								{t("cancel")}
-							</button>
-						</>
-					) : (
-						<button
-							type="button"
-							className="text-action danger"
-							disabled={signingOut}
-							onClick={() => setConfirmAll(true)}
-						>
-							{t("signOutAllDevices")}
-						</button>
-					)}
 				</div>
 			</div>
 		</Sheet>

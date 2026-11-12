@@ -1,11 +1,10 @@
-// The drawer's language button: follows the device's languages or picks English / Simplified Chinese. The choice is
-// kept per principal in the server's LocaleChoice and mirrored to the page's cookie and localStorage.
+// The Settings sheet's language row: follows the device's languages or picks English / Simplified Chinese. The choice
+// is kept per principal in the server's LocaleChoice and mirrored to the page's cookie and localStorage.
 
 import { LocaleChoice } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { useState } from "react";
 import { Sheet, useMessages, useObject, useReadable } from "../runtime/web.tsx";
-import { LanguageIcon } from "./icons.tsx";
 import { rememberLanguage } from "./language.ts";
 import { webMessages } from "./messages.ts";
 
@@ -14,25 +13,23 @@ const LANGUAGES = [
 	{ tag: "zh-CN", label: "简体中文" },
 ] as const;
 
-export function LanguageButton() {
+/** Settings › Language: the current choice, and a sheet to change it. */
+export function LanguageSetting() {
 	const { t } = useMessages(webMessages);
 	const [open, setOpen] = useState(false);
 	const choice = useObject(LocaleChoice, {});
 	const pick = useReadable(choice?.pick);
+	const current = pick == null ? t("followSystem") : (LANGUAGES.find(({ tag }) => tag === pick)?.label ?? pick);
 	const choose = (tag: string | null): void => {
 		rememberLanguage(tag);
 		void choice?.choose(tag, BACKGROUND_CONTEXT).finally(() => setOpen(false));
 	};
 	return (
 		<>
-			<button
-				type="button"
-				className="icon-button language-toggle"
-				aria-label={t("language")}
-				title={t("language")}
-				onClick={() => setOpen(true)}
-			>
-				<LanguageIcon />
+			<button type="button" className="foot-button" onClick={() => setOpen(true)}>
+				<span>{t("language")}</span>
+				<span className="spacer" />
+				<small className="row-value">{current}</small>
 			</button>
 			{open && (
 				<Sheet title={t("language")} onClose={() => setOpen(false)}>
