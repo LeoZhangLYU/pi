@@ -212,6 +212,7 @@
 
 /* A block is selected in the transcript, never represented by an extra workspace tab. */
 .activity-block {
+	position: relative;
 	margin-inline: calc(-1 * var(--semantic-dimension-space-padding-medium));
 	padding-inline: var(--semantic-dimension-space-padding-medium);
 	border-radius: var(--radius);
@@ -227,6 +228,10 @@
 	color: var(--muted);
 	font-size: var(--fs-sm);
 	line-height: 1.65;
+	/* Below the wheel and out of its flow: a growing or vanishing preview resizes nothing. */
+	position: absolute;
+	inset-inline: 0;
+	inset-block-start: 100%;
 }
 .activity-thought > svg {
 	flex: none;

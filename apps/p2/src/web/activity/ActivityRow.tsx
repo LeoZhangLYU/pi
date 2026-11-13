@@ -137,12 +137,6 @@ export function ActivityRow({
 		});
 	return (
 		<div className={`activity-block${selected ? " selected" : ""}`}>
-			{preview && (
-				<div className="activity-thought" data-testid="activity-thought">
-					<SparkIcon />
-					<div className="activity-thought-text">{preview}</div>
-				</div>
-			)}
 			{/* The row: the wheel is the button (a tap opens the calls, a drag rolls it); the rest of the row opens them
 		    too, for a pointer. */}
 			{/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the wheel inside is the keyboard's control. */}
@@ -174,6 +168,13 @@ export function ActivityRow({
 					<ChevronIcon />
 				</span>
 			</div>
+			{/* Below the wheel and out of its flow: the preview can come and go without resizing anything. */}
+			{preview && (
+				<div className="activity-thought" data-testid="activity-thought">
+					<SparkIcon />
+					<div className="activity-thought-text">{preview}</div>
+				</div>
+			)}
 		</div>
 	);
 }
