@@ -90,8 +90,10 @@ describe("chat mode in the browser", { skip: !browserTests }, () => {
 		await browser.click(".reply-quote");
 		await browser.wait(`document.querySelector('[data-entry="${original}"]').classList.contains('flash')`);
 
-		// Phone: a long press on Pi's answer starts a reply to it.
+		// Phone: a long press on Pi's answer starts a reply to it. Only once the answer stopped streaming: a row still
+		// growing under the finger shifts, and the press cancels on any move.
 		await browser.metrics(390, 844);
+		await browser.wait(`!document.querySelector('.assistant .streaming')`);
 		await browser.call("Emulation.setTouchEmulationEnabled", { enabled: true });
 		const answer = await browser.evaluate<{ x: number; y: number }>(
 			`(()=>{const e=[...document.querySelectorAll('.assistant[data-entry]')].at(-1);e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+Math.min(r.height/2,20)}})()`,
