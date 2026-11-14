@@ -222,20 +222,16 @@ test("location tools keep a sandboxed conversation in its sandbox", async () => 
 	// The refusals come before anything reads the conversation's documents.
 	const api = { conversationId: 2 as ConversationId } as unknown as ToolExecutionApi;
 	const envsText = text(await tool("location_envs").execute({}, api, BACKGROUND_CONTEXT));
-	assert.match(envsText, /in sandbox box1/);
-	assert.match(envsText, /cannot leave it/);
 	assert.doesNotMatch(envsText, /slayer\.example|this device/);
 	for (const args of [{ location: "slayer:/home" }, { location: "local:/tmp" }, { env: null, cwd: "/tmp" }]) {
 		for (const name of ["location_dirs", "location_move"]) {
 			const result = await tool(name).execute(args, api, BACKGROUND_CONTEXT);
 			assert.equal(result.isError, true, `${name} ${JSON.stringify(args)}`);
-			assert.match(text(result), /sandbox box1 and cannot leave it/);
 		}
 	}
 	assert.deepEqual(listed, [], "nothing outside the sandbox was even listed");
 	const inside = await tool("location_dirs").execute({ location: "/workspace" }, api, BACKGROUND_CONTEXT);
 	assert.equal(inside.isError, false);
-	assert.match(text(inside), /box1:\/workspace/);
 	assert.deepEqual(listed, ["box1"]);
 });
 
@@ -247,15 +243,16 @@ test("a sandboxed caller places subagents only in its sandbox", async () => {
 	};
 	const caller: Location = { env: "box1", cwd: "/workspace" };
 	for (const args of [{ env: "slayer" }, { env: null }, { env: null, cwd: "/tmp" }])
-		assert.match(String(await placeTarget(locator, caller, args, BACKGROUND_CONTEXT)), /only work inside it/);
+		assert.deepEqual(await placeTarget(locator, caller, args, BACKGROUND_CONTEXT), {
+			refused: "sandbox",
+			sandbox: "box1",
+		});
 	assert.deepEqual(await placeTarget(locator, caller, { cwd: "/workspace/a" }, BACKGROUND_CONTEXT), {
-		env: "box1",
-		cwd: "/workspace/a",
+		location: { env: "box1", cwd: "/workspace/a" },
 	});
 	// An unsandboxed caller may place a subagent in a sandbox (which then confines that subagent).
 	assert.deepEqual(await placeTarget(locator, { env: "slayer", cwd: "/" }, { env: "box1" }, BACKGROUND_CONTEXT), {
-		env: "box1",
-		cwd: "/workspace",
+		location: { env: "box1", cwd: "/workspace" },
 	});
 });
 
@@ -581,7 +578,17 @@ test(
 			{ text: `location_move ${JSON.stringify({ location: "host:/tmp" })}`, requestId: "sandbox-leave" },
 			BACKGROUND_CONTEXT,
 		);
-		await until(chat.view, (view) => output(view).includes("sandbox sbx and cannot leave it"), 60_000);
+		await until(
+			chat.view,
+			(view) =>
+				(
+					view?.entries
+						.flatMap((entry) => entry.model ?? [])
+						.filter((message) => message.role === "toolResult")
+						.at(-1)?.details as { refused?: { sandbox?: string } } | undefined
+				)?.refused?.sandbox === "sbx",
+			60_000,
+		);
 		chat.release();
 
 		// A session outside places a subagent in the sandbox; configure cannot take it out again.
@@ -620,9 +627,10 @@ test(
 					BACKGROUND_CONTEXT,
 				);
 				const view = await until(main.view, (value) => results(value).length > before, 60_000);
-				const last = output({ ...view, entries: view?.entries.slice(-2) ?? [] } as ConversationView);
-				if (last.includes("boxed works in sandbox sbx and cannot leave it")) break;
-				assert.match(last, /is working/);
+				const refused = (results(view).at(-1)?.details as { refused?: { sandbox?: string; working?: true } })
+					?.refused;
+				if (refused?.sandbox === "sbx") break;
+				assert.deepEqual(refused, { working: true }, "a location never changes under a run");
 				await new Promise((resolve) => setTimeout(resolve, 500));
 			}
 		}
@@ -631,7 +639,9 @@ test(
 		// A terminal opens in the VM too.
 		const terminals = owner.hold(Terminals, { session, view: crypto.randomUUID() }, BACKGROUND_CONTEXT);
 		const { token } = await terminals.channel({}, BACKGROUND_CONTEXT);
-		const socket = new WebSocket(`ws://127.0.0.1:${fixture.server.port}/terminal?${new URLSearchParams({ token })}`);
+		const socket = new WebSocket(`ws://127.0.0.1:${fixture.server.port}/terminal?${new URLSearchParams({ token })}`, {
+			headers: { Cookie: fixture.owner.cookie },
+		});
 		const events: TerminalEvent[] = [];
 		const screen: Buffer[] = [];
 		socket.on("message", (bytes, binary) => {

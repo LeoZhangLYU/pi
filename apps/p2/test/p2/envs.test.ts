@@ -361,7 +361,9 @@ test(
 		await assert.rejects(envs.delete({ name: "box" }, BACKGROUND_CONTEXT), /still use/);
 		const terminals = owner.hold(Terminals, { session: session.id, view: crypto.randomUUID() }, BACKGROUND_CONTEXT);
 		const { token } = await terminals.channel({}, BACKGROUND_CONTEXT);
-		const socket = new WebSocket(`ws://127.0.0.1:${fixture.server.port}/terminal?${new URLSearchParams({ token })}`);
+		const socket = new WebSocket(`ws://127.0.0.1:${fixture.server.port}/terminal?${new URLSearchParams({ token })}`, {
+			headers: { Cookie: fixture.owner.cookie },
+		});
 		const events: TerminalEvent[] = [];
 		const output: Buffer[] = [];
 		socket.on("message", (bytes, binary) => {

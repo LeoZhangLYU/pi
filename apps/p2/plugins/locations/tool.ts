@@ -51,12 +51,15 @@ const describeEnv = (env: EnvInfo, here: Location): string => {
 };
 
 export function createLocationExtension({ server, locate }: LocationTools) {
+	/** Why a location tool refused: structured for callers; the sentence only says it. */
+	const refusalText = (sandbox: string) =>
+		`You work in sandbox ${sandbox} and cannot leave it; use paths inside ${sandbox}.`;
 	/** `[env:]path` (or `env` and `cwd`) from where the caller works, resolved by the server to an existing directory. */
 	const target = async (
 		args: { location?: string; env?: string | null; cwd?: string },
 		here: Location,
 		context: Context,
-	): Promise<{ listing: DirectoryListing; env: string | null } | string> => {
+	): Promise<{ listing: DirectoryListing; env: string | null } | { refused: { sandbox: string } } | string> => {
 		const envs = await server.envs(context);
 		const names = envs.map((env) => env.name);
 		const sandbox = sandboxAt(here, envs);
@@ -68,8 +71,7 @@ export function createLocationExtension({ server, locate }: LocationTools) {
 						...(args.env === undefined || args.env === here.env ? { cwd: here.cwd } : {}),
 					});
 		if ("error" in parsed) return parsed.error;
-		if (sandbox !== undefined && parsed.env !== sandbox)
-			return `You work in sandbox ${sandbox} and cannot leave it; use paths inside ${sandbox}.`;
+		if (sandbox !== undefined && parsed.env !== sandbox) return { refused: { sandbox } };
 		if (parsed.env !== null && !names.includes(parsed.env))
 			return `Unknown environment "${parsed.env}" (location_envs lists them).`;
 		try {
@@ -149,9 +151,9 @@ export function createLocationExtension({ server, locate }: LocationTools) {
 				replay: "safe",
 				origin: "owner",
 				execute: async (args, api, context) => {
-					const reply = (text: string, isError = false) => ({
+					const reply = (text: string, details: { refused?: { sandbox: string } } = {}, isError = false) => ({
 						output: [{ type: "text" as const, text }],
-						details: {},
+						details,
 						isError,
 					});
 					const here = await locate(api.conversationId, api, context);
@@ -162,7 +164,8 @@ export function createLocationExtension({ server, locate }: LocationTools) {
 						here,
 						context,
 					);
-					if (typeof found === "string") return reply(found, true);
+					if (typeof found === "string") return reply(found, {}, true);
+					if ("refused" in found) return reply(refusalText(found.refused.sandbox), found, true);
 					const { listing, env } = found;
 					const prefix = env ? `${env}:` : "";
 					const names = listing.directories.slice(0, MAX_LISTED).map((path) => `${path.split(/[\\/]/).pop()}/`);
@@ -192,7 +195,11 @@ export function createLocationExtension({ server, locate }: LocationTools) {
 				replay: "safe",
 				origin: "owner",
 				execute: async (args, api, context) => {
-					const reply = (text: string, details: { env?: string | null; cwd?: string } = {}, isError = false) => ({
+					const reply = (
+						text: string,
+						details: { env?: string | null; cwd?: string; refused?: { sandbox: string } } = {},
+						isError = false,
+					) => ({
 						output: [{ type: "text" as const, text }],
 						details,
 						isError,
@@ -202,6 +209,7 @@ export function createLocationExtension({ server, locate }: LocationTools) {
 					const here = await locate(api.conversationId, api, context);
 					const found = await target(args, here, context);
 					if (typeof found === "string") return reply(found, {}, true);
+					if ("refused" in found) return reply(refusalText(found.refused.sandbox), found, true);
 					const to: Location = { env: found.env, cwd: found.listing.path };
 					const details = { env: to.env, cwd: to.cwd };
 					if (await isTopLevel(api, api.conversationId, context)) {

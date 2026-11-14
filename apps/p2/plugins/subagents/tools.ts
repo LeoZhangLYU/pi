@@ -231,6 +231,8 @@ type SubagentDetails = {
 	/** Its own cwd (raw path) and, on a remote environment, that environment's name. */
 	cwd?: string;
 	env?: string;
+	/** Why a placement was refused: structured, so callers (and tests) never read the sentence. */
+	refused?: { sandbox: string } | { working: true };
 };
 
 /** A subagent's own location as the tool's details carry it. */
@@ -321,23 +323,30 @@ export type SubagentLocator = {
  * Where a subagent of a caller at `caller` should work: `env` (default the caller's; null this device) and `cwd`
  * (default the caller's cwd on its own environment, the home elsewhere). Text when it is not an existing directory.
  */
+/** Where a subagent may go: its location, or why it may not go there (the tool says why in words). */
+export type Placement = { readonly location: Location } | { readonly refused: "sandbox"; readonly sandbox: string };
+
 export async function placeTarget(
 	locator: SubagentLocator,
 	caller: Location,
 	args: { env?: string | null; cwd?: string },
 	context: Context,
-): Promise<Location | string> {
+): Promise<Placement | string> {
 	const env = args.env === undefined ? caller.env : args.env;
 	// A caller in a sandbox places its subagents in the same sandbox only.
 	const sandbox = await locator.sandbox(caller);
-	if (sandbox !== undefined && env !== sandbox)
-		return `You work in sandbox ${sandbox}; your subagents can only work inside it.`;
+	if (sandbox !== undefined && env !== sandbox) return { refused: "sandbox", sandbox };
 	const resolved = await locator.directory({ env, path: args.cwd ?? "" }, caller, context);
-	if (!("error" in resolved)) return resolved;
+	if (!("error" in resolved)) return { location: resolved };
 	const where = `${env === caller.env ? "" : `${env ?? "local"}:`}${args.cwd ?? "~"}`;
 	return resolved.error === "not an existing directory"
 		? `cwd ${where} is not an existing directory.`
 		: `cwd ${where}: ${resolved.error}`;
+}
+
+/** What a placement refusal says: the reason is the placement's, the words are here. */
+export function placementRefusal(placement: Extract<Placement, { refused: "sandbox" }>): string {
+	return `You work in sandbox ${placement.sandbox}; your subagents can only work inside it.`;
 }
 
 /** What archiving needs: a tool call's API, or the worker's Harness. */
@@ -529,7 +538,11 @@ export function createSubagentExtension(
 					(placing || args.followSession) &&
 					(await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined
 				)
-					return reply(`${name} is working: stop it or wait before changing its location.`, {}, true);
+					return reply(
+						`${name} is working: stop it or wait before changing its location.`,
+						{ refused: { working: true } },
+						true,
+					);
 				if (args.followSession) location = null;
 				else if (placing) {
 					// From the caller's location (the session's: subagents spawn none).
@@ -542,14 +555,20 @@ export function createSubagentExtension(
 					const target = kept === undefined ? args : { ...args, env: kept };
 					const placed = await placeTarget(locator, caller, target, context);
 					if (typeof placed === "string") return reply(placed, {}, true);
-					location = placed;
+					if ("refused" in placed)
+						return reply(placementRefusal(placed), { refused: { sandbox: placed.sandbox } }, true);
+					location = placed.location;
 				}
 				// A subagent working in a sandbox stays there, whoever configures it (only the owner's Relocate leaves one).
 				const sandbox = agent?.location === undefined ? undefined : await locator.sandbox(agent.location);
 				if (sandbox !== undefined && location !== undefined) {
 					const next = location ?? (await locator.locate(ROOT_CONVERSATION_ID, api, context));
 					if (next.env !== sandbox)
-						return reply(`${name} works in sandbox ${sandbox} and cannot leave it.`, {}, true);
+						return reply(
+							`${name} works in sandbox ${sandbox} and cannot leave it.`,
+							{ refused: { sandbox } },
+							true,
+						);
 				}
 			} else if (agent) {
 				// A send: what it was given that its caller can no longer give is taken away (the caller's tools changed).

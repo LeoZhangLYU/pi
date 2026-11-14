@@ -32,8 +32,11 @@ export async function terminalDaemon(platform: string, arch: string, local: bool
 	const candidates = [
 		local ? process.env.P2_TERMINAL_DAEMON : undefined,
 		target ? join(envPackage, "daemon", "target", target, "release", "pi-env") : undefined,
-		native ? join(envPackage, "daemon", "target", "release", "pi-env") : undefined,
-		native ? join(envPackage, "daemon", "target", "debug", "pi-env") : undefined,
+		// Development builds are this machine's libc and architecture. They run where the terminal does only for a local
+		// terminal: a sandbox VM of the same architecture is another libc (Alpine's musl), where a glibc build does not
+		// start at all. A terminal elsewhere gets the released binary for its system.
+		local && native ? join(envPackage, "daemon", "target", "release", "pi-env") : undefined,
+		local && native ? join(envPackage, "daemon", "target", "debug", "pi-env") : undefined,
 		join(envPackage, "bin", `pi-env-${system}`, "pi-env"),
 	];
 	const failures: string[] = [];
