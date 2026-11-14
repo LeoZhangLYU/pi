@@ -53,6 +53,9 @@ Paths are relative to `apps/p2`. Read `docs/handoff.md` and the matching part of
   the turn's first part is at least `--row` (`data-lead`), so Working… turning into anything never shrinks the turn.
   Inside a block: `--s3` (answer paragraphs and code blocks, card and code padding), `--s2` (results, inline
   artifacts below their card, images); the copy/branch actions pull up `--s2` to sit under the answer.
+  The live thought preview hangs below its wheel out of the flow, so `.scroller` keeps its lane above the composer
+  (`showPreview`/`releasePreview` in use-chat-scroll.ts): it only grows within a run and goes with the next turn's
+  message, never shrinking the transcript under the reader.
 
 ## Back navigation
 

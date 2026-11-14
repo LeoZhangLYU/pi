@@ -168,7 +168,8 @@ export function ActivityRow({
 					<ChevronIcon />
 				</span>
 			</div>
-			{/* Below the wheel and out of its flow: the preview can come and go without resizing anything. */}
+			{/* Below the wheel and out of its flow: the preview can come and go without resizing anything. The scroller
+			    keeps the room it takes above the composer (use-chat-scroll.ts `showPreview`). */}
 			{preview && (
 				<div className="activity-thought" data-testid="activity-thought">
 					<SparkIcon />

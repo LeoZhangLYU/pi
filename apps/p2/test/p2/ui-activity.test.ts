@@ -459,6 +459,13 @@ describe("a block's steps and active thought", { skip: !browserTests }, () => {
 			"(e=>({lines:getComputedStyle(e).webkitLineClamp,clipped:e.scrollHeight>e.clientHeight}))(document.querySelector('.activity-thought-text'))",
 		);
 		assert.deepEqual(clamp, { lines: "3", clipped: true });
+		// The scroller keeps the preview's lane: the whole preview is inside the viewport, not cut off below it.
+		const lane = await browser.evaluate<{ top: number; bottom: number; view: number }>(`(() => {
+			const preview = document.querySelector('[data-testid=activity-thought]').getBoundingClientRect();
+			const view = document.querySelector('.scroller.transcript').getBoundingClientRect();
+			return { top: preview.top, bottom: preview.bottom, view: view.bottom };
+		})()`);
+		assert.ok(lane.bottom <= lane.view + 1 && lane.top >= 0, `the preview shows whole: ${JSON.stringify(lane)}`);
 		await browser.click("[data-testid=activity]");
 		await browser.wait("document.querySelector('pre.detail-output')?.textContent==='building'");
 		await browser.evaluate(`window.showCodemode(${JSON.stringify(running("building\ntesting\n"))}, 2)`);

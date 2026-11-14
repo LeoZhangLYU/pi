@@ -137,6 +137,9 @@ export class TranscriptScroll {
 	readonly #observer: ResizeObserver | undefined =
 		typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver((entries) => this.#resized(entries));
 	#spacers = { top: Number.NaN, bottom: Number.NaN };
+	/** The composer dock's height, and the preview lane above it; `.scroller` keeps room for both. */
+	#dockHeight = 0;
+	#lane = 0;
 
 	/** A correction not written to `scrollTop` yet: the rows are translated up by it meanwhile. */
 	#hold = 0;
@@ -193,6 +196,7 @@ export class TranscriptScroll {
 			this.#target = undefined;
 			this.#lastKey = undefined;
 			this.#earlierSize = -1;
+			this.#lane = 0;
 		}
 		if (rows !== this.#rows || estimates !== this.#estimates) {
 			this.#rows = rows;
@@ -377,7 +381,8 @@ export class TranscriptScroll {
 		const element = this.#scroller;
 		if (!docked || !element) return;
 		const observer = new ResizeObserver(() => {
-			element.style.paddingBottom = `${docked.offsetHeight}px`;
+			this.#dockHeight = docked.offsetHeight;
+			this.#applyBottom();
 			docked.style.right = `${Math.max(element.offsetWidth - element.clientWidth, 4)}px`;
 			// The room is below the rows: a taller composer (a second line, a queued chip) moves nothing the reader
 			// sees, and a transcript following the answer stays at its end.
@@ -387,6 +392,43 @@ export class TranscriptScroll {
 		observer.observe(docked);
 		return () => observer.disconnect();
 	};
+
+	/** The room below the rows: the composer's, and the lane a live thought preview takes above it. */
+	#applyBottom(): void {
+		const element = this.#scroller;
+		const room = `${this.#dockHeight + this.#lane}px`;
+		if (element && element.style.paddingBottom !== room) element.style.paddingBottom = room;
+	}
+
+	/**
+	 * The thought preview hangs below its activity row, out of the rows' flow (activity.css), so the scroller keeps the
+	 * lane it takes instead: `height` grows it, and it never shrinks within a run — a preview wrapping to another line,
+	 * or going away, is what would otherwise shorten the transcript under the reader.
+	 */
+	showPreview(height: number): void {
+		const lane = Math.ceil(height);
+		if (lane <= this.#lane) return;
+		this.#lane = lane;
+		this.#applyBottom();
+		this.#sync();
+	}
+
+	/** A new turn starts (its message arrived): the lane goes in the same commit as the taller row replacing it. */
+	releasePreview(): void {
+		if (this.#lane === 0) return;
+		this.#lane = 0;
+		this.#applyBottom();
+		this.#sync();
+	}
+
+	/** The height of the thought preview rendered in a row, if one is. */
+	previewHeight(): number | undefined {
+		for (const element of this.#elements.values()) {
+			const preview = element.querySelector<HTMLElement>(".activity-thought");
+			if (preview?.isConnected) return preview.getBoundingClientRect().height;
+		}
+		return undefined;
+	}
 
 	/** The reader scrolls up or touches the transcript: stop following the answer. */
 	unpin(): void {
@@ -649,6 +691,7 @@ export class TranscriptScroll {
 	#sync(): void {
 		const scroller = this.#scroller;
 		if (!scroller) return;
+		this.#applyBottom();
 		this.#viewport = scroller.clientHeight;
 		const width = this.#list?.clientWidth ?? this.#width;
 		if (width !== this.#width) {

@@ -783,6 +783,18 @@ export const Messages = memo(function Messages({
 	const { t } = useMessages(webMessages);
 	const spacers = list.spacers(range);
 	const arriving = useArriving(rows);
+	// A live thought preview hangs below its row, out of the flow (activity.css): the scroller keeps its lane above the
+	// composer, so the preview is not drawn under it. The lane grows to the tallest preview of a run; a person's message
+	// below the rows shown last starts the next turn, and its row takes the lane's room with it. (Writing into a running
+	// turn releases it too, and a preview still up brings it back in the same pass.)
+	const lastSeen = useRef<string | undefined>(undefined);
+	useLayoutEffect(() => {
+		const at = lastSeen.current === undefined ? -1 : rows.findIndex((row) => row.key === lastSeen.current);
+		if (at >= 0 && rows.some((row, index) => index > at && row.item.type === "user")) list.releasePreview();
+		lastSeen.current = rows.at(-1)?.key;
+		const preview = list.previewHeight();
+		if (preview) list.showPreview(preview);
+	});
 	return (
 		<div className="messages">
 			{/* One height in every state: the edge changing never moves the transcript under the reader. It loads ahead
