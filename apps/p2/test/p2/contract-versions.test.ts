@@ -2,8 +2,9 @@
 // still bind the versions released before `/tree` and its branch labels, through their `accepts`, and map the current
 // state and results back. The old contracts below are copied verbatim from the releases that bundled them
 // (`Sessions` v3 and `Catalog` v2 from 0a730c8a7, `Sessions` v4, `Catalog` v3 and `SessionTree` v1 from e88525506,
-// `Sessions` v5 from 9ff0ebfd0, `Envs` v1 from 2a32a605a and v2 from d07548004), so their fingerprints are the ones
-// old bundles send.
+// `Sessions` v5 from 9ff0ebfd0, `Envs` v1 from 2a32a605a and v2 from d07548004; `SessionStatus` v1, `SessionMetrics` v1
+// and `Subagents` v2 as released before the cost display was removed and the team came), so their fingerprints are
+// the ones old bundles send.
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
@@ -12,15 +13,16 @@ import {
 	BACKGROUND_CONTEXT,
 	DirectoryListingSchema,
 	evolve,
+	LocationSchema,
 	literal,
 	local,
 	ModelRefSchema,
 	method,
 	param,
 	propertiesOf,
+	record,
 	remote,
 	serverHost,
-	record,
 	sessionHost,
 	ThinkingLevelSchema,
 } from "@p2/app/v1";
@@ -29,9 +31,10 @@ import { Envs, EnvTestSchema, SandboxStatusSchema } from "../../plugins/envs/con
 import { SandboxMountSchema, SshEnvConfigSchema } from "../../plugins/envs/schema.ts";
 import { CreateSchema, MAX_TITLE, type Session, Sessions } from "../../plugins/sessions/contract.ts";
 import { SessionStatus } from "../../plugins/status/contract.ts";
+import { Subagents } from "../../plugins/subagents/contract.ts";
 import { SessionTree } from "../../plugins/tree/contract.ts";
 import type { Host } from "../../src/runtime/chord.ts";
-import { bound, boundIn, type Fixture, holdIn, startFixture, until } from "./helpers.ts";
+import { bound, boundIn, type Fixture, hire, holdIn, startFixture, until } from "./helpers.ts";
 
 const Id = obj({ id: str() });
 const Title = str({ minLength: 1, maxLength: MAX_TITLE });
@@ -355,9 +358,6 @@ const EnvsV2 = evolve(EnvsV1, (e) =>
 		.args("delete", obj({ name: str(), force: opt(bool()) })),
 );
 
-describe("older contract versions against the current server (fake provider)", () => {
-	let fixture: Fixture;
-	let owner: Host;
 /** `SessionStatus` version 1, as released before the cost display was removed: statuses and reports with `usage`. */
 const SessionStatusV1 = remote("p2.session-status", {
 	version: 1,
@@ -383,6 +383,60 @@ const SessionMetricsV1 = remote("p2.session-metrics", {
 	variants: { reader: { state: { clients: num(), usage: union([unknown(), nul()]) } } },
 });
 
+/** `Subagents` version 2, as released before the team: children without roles. */
+const SubagentsV2 = remote("p2.subagents", {
+	version: 2,
+	params: {},
+	hostAddress: serverHost,
+	variants: {
+		reader: {
+			state: {
+				children: record(
+					arr(
+						obj({
+							name: str(),
+							kind: opt(literal("agent")),
+							callId: opt(str()),
+							archived: opt(bool()),
+							conversationId: num(),
+							model: str(),
+							thinkingLevel: str(),
+							tools: arr(str()),
+							location: opt(LocationSchema),
+							lastEntryId: num(),
+						}),
+					),
+				),
+			},
+		},
+		reporter: {
+			methods: {
+				report: method(
+					obj({
+						children: arr(
+							obj({
+								name: str(),
+								kind: opt(literal("agent")),
+								callId: opt(str()),
+								archived: opt(bool()),
+								conversationId: num(),
+								model: str(),
+								thinkingLevel: str(),
+								tools: arr(str()),
+								location: opt(LocationSchema),
+								lastEntryId: num(),
+							}),
+						),
+					}),
+				),
+			},
+		},
+	},
+});
+
+describe("older contract versions against the current server (fake provider)", () => {
+	let fixture: Fixture;
+	let owner: Host;
 	let session: Session;
 	let branch: number;
 
@@ -492,7 +546,6 @@ const SessionMetricsV1 = remote("p2.session-metrics", {
 		});
 		v3.release();
 	});
-});
 
 	it("binds SessionStatus v1: statuses as they are, without usage", async () => {
 		const ref = await boundIn(owner, SessionStatusV1, {}, "reader");
@@ -503,9 +556,31 @@ const SessionMetricsV1 = remote("p2.session-metrics", {
 		ref.release();
 	});
 
+	it("binds Subagents v2: members listed without their role, manager or duty", async () => {
+		// The `/tree` branch made in `before` is the main conversation now: conversation 1 takes no input.
+		const chat = await holdIn(owner, Chat, { session: session.id, conversation: branch }, "participant");
+		const current = await holdIn(owner, Subagents, {}, "reader");
+		await hire(chat, current, session.id, { name: "old-tab-helper" });
+		const ref = await boundIn(owner, SubagentsV2, {}, "reader");
+		const children = await until(
+			ref.children,
+			(value) => value?.[session.id]?.some((child) => child.name === "old-tab-helper") === true,
+		);
+		for (const child of children[session.id] ?? []) {
+			assert.equal("role" in child, false, child.name);
+			assert.equal("manager" in child || "duty" in child, false, child.name);
+		}
+		// The HR manager is listed too: an old page shows it as a plain subagent.
+		assert.ok(children[session.id]?.some((child) => child.name === "hr"));
+		ref.release();
+		current.release();
+		chat.release();
+	});
+
 	it("binds SessionMetrics v1: viewers, and no spend", async () => {
 		const ref = await boundIn(owner, SessionMetricsV1, { session: session.id, viewer: "old-tab" }, "reader");
 		await until(ref.clients, (value) => typeof value === "number");
 		assert.equal(await until(ref.usage, (value) => value !== undefined), null);
 		ref.release();
 	});
+});

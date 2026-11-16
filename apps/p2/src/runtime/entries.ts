@@ -29,7 +29,7 @@ export const peerMessage = (kind: string, data: unknown): PeerMessage | undefine
 export type ConversationOrigin = "owner";
 
 /**
- * An agent's task for another agent: a main agent's message to its subagent (`subagent spawn`/`send`) or a script's
+ * An agent's task for another agent: work given to a team member (`subagent hire`/`send`, `delegate send`) or a script's
  * prompt to its one-shot agent, as its own entry kind, with `{ origin: "owner" }` when the owner started the writing
  * turn. The receiving turn inherits it (`originOf`), so the owner-only tools it was given work for it.
  */
@@ -44,7 +44,7 @@ export const AGENT_MESSAGE_ENTRY = "p2.agent-message";
 export const AgentMessageSchema = obj(
 	{
 		from: obj({ name: str(), conversationId: num() }, { open: true }),
-		intent: union([literal("answered"), literal("failed"), literal("question"), literal("note")]),
+		intent: union([literal("answered"), literal("failed"), literal("question"), literal("note"), literal("stopped")]),
 		text: str(),
 		/** The origin of the subagent's turn that wrote it (`originOf`): the receiving turn may act for the owner too. */
 		origin: opt(literal("owner")),

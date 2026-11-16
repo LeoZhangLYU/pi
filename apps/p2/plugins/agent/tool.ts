@@ -17,7 +17,7 @@ import { arr, compile, obj, opt, str, unknown, type Validator } from "@earendil-
 import { formats } from "@earendil-works/pi-schema/formats";
 import type { JsonValue } from "@p2/app/v1";
 import { record, SUBAGENT_TASK_ENTRY } from "@p2/app/v1";
-import { defineP2Tool, isTopLevel, originOf, type P2Tool } from "@p2/app/v1/worker";
+import { defineP2Tool, originOf, type P2Tool } from "@p2/app/v1/worker";
 import { InheritedLocation, resolveChoice, Subagents } from "../subagents/contract.worker.ts";
 import { ownLocation } from "../subagents/tools.ts";
 
@@ -81,11 +81,9 @@ export function createAgentExtension(models: Models, access: () => ReadonlyMap<s
 					: undefined;
 			if (typeof choice === "string") return fail(choice);
 			// Owned by this call: aborting the call aborts the agent's work. Listed in the same commit, by the call ID the
-			// script's tool card shows it under, so the user can open its transcript.
-			// The main conversation's and its `/tree` branches' one-shot agents are listed in the session's registry.
-			const listedOn = (await isTopLevel(api, api.conversationId, context))
-				? ROOT_CONVERSATION_ID
-				: api.conversationId;
+			// script's tool card shows it under, so the user can open its transcript. Every one-shot is listed in the
+			// session's registry, also one a member's script started: readers (the sidebar, the read-only rule) look there.
+			const listedOn = ROOT_CONVERSATION_ID;
 			// The agent works where its caller does: a caller with its own location (a subagent's) passes it on.
 			const inherited = await ownLocation(api, api.conversationId, context);
 			const conversationId = await api.commit(async (tx) => {

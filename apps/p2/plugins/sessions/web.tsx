@@ -45,7 +45,6 @@ import { Envs } from "../envs/contract.ts";
 import { directoryPickerLayer } from "../envs/contract.web.tsx";
 import { Search, SessionReads } from "../search/contract.ts";
 import { SessionStatus } from "../status/contract.ts";
-import { Subagents } from "../subagents/contract.ts";
 import { SessionTree } from "../tree/contract.ts";
 import { BranchSheet } from "./BranchSheet.tsx";
 import { type Operation, type Session, Sessions } from "./contract.ts";
@@ -182,11 +181,9 @@ function Sidebar() {
 	// As the server last said (kept across starts): unread marks and search hold without waiting for the catalog.
 	const owner = useOwner();
 	const status = keptIn(useObject(SessionStatus, {}), "reader");
-	const agents = keptIn(useObject(Subagents, {}), "reader");
 	const { fail } = useComposerState();
 	const [list, edit] = useOptimisticCall(useReadable(keptIn(service, "owner")?.sessions), applyRow, fail);
 	const statuses = useReadable(status?.statuses);
-	const children = useReadable(agents?.children);
 	useEffect(() => {
 		if (list) rememberMains(list);
 	}, [list]);
@@ -218,11 +215,10 @@ function Sidebar() {
 						error: statuses?.[session.id]?.error,
 						unread: (answers?.[session.id] ?? 0) > (reads?.[session.id] ?? 0),
 					},
-					subagents: children?.[session.id] ?? [],
 					operation: operationOf(operations, session.id, dismiss, t),
 				};
 			}),
-		[list, statuses, children, answers, reads, operations, dismiss, t],
+		[list, statuses, answers, reads, operations, dismiss, t],
 	);
 	// Sessions a `drawer-head` entry shows are left out of the folders.
 	const [apart, setApart] = useState<Readonly<Record<string, readonly string[]>>>({});

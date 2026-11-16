@@ -185,9 +185,22 @@ describe("/tree (fake provider)", () => {
 		const ref = await treeRef();
 		const asking = (await ref.tree(BACKGROUND_CONTEXT)).main;
 		const chat = await chatOf(asking);
-		const spawn = { action: "spawn", name: "slowpoke", message: "slow-tool", tools: ["bash"] };
-		await chat.send({ text: `subagent ${JSON.stringify(spawn)}`, requestId: "slowpoke" }, BACKGROUND_CONTEXT);
-		await until(chat.view, (next) => text(next).includes("Started slowpoke."));
+		const staff = { action: "hire", name: "slowpoke", role: "executor", duty: "helps", tools: ["bash"] };
+		await chat.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(staff)}` })}`,
+				requestId: "slowpoke-hire",
+			},
+			BACKGROUND_CONTEXT,
+		);
+		// The HR manager's report to this branch names the member it hired.
+		await until(
+			chat.view,
+			(next) => text(next).includes("[answered, no reply needed]") && text(next).includes('"name":"slowpoke"'),
+		);
+		const work = { action: "send", name: "slowpoke", message: "slow-tool" };
+		await chat.send({ text: `subagent ${JSON.stringify(work)}`, requestId: "slowpoke" }, BACKGROUND_CONTEXT);
+		await until(chat.view, (next) => text(next).includes("Sent to slowpoke"));
 		// The subagent's bash call takes 4 seconds: the session switches meanwhile.
 		await ref.select({ conversation: 1 }, BACKGROUND_CONTEXT);
 		await until(chat.view, (next) => text(next).includes('<sender kind="subagent" name="slowpoke"/>'));
@@ -199,11 +212,14 @@ describe("/tree (fake provider)", () => {
 		feed.release();
 		const slowpoke = children?.[session.id]?.find((child) => child.name === "slowpoke")?.conversationId;
 		assert(slowpoke !== undefined);
-		const direct = await chatOf(slowpoke);
+		// The member notes whoever gave it the work: sent from the asking branch, after the session moved away from it.
+		await ref.select({ conversation: asking }, BACKGROUND_CONTEXT);
+		await until(chat.view, (next) => !(next?.docs["pi.live"] as { run?: unknown } | undefined)?.run);
 		const team = { action: "send", to: "parent", message: "for the asker", intent: "note" };
-		await direct.send({ text: `team ${JSON.stringify(team)}`, requestId: "team-parent" }, BACKGROUND_CONTEXT);
+		const note = { action: "send", name: "slowpoke", message: `team ${JSON.stringify(team)}` };
+		await chat.send({ text: `subagent ${JSON.stringify(note)}`, requestId: "team-parent" }, BACKGROUND_CONTEXT);
+		await ref.select({ conversation: 1 }, BACKGROUND_CONTEXT);
 		await until(chat.view, (next) => text(next).includes("[notes, no reply needed] for the asker"));
-		direct.release();
 		chat.release();
 		await idle();
 		const main = await chatOf(1);

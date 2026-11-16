@@ -64,12 +64,13 @@ import {
 import type { EnvInfo } from "../../plugins/locations/contract.ts";
 import { createLocationExtension, sandboxAt } from "../../plugins/locations/tool.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
+import { Subagents as SubagentIndex } from "../../plugins/subagents/contract.ts";
 import { InheritedLocation, Subagents } from "../../plugins/subagents/contract.worker.ts";
 import { ownLocation, placeTarget, type SubagentLocator } from "../../plugins/subagents/tools.ts";
 import { Terminals } from "../../plugins/terminals/contract.ts";
 import type { TerminalEvent } from "../../plugins/terminals/protocol.ts";
 import { conversationConfinement, type ExecutionEnvironments } from "../../src/runtime/worker.ts";
-import { holdIn, poll, startFixture, until } from "./helpers.ts";
+import { hire, holdIn, poll, startFixture, until } from "./helpers.ts";
 
 const slayer = { type: "ssh" as const, host: "slayer.example" };
 const box = {
@@ -591,21 +592,17 @@ test(
 		);
 		chat.release();
 
-		// A session outside places a subagent in the sandbox; configure cannot take it out again.
+		// A session outside has the HR manager place a member in the sandbox; configure cannot take it out again.
 		const outside = (await sessions.create({ env: "host", cwd: root }, BACKGROUND_CONTEXT)).id;
 		const main = await holdIn(owner, Chat, { session: outside, conversation: 1 }, "participant");
-		const spawnArgs = {
-			action: "spawn",
+		const agents = await holdIn(owner, SubagentIndex, {}, "reader");
+		await hire(main, agents, outside, {
 			name: "boxed",
-			message: "hi",
 			env: "sbx",
 			cwd: "/workspace",
 			tools: ["bash"],
-		};
-		await main.send(
-			{ text: `subagent ${JSON.stringify(spawnArgs)}`, requestId: "sandbox-spawn" },
-			BACKGROUND_CONTEXT,
-		);
+			message: "hi",
+		});
 		// Its answer reported and the main agent idle again: inputs sent meanwhile would join the report's turn.
 		await until(
 			main.view,
@@ -616,17 +613,25 @@ test(
 		);
 		const results = (view: ConversationView | null | undefined) =>
 			(view?.entries ?? []).flatMap((entry) => entry.model ?? []).filter((message) => message.role === "toolResult");
+		// The HR manager's calls and their results are in its own conversation.
+		const hrMember = (
+			await until(agents.children, (value) => value?.[outside]?.some((each) => each.role === "hr") === true)
+		)?.[outside]?.find((each) => each.role === "hr");
+		const hr = await holdIn(owner, Chat, { session: outside, conversation: hrMember!.conversationId }, "participant");
 		let serial = 0;
 		for (const change of [{ followSession: true }, { env: "host", cwd: root }]) {
 			const configure = JSON.stringify({ action: "configure", name: "boxed", ...change });
 			// Until its first task is done: a location never changes under a run.
 			for (;;) {
-				const before = results(await until(main.view, Boolean)).length;
+				const before = results(await until(hr.view, Boolean)).length;
 				await main.send(
-					{ text: `subagent ${configure}`, requestId: `sandbox-configure-${++serial}` },
+					{
+						text: `subagent ${JSON.stringify({ action: "hire", message: `staff ${configure}` })}`,
+						requestId: `sandbox-configure-${++serial}`,
+					},
 					BACKGROUND_CONTEXT,
 				);
-				const view = await until(main.view, (value) => results(value).length > before, 60_000);
+				const view = await until(hr.view, (value) => results(value).length > before, 60_000);
 				const refused = (results(view).at(-1)?.details as { refused?: { sandbox?: string; working?: true } })
 					?.refused;
 				if (refused?.sandbox === "sbx") break;
@@ -634,6 +639,8 @@ test(
 				await new Promise((resolve) => setTimeout(resolve, 500));
 			}
 		}
+		hr.release();
+		agents.release();
 		main.release();
 
 		// A terminal opens in the VM too.

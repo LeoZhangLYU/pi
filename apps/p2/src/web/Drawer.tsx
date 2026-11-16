@@ -1,12 +1,10 @@
 import { memo, type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import type { SearchResults } from "../../plugins/search/contract.ts";
 import type { Session } from "../../plugins/sessions/contract.ts";
-import type { Child } from "../../plugins/subagents/contract.ts";
 import { locationLabel } from "./path-label.ts";
 
 export { locationLabel } from "./path-label.ts";
 export type SessionSummary = Session & {
-	subagents: Child[];
 	/** `unread`: a finished answer the owner has not read on any device (see `SessionReads`). */
 	worker: { busy: number[]; error?: string; unread?: boolean };
 	/** A lifecycle operation of the session: running (`label` only), or failed with its error and a Dismiss. */
@@ -154,55 +152,12 @@ function SessionRow({
 	children: ReactNode;
 }) {
 	const { t } = useMessages(webMessages);
-	// One control expands a session's branch rows and its subagents; a subagent shown expands them. Not any conversation
-	// but the main one: right after a `/tree` switch the page shows the new branch before the row names it main.
-	const showsSubagent = session.subagents.some((agent) => agent.conversationId === conversationId);
-	const [expanded, setExpanded] = useState(showsSubagent);
-	useEffect(() => {
-		if (showsSubagent) setExpanded(true);
-	}, [showsSubagent]);
-	// One-shot agents are opened from their script's tool card; archived subagents wait behind their own row.
-	const listed = (archived ? [] : session.subagents)
-		.filter((agent) => agent.kind !== "agent")
-		.toSorted((a, b) => (b.lastEntryId ?? 0) - (a.lastEntryId ?? 0) || b.conversationId - a.conversationId);
-	const agents = listed.filter((agent) => !agent.archived);
-	const stored = listed.filter((agent) => agent.archived);
-	const [showStored, setShowStored] = useState(false);
-	const storedOpen = showStored || stored.some((agent) => agent.conversationId === conversationId);
+	// The team's members are not conversation entries: the main agent is the team's only entry, and its Team panel shows
+	// them. Only `/tree` branches get rows under a session here.
 	const branches = onBranch !== undefined && !archived && session.branches.length >= 2;
-	const nestedWhat =
-		branches && listed.length > 0
-			? t("branchesAndSubagents")
-			: branches
-				? t("branchesOnly")
-				: listed.length > 0
-					? t("subagentsOnly")
-					: undefined;
+	const [expanded, setExpanded] = useState(false);
+	const nestedWhat = branches ? t("branchesOnly") : undefined;
 	const nested = nestedWhat !== undefined;
-	const row = (agent: (typeof listed)[number]) => (
-		<button
-			type="button"
-			key={agent.conversationId}
-			className={`subagent-row ${conversationId === agent.conversationId ? "active" : ""}`}
-			title={
-				agent.location
-					? t("worksIn", locationLabel(agent.location.env, agent.location.cwd))
-					: t("followsSession", locationLabel(session.env, session.cwd))
-			}
-			onClick={() => onOpen(session.id, agent.conversationId)}
-		>
-			<span className="branch" />
-			<span className="session-title">{agent.name}</span>
-			<span className="session-meta">
-				{/* A subagent with its own location shows it: it stays there when the session moves. */}
-				{agent.location && (
-					<span className="subagent-location">{locationLabel(agent.location.env, agent.location.cwd)}</span>
-				)}
-				{session.worker.busy?.includes(agent.conversationId) && <span className="live-dot" title={t("working")} />}
-				{agent.model.split("/").pop()}
-			</span>
-		</button>
-	);
 	return (
 		<div className="session-row">
 			<div className={`session-header ${nested ? "has-subagents" : ""}`}>
@@ -213,12 +168,9 @@ function SessionRow({
 						className="subagent-toggle"
 						aria-label={t("expandOrCollapse", expanded, nestedWhat ?? "")}
 						aria-expanded={expanded}
-						aria-controls={[branches && `branches-${session.id}`, listed.length > 0 && `subagents-${session.id}`]
-							.filter(Boolean)
-							.join(" ")}
+						aria-controls={branches ? `branches-${session.id}` : undefined}
 						onClick={() => setExpanded(!expanded)}
 					>
-						{listed.length > 0 && <span>{agents.length}</span>}
 						{branches && (
 							<span className="toggle-branches" title={t("branches", session.branches.length)}>
 								<BranchIcon size={11} />
@@ -254,26 +206,6 @@ function SessionRow({
 					onRenameBranch={onRenameBranch}
 					hidden={!expanded}
 				/>
-			)}
-			{listed.length > 0 && (
-				<div id={`subagents-${session.id}`} hidden={!expanded}>
-					{agents.map(row)}
-					{stored.length > 0 && (
-						<button
-							type="button"
-							className="subagent-row subagent-stored"
-							aria-expanded={storedOpen}
-							onClick={() => setShowStored(!storedOpen)}
-						>
-							<span className="branch" />
-							<span className="session-title">{t("archivedCount", stored.length)}</span>
-							<span className={`chev ${storedOpen ? "open" : ""}`}>
-								<ChevronIcon size={12} />
-							</span>
-						</button>
-					)}
-					{storedOpen && stored.map(row)}
-				</div>
 			)}
 		</div>
 	);

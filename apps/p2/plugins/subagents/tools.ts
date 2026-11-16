@@ -2,50 +2,71 @@
 // test/examples/23-subagent-background.ts (MIT; see third-party/pi.LICENSE).
 // Adds per-subagent model, thinking level and tool selection, and an optional own location (environment and cwd).
 
-import type { AssistantMessage, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { Models } from "@earendil-works/pi-ai/models";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	AssistantEntry,
 	type ConversationHandle,
 	type ConversationId,
 	type Cursor,
-	configure,
 	type DocumentReader,
 	defineExtension,
 	defineTask,
-	type Extension,
+	type EntryId,
 	type Harness,
+	InboxDoc,
 	LiveDoc,
-	type ModelRef,
 	ROOT_CONVERSATION_ID,
 	type SettledSubmissionRecord,
 	type Submission,
 	type ToolExecutionApi,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { arr, bool, compile, nul, obj, opt, str, union } from "@earendil-works/pi-schema";
+import { bool, compile, obj, opt, str, union } from "@earendil-works/pi-schema";
 import type { Context, JsonValue } from "@p2/app/v1";
-import { type Location, type LocationInput, literal, locationText, senderText } from "@p2/app/v1";
+import { type Location, type LocationInput, literal, senderText } from "@p2/app/v1";
 import { answerOrigin, defineP2Tool, mainConversation, originOf, type P2Tool } from "@p2/app/v1/worker";
 import { AGENT_MESSAGE_ENTRY, type AgentMessage, SUBAGENT_TASK_ENTRY, SubagentLocationsSchema } from "./contract.ts";
 import {
 	CODEMODE_TOOL,
+	type Delegation,
+	type DelegationStoppedHandler,
 	InheritedLocation,
-	resolveChoice,
-	resolveTools,
+	type Role,
+	roleOf,
+	type StopNotice,
+	type Subagent,
+	type SubagentState,
 	Subagents,
-	stillGiven,
 	TEAM_TOOL,
 	type ToolChoice,
 } from "./contract.worker.ts";
+import {
+	delegationOf,
+	endDelegation,
+	memberOf,
+	openDelegations,
+	peersOf,
+	replyFor,
+	replyToMember,
+	roleText,
+	stopNoteFor,
+} from "./team.ts";
 
-const SUBAGENT_EXTENSION = "subagent-tools";
+export const SUBAGENT_EXTENSION = "subagent-tools";
 
-// Owns the subagent conversation. Background and immediately terminal, so the
-// main agent's Stop and idle waits do not reach the subagent; abort({background})
-// still does.
-const Anchor = defineTask<null, { phase: "done" }, null>({
+/** Background work of the calling conversation: its Stop and idle waits do not reach it (a report, a delegation). */
+export const BACKGROUND = { ownership: { kind: "conversation" }, background: true } as const;
+
+/**
+ * Background work on conversation 1, whoever creates it: a member's anchor, so stopping the HR manager or a manager that
+ * hired it never reaches the member, and a `/tree` branch's Stop does not either.
+ */
+export const ANCHORED = { ...BACKGROUND, conversationId: ROOT_CONVERSATION_ID } as const;
+
+// Owns a member's conversation. Background and immediately terminal, so no conversation's Stop and idle waits reach the
+// member; abort({background}) still does.
+export const Anchor = defineTask<null, { phase: "done" }, null>({
 	name: "p2.subagent-anchor",
 	version: 1,
 	initial: () => ({ phase: "done" }),
@@ -114,6 +135,7 @@ function agentMessageInput(message: AgentMessage, replyWith: string) {
 		failed: "failed",
 		question: `asks; answer with ${replyWith}`,
 		note: "notes, no reply needed",
+		stopped: "stopped",
 	}[message.intent];
 	return {
 		content: [
@@ -124,27 +146,40 @@ function agentMessageInput(message: AgentMessage, replyWith: string) {
 	};
 }
 
-/** The latest completed ("stop") answer with text of a conversation: a bounded, read-only, newest-first scan. */
-async function latestAnswer(api: ToolExecutionApi, conversationId: ConversationId, context: Context) {
-	return api.commit(async (tx) => {
-		let cursor: Cursor | undefined;
-		for (let scanned = 0; scanned < 2000; ) {
-			const page = await tx.scanEntries({ conversationId }, 200, cursor);
-			for (const entry of page.items) {
-				scanned++;
-				const message = AssistantEntry.is(entry) ? (entry.model?.[0] as AssistantMessage | undefined) : undefined;
-				if (message?.stopReason === "stop" && textOf(message).trim()) return textOf(message);
-			}
-			if (!page.next) break;
-			cursor = page.next;
+/**
+ * A conversation's newest assistant reply and its latest completed ("stop") answer with text (with its entry): a
+ * bounded, read-only, newest-first scan.
+ */
+async function scanReplies(
+	tx: Tx,
+	conversationId: ConversationId,
+): Promise<{ last?: AssistantMessage; answer?: { id: EntryId; text: string } }> {
+	let last: AssistantMessage | undefined;
+	let cursor: Cursor | undefined;
+	for (let scanned = 0; scanned < 2000; ) {
+		const page = await tx.scanEntries({ conversationId }, 200, cursor);
+		for (const entry of page.items) {
+			scanned++;
+			const message = AssistantEntry.is(entry) ? (entry.model?.[0] as AssistantMessage | undefined) : undefined;
+			if (!message) continue;
+			last ??= message;
+			if (message.stopReason === "stop" && textOf(message).trim())
+				return { last, answer: { id: entry.id, text: textOf(message) } };
 		}
-		return undefined;
-	}, context);
+		if (!page.next) break;
+		cursor = page.next;
+	}
+	return { ...(last ? { last } : {}) };
+}
+
+/** The latest completed ("stop") answer with text of a conversation. */
+export async function latestAnswer(api: ToolExecutionApi, conversationId: ConversationId, context: Context) {
+	return (await api.commit((tx) => scanReplies(tx, conversationId), context)).answer?.text;
 }
 
 // Delivers one message, waits for the answer, then reports it to the conversation that sent the message
 // as a follow-up input. Request IDs make both submissions exactly-once across restarts.
-type ReporterInput = {
+export type ReporterInput = {
 	name: string;
 	conversationId: ConversationId;
 	/**
@@ -156,20 +191,83 @@ type ReporterInput = {
 	followUp: boolean;
 	/** The owner started the main agent's turn: the subagent's turn inherits it (`SUBAGENT_TASK_ENTRY`). */
 	origin?: "owner";
+	/**
+	 * The delegation this message is (the registry's `delegations`), which the report ends. Absent: a reporter created
+	 * before delegations, which reports as it did.
+	 */
+	delegation?: number;
 };
 /**
  * `report`: what to tell the main agent, with the origin of the subagent's run that answered (`answerOrigin`); a
  * failure the reporter itself describes has the task's.
  */
 type Report = { intent: "answered" | "failed"; text: string; origin?: "owner" };
-type ReporterState = { phase: "deliver" } | { phase: "report"; report?: Report };
-const Reporter = defineTask<ReporterInput, ReporterState, null>({
+/**
+ * How the delegation ends once its report is submitted: ending it earlier would let a manager's settle task see it done
+ * before the message that tells the manager reached it.
+ */
+type End = { status: "done" | "failed" | "stopped"; result?: string; by?: string };
+type ReporterState = { phase: "deliver" } | { phase: "report"; report?: Report; end?: End };
+
+/** `Promise.race` marker: the phase's wait ran long, so it commits a durable sleep and waits again. */
+const recheck = "recheck";
+
+/**
+ * Ensures manager `name` has a settle task, in the commit that changed one of its delegations. Reads the claimed task
+ * (a task-table read), so callers run it before the commit's first table write.
+ */
+async function ensureSettle(tx: Tx, state: SubagentState, name: string): Promise<void> {
+	const agent = Object.hasOwn(state.agents, name) ? state.agents[name] : undefined;
+	if (!agent || roleOf(agent) !== "manager") return;
+	if (agent.settling !== undefined) {
+		// The claim is only a task ID: a task that ended without clearing it (faulted after restarts, or aborted) must not
+		// keep later waiting delegations from having a settle task of their own.
+		const claimed = (await tx.task(agent.settling))?.state.status;
+		if (
+			claimed === "pending" ||
+			claimed === "running" ||
+			claimed === "waiting" ||
+			claimed === "sleeping" ||
+			claimed === "completing"
+		)
+			return;
+		delete agent.settling;
+	}
+	agent.settling = await tx.createTask(Settle, { manager: name }, ANCHORED);
+}
+
+/**
+ * Ensures the settle tasks of the managers `delegation` is between (its giver and its member): the same commit, before
+ * its table writes (`seen` keeps one call per manager across several delegations of that commit).
+ */
+export async function ensureSettleFor(
+	tx: Tx,
+	state: SubagentState,
+	delegation: Delegation,
+	seen: Set<string> = new Set(),
+): Promise<void> {
+	for (const name of new Set([delegation.from, delegation.to])) {
+		if (seen.has(name)) continue;
+		seen.add(name);
+		await ensureSettle(tx, state, name);
+	}
+}
+export const Reporter = defineTask<ReporterInput, ReporterState, null>({
 	name: "p2.subagent-reporter",
 	version: 1,
 	initial: () => ({ phase: "deliver" }),
 	phases: {
 		deliver: async (reporter, runtime, context) => {
 			const { name, conversationId, message, followUp, origin } = reporter.input;
+			// Work stopped before it was delivered is not delivered.
+			const before = delegationOf(
+				(await runtime.snapshot(Subagents, ROOT_CONVERSATION_ID, context)) ?? {},
+				reporter.input.delegation,
+			)?.status;
+			if (before === "stopping" || before === "stopped") {
+				await runtime.commit(() => ({ status: "running", checkpoint: { phase: "report" } }) as const, context);
+				return;
+			}
 			const subagent = await runtime.conversation(conversationId, context);
 			if (!subagent) throw new Error(`Subagent ${name} has no conversation`);
 			const submission = await subagent.submit(
@@ -182,34 +280,247 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
 				},
 				context,
 			);
-			const settled = await settledOrWithdrawn(submission, subagent, () => pause(runtime, 1000, context), context);
+			// Waiting inside the phase is cut off by every restart, and after the restart limit the task faults: the wait
+			// below re-checks durably every so often, resuming the same submission (its request ID dedupes the submit).
+			const settled: SettledSubmissionRecord | undefined | "recheck" = await Promise.race([
+				settledOrWithdrawn(submission, subagent, () => pause(runtime, 1000, context), context),
+				pause(runtime, 10_000, context).then((): "recheck" => recheck),
+			]);
+			if (settled === recheck) {
+				await runtime.commit(
+					() =>
+						({
+							status: "sleeping",
+							until: runtime.now() + 1000,
+							checkpoint: { phase: "deliver" },
+						}) as const,
+					context,
+				);
+				return;
+			}
 			await runtime.commit(async (tx) => {
-				const next = (report?: Report) => ({ status: "running", checkpoint: { phase: "report", report } }) as const;
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const id = reporter.input.delegation;
+				const next = (report?: Report, end?: End) =>
+					({
+						status: "running",
+						checkpoint: { phase: "report", ...(report ? { report } : {}), ...(end ? { end } : {}) },
+					}) as const;
 				const failed = (text: string): Report => ({ intent: "failed", text, ...(origin ? { origin } : {}) });
-				if (settled === undefined) return next(failed(undelivered));
-				if (settled.status === "unanswered")
-					return next(settled.reason === "aborted" ? undefined : failed(settled.reason));
+				// Being stopped, or stopped: the stop ends the delegation, and nothing is reported.
+				const delegation = delegationOf(state, id);
+				if (delegation?.status === "stopping" || delegation?.status === "stopped") return next();
+				// A manager's answer is not the end of its work: its team may still be working. It waits, and the manager's
+				// settle task reports once the team is done (a message that never reached it, or a stop, is reported now).
+				const agent = state.agents[name];
+				const waits = delegation !== undefined && agent !== undefined && roleOf(agent) === "manager";
+				const wait = async (answer?: EntryId) => {
+					// Before the writes below: it reads the manager's claimed settle task.
+					await ensureSettle(tx, state, name);
+					if (delegation) {
+						delegation.status = "waiting";
+						// The delegation keeps its own answer: the settle task reports that, not a later or earlier turn of the
+						// manager (a `team send` question it answers meanwhile).
+						if (answer !== undefined) delegation.answer = answer;
+					}
+					return next();
+				};
+				if (settled === undefined) return next(failed(undelivered), { status: "failed", result: undelivered });
+				if (settled.status === "unanswered") {
+					if (settled.reason === "aborted") {
+						// Aborted outside a stop: stop the member's work the same way, so whoever gave work hears of it.
+						await startStop(tx, { member: name, by: "system" });
+						return next();
+					}
+					if (waits) return wait();
+					return next(failed(settled.reason), { status: "failed", result: settled.reason });
+				}
 				// A continue settles like an input (it has no placed entry): its run's answer is reported the same way.
-				if (settled.type !== "input" && settled.type !== "continue") return next();
-				const agent = (await tx.doc(Subagents, ROOT_CONVERSATION_ID)).agents[name];
-				if (!agent || agent.reported.includes(settled.answer)) return next();
-				agent.reported.push(settled.answer);
+				if (settled.type !== "input" && settled.type !== "continue") return next(undefined, { status: "done" });
+				if (waits) return wait(settled.answer);
 				const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as AssistantMessage | undefined;
+				const text = textOf(answer);
+				const end: End = { status: "done", result: text };
+				// Several messages can end in one answer: it is reported once per conversation that gave the work (two
+				// branches giving work that one run answers both hear of it). A registry without keys keeps the old rule.
+				const key = `${settled.answer}:${reporter.input.parent ?? "main"}`;
+				const already =
+					agent?.reportedTo === undefined
+						? agent.reported.includes(settled.answer)
+						: agent.reportedTo.includes(key);
+				if (!agent || already) return next(undefined, end);
+				if (agent.reportedTo === undefined) agent.reportedTo = [];
+				agent.reportedTo.push(key);
+				agent.reported.push(settled.answer);
 				const answered = await answerOrigin(tx, conversationId, settled.answer);
-				return next({ intent: "answered", text: textOf(answer), ...(answered ? { origin: answered } : {}) });
+				return next({ intent: "answered", text, ...(answered ? { origin: answered } : {}) }, end);
 			}, context);
 		},
 		report: async (reporter, runtime, context) => {
-			const report = reporter.state.checkpoint.report;
-			if (report !== undefined) {
-				const { name, conversationId, parent } = reporter.input;
-				const target = await runtime.conversation(parent ?? (await mainConversation(runtime, context)), context);
-				await target?.submit(
+			const { report, end } = reporter.state.checkpoint;
+			const { name, conversationId, parent, delegation: id } = reporter.input;
+			const target =
+				report === undefined
+					? undefined
+					: await runtime.conversation(parent ?? (await mainConversation(runtime, context)), context);
+			// Delivering the report and ending the delegation are one decision: a stop that commits in between sees either
+			// the work still open or the delegation already reported and done.
+			const registry = await runtime.snapshot(Subagents, ROOT_CONVERSATION_ID, context);
+			const status = delegationOf(registry ?? {}, id)?.status;
+			const stopped = status === "stopping" || status === "stopped";
+			if (report !== undefined && !stopped && target)
+				await target.submit(
 					{
 						type: "input",
-						...agentMessageInput({ from: { name, conversationId }, ...report }, `subagent send to ${name}`),
+						...agentMessageInput(
+							{ from: { name, conversationId }, ...report },
+							replyFor(registry?.agents[name], name),
+						),
 						whenBusy: "followUp",
 						requestId: `subagent-report:${reporter.id}`,
+					},
+					context,
+				);
+			await runtime.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const ending = delegationOf(state, id)?.status;
+				// Only work still going ends here: a stop ends its own.
+				if (end !== undefined && (ending === "working" || ending === "waiting")) {
+					const delegation = delegationOf(state, id);
+					if (delegation) await ensureSettleFor(tx, state, delegation);
+					endDelegation(state, id, end.status, runtime.now(), end.result, end.by);
+				}
+				return { status: "terminal", outcome: { status: "completed", result: null } } as const;
+			}, context);
+		},
+	},
+	abort: (_reporter, runtime, context) =>
+		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
+
+/** What a settle task tells the conversation that gave a manager its work. */
+type SettleReport = { parent: ConversationId; intent: "answered" | "failed"; text: string; origin?: "owner" };
+type SettleState = { phase: "check"; round: number; stuck: number } | { phase: "report"; reports: SettleReport[] };
+
+/**
+ * Reports a manager's answer once its team is done. A manager's answer to work it was given waits (`Delegation.status`
+ * `waiting`) while the executors it gave work to may still be working: this task, at most one per manager, watches until
+ * the manager is idle with nothing queued and none of the work it gave out or was newly given is open, then ends the
+ * waiting delegations with its latest answer and reports it, once per conversation that gave it work. It ends when the
+ * team is not done yet: the delegations' next change creates it again (`ensureSettle`).
+ */
+export const Settle = defineTask<{ manager: string }, SettleState, null>({
+	name: "p2.team-settle",
+	version: 1,
+	initial: () => ({ phase: "check", round: 0, stuck: 0 }),
+	phases: {
+		check: async (settle, runtime, context) => {
+			const { manager } = settle.input;
+			const { round, stuck } = settle.state.checkpoint;
+			await runtime.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const agent = Object.hasOwn(state.agents, manager) ? state.agents[manager] : undefined;
+				const finish = () => ({ status: "terminal", outcome: { status: "completed", result: null } }) as const;
+				if (!agent) return finish();
+				const done = () => {
+					if (agent.settling === settle.id) delete agent.settling;
+					return finish();
+				};
+				// Waiting inside the phase is cut off by every restart; a sleep is durable, and a message on its way (a
+				// report of an executor) gets the second between checks to be queued.
+				const again = (stuckRuns: number) =>
+					({
+						status: "sleeping",
+						until: runtime.now() + 1000,
+						checkpoint: { phase: "check", round: round + 1, stuck: stuckRuns },
+					}) as const;
+				const waiting = Object.values(state.delegations ?? {}).filter(
+					(each) => each.to === manager && each.status === "waiting",
+				);
+				if (waiting.length === 0) return done();
+				// Work it gave out, or was given since: when that ends, the delegation's change creates this task again.
+				const open = openDelegations(state).some(
+					(each) =>
+						(each.from === manager && each.status !== "waiting") ||
+						(each.to === manager && each.status === "working"),
+				);
+				if (open) return done();
+				const running = (await tx.doc(LiveDoc, agent.conversationId)).run !== undefined;
+				if (running) return again(0);
+				const queued = (await tx.doc(InboxDoc, agent.conversationId)).items.some((item) => item.mode !== "write");
+				// Idle with input still queued, twice running: its last run failed before taking it.
+				if (queued && stuck < 1) return again(stuck + 1);
+				const replies = await scanReplies(tx, agent.conversationId);
+				const failure = queued
+					? undelivered
+					: replies.last?.stopReason === "error"
+						? replies.last.errorMessage || "its last run failed"
+						: undefined;
+				// The answer each waiting delegation got, not the manager's newest reply: a `team send` question it answered
+				// meanwhile belongs to its sender, not to the work that waits. Delegations from before the answer was
+				// recorded fall back to the conversation's latest answer.
+				const answers = waiting.flatMap((each) => (each.answer === undefined ? [] : [each.answer]));
+				const newest = answers.length ? answers.reduce((a, b) => (a > b ? a : b)) : undefined;
+				const fallback = answers.length === 0 && waiting.some((each) => each.answer === undefined);
+				const answerId = newest ?? (fallback ? replies.answer?.id : undefined);
+				const answerText =
+					newest === undefined
+						? fallback
+							? (replies.answer?.text ?? "")
+							: ""
+						: textOf((await tx.entry(AssistantEntry, newest))?.model?.[0] as AssistantMessage | undefined);
+				const reason = failure ?? (answerText.trim() ? undefined : "it gave no answer");
+				const now = runtime.now();
+				const text = reason ?? answerText;
+				const answered =
+					reason === undefined && answerId !== undefined
+						? await answerOrigin(tx, agent.conversationId, answerId)
+						: undefined;
+				if (reason === undefined && answerId !== undefined && !agent.reported.includes(answerId))
+					agent.reported.push(answerId);
+				const reports: SettleReport[] = [];
+				for (const each of waiting) {
+					endDelegation(state, each.id, reason === undefined ? "done" : "failed", now, text);
+					if (!reports.some((report) => report.parent === each.parent))
+						reports.push({
+							parent: each.parent,
+							intent: reason === undefined ? "answered" : "failed",
+							text,
+							...(answered ? { origin: answered } : {}),
+						});
+				}
+				// Cleared with the claim: work given to the manager from now on settles through a task of its own.
+				if (agent.settling === settle.id) delete agent.settling;
+				return { status: "running", checkpoint: { phase: "report", reports } } as const;
+			}, context);
+		},
+		report: async (settle, runtime, context) => {
+			const { manager } = settle.input;
+			const agent = (await runtime.snapshot(Subagents, ROOT_CONVERSATION_ID, context))?.agents[manager];
+			const reports = settle.state.checkpoint.reports;
+			const targets = new Map<ConversationId, Awaited<ReturnType<typeof runtime.conversation>>>();
+			for (const report of reports) {
+				if (targets.has(report.parent)) continue;
+				targets.set(report.parent, await runtime.conversation(report.parent, context));
+			}
+			// Each report is admitted before the terminal commit, with a stable request ID, so a restart cannot deliver it
+			// twice; a manager's settle task reports once the work it gave out has ended.
+			for (const report of reports) {
+				if (!agent) break;
+				await targets.get(report.parent)?.submit(
+					{
+						type: "input",
+						...agentMessageInput(
+							{
+								from: { name: manager, conversationId: agent.conversationId },
+								intent: report.intent,
+								text: report.text,
+								...(report.origin ? { origin: report.origin } : {}),
+							},
+							replyFor(agent, manager),
+						),
+						whenBusy: "followUp",
+						requestId: `team-settle:${settle.id}:${report.parent}`,
 					},
 					context,
 				);
@@ -217,11 +528,223 @@ const Reporter = defineTask<ReporterInput, ReporterState, null>({
 			await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
 		},
 	},
-	abort: (_reporter, runtime, context) =>
-		runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+	// An aborted or faulted settle frees its claim, so later work gets a settle task of its own.
+	abort: (settle, runtime, context) =>
+		runtime.commit(async (tx) => {
+			const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+			const agent = Object.hasOwn(state.agents, settle.input.manager)
+				? state.agents[settle.input.manager]
+				: undefined;
+			if (agent?.settling === settle.id) delete agent.settling;
+			return { status: "terminal", outcome: { status: "aborted" } } as const;
+		}, context),
 });
 
-type SubagentDetails = {
+let readStoppedHandlers: () => readonly DelegationStoppedHandler[] = () => [];
+/** Binds the stop flow to the worker's `DelegationStopped` registry (a Harness task has no access to Chord registries). */
+export function bindStoppedHandlers(read: () => readonly DelegationStoppedHandler[]): void {
+	readStoppedHandlers = read;
+}
+
+/** A stop of `member` (a manager's covers its executors) by `by`: "main", "owner", "hr", "system" or a manager's name. */
+export type StopInput = { member: string; by: string; archive?: boolean };
+/** What a stop did: the members it covered, the delegations it stopped, and whether their runs were confirmed ended. */
+export type StopResult = { names: string[]; stopped: number[]; verified: boolean };
+type StopState =
+	| { phase: "mark" }
+	| { phase: "abort"; names: string[]; delegations: number[] }
+	| { phase: "verify"; names: string[]; delegations: number[] }
+	| { phase: "finish"; names: string[]; delegations: number[]; verified: boolean };
+
+/** The members a stop of `member` covers: a manager and its executors, any other member alone, none when it is gone. */
+function stopScope(state: Pick<SubagentState, "agents">, member: string): string[] {
+	const agent = Object.hasOwn(state.agents, member) ? state.agents[member] : undefined;
+	if (!agent) return [];
+	if (roleOf(agent) !== "manager") return [member];
+	return [
+		member,
+		...Object.entries(state.agents)
+			.filter(([, each]) => roleOf(each) === "executor" && each.manager === member)
+			.map(([name]) => name),
+	];
+}
+
+/**
+ * The one way work given to members stops (`subagent stop`, `delegate stop`, the HR manager archiving, the owner's Stop
+ * button, a turn aborted by something else). It marks the members stopping (nothing more reaches them: the send tools
+ * and the Reporter refuse), aborts their runs, confirms nothing runs or waits in them, tells whoever gave the work
+ * through the `DelegationStopped` hooks, then ends the stopped work. A second stop of a member waits for the first.
+ */
+export const Stop = defineTask<StopInput, StopState, StopResult>({
+	name: "p2.team-stop",
+	version: 1,
+	initial: () => ({ phase: "mark" }),
+	phases: {
+		mark: async (stop, runtime, context) => {
+			await runtime.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const names = stopScope(state, stop.input.member);
+				if (names.length === 0)
+					return {
+						status: "terminal",
+						outcome: { status: "completed", result: { names: [], stopped: [], verified: true } },
+					} as const;
+				// Another stop of one of them is in progress: this one starts when it has ended.
+				const other = names
+					.map((name) => state.agents[name]?.stopping)
+					.find((id) => id !== undefined && id !== stop.id);
+				if (other !== undefined)
+					return { status: "waiting", checkpoint: { phase: "mark" }, on: [other], policy: "allSettled" } as const;
+				const delegations: number[] = [];
+				for (const name of names) {
+					const agent = state.agents[name];
+					if (agent) agent.stopping = stop.id;
+				}
+				for (const delegation of openDelegations(state)) {
+					if (!names.includes(delegation.to)) continue;
+					delegation.status = "stopping";
+					delegation.stoppedBy = stop.input.by;
+					delegations.push(delegation.id);
+				}
+				return { status: "running", checkpoint: { phase: "abort", names, delegations } } as const;
+			}, context);
+		},
+		abort: async (stop, runtime, context) => {
+			const { names, delegations } = stop.state.checkpoint;
+			const registry = await runtime.snapshot(Subagents, ROOT_CONVERSATION_ID, context);
+			for (const name of names) {
+				const agent = registry?.agents[name];
+				if (agent)
+					await (await runtime.conversation(agent.conversationId, context))?.abort(context, {
+						// A member's work may run as background work of a task that gave it the message (a reporter): a stop
+						// reaches it too, or abort() would wait for an idle it can never reach.
+						background: true,
+					});
+			}
+			await runtime.commit(
+				() => ({ status: "running", checkpoint: { phase: "verify", names, delegations } }) as const,
+				context,
+			);
+		},
+		verify: async (stop, runtime, context) => {
+			const { names, delegations } = stop.state.checkpoint;
+			let verified = false;
+			// Nothing running and nothing queued in any member; abort again (up to three checks) what is not.
+			for (let attempt = 0; attempt < 3 && !verified; attempt++) {
+				const registry = await runtime.snapshot(Subagents, ROOT_CONVERSATION_ID, context);
+				const busy: ConversationId[] = [];
+				for (const name of names) {
+					const agent = registry?.agents[name];
+					if (!agent) continue;
+					const live = await runtime.snapshot(LiveDoc, agent.conversationId, context);
+					const inbox = await runtime.snapshot(InboxDoc, agent.conversationId, context);
+					if (live?.run !== undefined || inbox?.items.some((item) => item.mode !== "write"))
+						busy.push(agent.conversationId);
+				}
+				verified = busy.length === 0;
+				if (verified || attempt === 2) break;
+				for (const id of busy)
+					await (await runtime.conversation(id, context))?.abort(context, { background: true });
+				await pause(runtime, 1000, context);
+			}
+			await runtime.commit(
+				() => ({ status: "running", checkpoint: { phase: "finish", names, delegations, verified } }) as const,
+				context,
+			);
+		},
+		finish: async (stop, runtime, context) => {
+			const { names, delegations, verified } = stop.state.checkpoint;
+			const { by, archive, member } = stop.input;
+			const registry = (await runtime.snapshot(Subagents, ROOT_CONVERSATION_ID, context)) ?? {
+				agents: {},
+				reporters: {},
+			};
+			// The hooks decide whom to tell; the notices go out before the closing commit, so a manager's settle task, which
+			// that commit may start, finds them queued and does not report the manager's earlier answer as its last.
+			const notices: StopNotice[] = [];
+			for (const id of delegations) {
+				const delegation = delegationOf(registry, id);
+				if (delegation?.status !== "stopping") continue;
+				for (const handler of readStoppedHandlers())
+					notices.push(...(await handler({ delegation, by, scope: names, verified, registry })));
+			}
+			const targets = new Map<ConversationId, Awaited<ReturnType<typeof runtime.conversation>>>();
+			for (const notice of notices) {
+				if (targets.has(notice.to)) continue;
+				targets.set(notice.to, await runtime.conversation(notice.to, context));
+			}
+			for (const [index, notice] of notices.entries()) {
+				await targets.get(notice.to)?.submit(
+					{
+						type: "input",
+						...agentMessageInput({ from: notice.from, intent: "stopped", text: notice.text }, ""),
+						whenBusy: "followUp",
+						requestId: `team-stop:${stop.id}:${index}`,
+					},
+					context,
+				);
+			}
+			await runtime.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const stopping = delegations.flatMap((id) => {
+					const delegation = delegationOf(state, id);
+					return delegation?.status === "stopping" ? [delegation] : [];
+				});
+				// Before the writes: the settle tasks (task-table reads) these ends may need.
+				const seen = new Set<string>();
+				for (const delegation of stopping) await ensureSettleFor(tx, state, delegation, seen);
+				const stopped: number[] = [];
+				for (const id of delegations) {
+					if (delegationOf(state, id)?.status !== "stopping") continue;
+					endDelegation(state, id, "stopped", runtime.now(), undefined, by);
+					stopped.push(id);
+				}
+				for (const name of names) {
+					const agent = Object.hasOwn(state.agents, name) ? state.agents[name] : undefined;
+					if (!agent) continue;
+					if (agent.stopping === stop.id) delete agent.stopping;
+					const note = stopNoteFor(state, name, stopped, by);
+					if (note !== undefined) agent.stopNote = note;
+					if (archive && name === member) agent.archived = true;
+				}
+				return {
+					status: "terminal",
+					outcome: { status: "completed", result: { names, stopped, verified } },
+				} as const;
+			}, context);
+		},
+	},
+	// An aborted stop frees what it marked, and ends the work it was stopping as stopped.
+	abort: (stop, runtime, context) =>
+		runtime.commit(async (tx) => {
+			const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+			const freed = Object.entries(state.agents).filter(([, agent]) => agent.stopping === stop.id);
+			for (const [name, agent] of freed) {
+				delete agent.stopping;
+				for (const delegation of openDelegations(state)) {
+					if (delegation.to !== name || delegation.status !== "stopping") continue;
+					const ended = endDelegation(state, delegation.id, "stopped", runtime.now(), undefined, stop.input.by);
+					if (ended) await ensureSettleFor(tx, state, ended);
+				}
+			}
+			return { status: "terminal", outcome: { status: "aborted" } } as const;
+		}, context),
+});
+
+/** Starts a stop in `tx`: the flow runs in the background on conversation 1, whoever asked. */
+export const startStop = (tx: Tx, input: StopInput) => tx.createTask(Stop, input, ANCHORED);
+
+/** The result of a settled stop (a stop that did not complete is reported as unconfirmed). */
+export const stopResultOf = (
+	settled: { state: { outcome: { status: string; result?: StopResult; error?: unknown } } },
+	member: string,
+): StopResult =>
+	settled.state.outcome.status === "completed" && settled.state.outcome.result
+		? settled.state.outcome.result
+		: { names: [member], stopped: [], verified: false };
+
+/** What the subagent and staff tools give as a call's details. */
+export type SubagentDetails = {
 	action: string;
 	name?: string;
 	conversationId?: number;
@@ -231,13 +754,41 @@ type SubagentDetails = {
 	/** Its own cwd (raw path) and, on a remote environment, that environment's name. */
 	cwd?: string;
 	env?: string;
-	/** Why a placement was refused: structured, so callers (and tests) never read the sentence. */
-	refused?: { sandbox: string } | { working: true };
+	role?: Role;
+	/** A team executor's manager. */
+	manager?: string;
+	/** The delegation a hire or send opened. */
+	delegation?: number;
+	/**
+	 * Why a call was refused, structured, so callers (and tests) never read the sentence: a placement (`sandbox`), a busy
+	 * member (`working`), a member the main agent asks with hire (`use`), a team executor (`manager`: whom to give its
+	 * work), a caller without the role (`role`), a manager that still has a team (`team`).
+	 */
+	refused?:
+		| { sandbox: string }
+		| { working: true }
+		| { use: "hire" }
+		| { manager: string }
+		| { role: Role }
+		| { team: true }
+		| { stopping: true }
+		| { notYours: true };
 };
 
-/** A subagent's own location as the tool's details carry it. */
-const locationDetails = (location: Location | undefined): Pick<SubagentDetails, "cwd" | "env"> =>
+/** A member's own location as the tools' details carry it. */
+export const locationDetails = (location: Location | undefined): Pick<SubagentDetails, "cwd" | "env"> =>
 	location === undefined ? {} : { cwd: location.cwd, ...(location.env === null ? {} : { env: location.env }) };
+
+/** A member as the tools' details carry it: plain values, never the registry's draft. */
+export const memberDetails = (agent: Subagent): Partial<SubagentDetails> => ({
+	conversationId: agent.conversationId,
+	model: agent.model,
+	thinkingLevel: agent.thinkingLevel,
+	tools: [...agent.tools],
+	role: roleOf(agent),
+	...(agent.manager === undefined ? {} : { manager: agent.manager }),
+	...locationDetails(agent.location),
+});
 
 /**
  * Places what version 1 left unplaced (an own cwd without its environment: `spawnedOn` tells the environment it was
@@ -376,287 +927,6 @@ export async function setArchived(
 	}, context);
 }
 
-// TODO: use the tool API's models once pi-durable exposes them
-// (earendil-works/pi#10395). Until then the host passes its Models instance. `access` gives the worker's tools by name,
-// with what they declare (`P2Tool`).
-export function createSubagentExtension(
-	models: Models,
-	locator: SubagentLocator,
-	access: () => ReadonlyMap<string, P2Tool>,
-): Extension<P2Tool> {
-	const tool = defineP2Tool({
-		name: "subagent",
-		description: [
-			"Manage persistent subagents that work in the background while you keep talking to the user.",
-			"Each subagent is its own conversation with its own memory, working in your cwd unless spawned with its own.",
-			"Actions:",
-			"- spawn (name, message; optional model, thinkingLevel, tools, env, cwd): start a subagent and send its first message.",
-			"  Without env and cwd it works where you work and follows the session when it moves. With them it gets its own",
-			"  location, which stays when the session moves: cwd is an existing directory its tools run in and the user's workspace",
-			"  view shows, e.g. a git worktree you created first (relative to your cwd on your environment, to the home on another);",
-			"  env is an environment name from location_envs, or null for this device (default: yours; another environment needs",
-			"  the owner's request).",
-			"  model is 'provider/modelId' (default: yours); thinkingLevel is off|minimal|low|medium|high|xhigh|max",
-			"  (clamped to the model); tools names tools of yours it gets (default: all you can give; [] for none). Tools that",
-			"  work only in your conversation (subagent, rename_session, …) cannot be given. With codemode its scripts call",
-			"  its tools and the tools behind code mode (MCP tools, terminal, one-shot agents). With location_move it can",
-			"  move itself.",
-			"- send (name, message; followUp: true queues after the current answer instead of steering).",
-			"- configure (name; optional model, thinkingLevel, tools, env, cwd, followSession): replace its model/thinking/tool",
-			"  selection for later work; env/cwd give it its own location, followSession: true makes it follow the session",
-			"  again. A location changes only while it is idle.",
-			"- stop (name): abort its current work; it stays usable.",
-			"- archive (name): stop it and hide it from the user's sidebar and from status; restore (name) or send brings it back.",
-			"- answer (name): return its latest completed answer, e.g. when a report did not reach you or you need it again.",
-			"- status (optional name): list subagents and whether they are working; archived ones only by name.",
-			"- models: list models that have credentials configured.",
-			"Answers are reported back to you as messages when they arrive; do not wait or poll for them.",
-			'Subagents can also message you while they work: a <sender kind="subagent"> message marked [asks; …] needs your',
-			"answer (send to that subagent); a note needs none.",
-		].join("\n"),
-		parameters: obj(
-			{
-				action: union([
-					literal("spawn"),
-					literal("send"),
-					literal("configure"),
-					literal("stop"),
-					literal("archive"),
-					literal("restore"),
-					literal("answer"),
-					literal("status"),
-					literal("models"),
-				]),
-				name: opt(str()),
-				message: opt(str()),
-				followUp: opt(bool()),
-				model: opt(str()),
-				thinkingLevel: opt(str()),
-				tools: opt(arr(str())),
-				cwd: opt(str()),
-				env: opt(union([str(), nul()])),
-				followSession: opt(bool()),
-			},
-			{ open: true },
-		),
-		// A crash-interrupted stop must not be repeated against newer work.
-		replay: "unsafe",
-		scope: "main",
-		execute: async (args, api, context) => {
-			const { action, name, message, followUp } = args;
-			const reply = (text: string, extra: Partial<SubagentDetails> = {}, isError = false) => ({
-				output: [{ type: "text" as const, text }],
-				details: { action, ...(name === undefined ? {} : { name }), ...extra } satisfies SubagentDetails,
-				isError,
-			});
-			const registry = (await api.snapshot(Subagents, ROOT_CONVERSATION_ID, context)) ?? {
-				agents: {},
-				reporters: {},
-			};
-
-			if (action === "models") {
-				const available = await models.getAvailable(undefined, { signal: AbortSignal.timeout(10_000) });
-				const lines = available.slice(0, 200).map((model) => `${model.provider}/${model.id} (${model.name})`);
-				return reply(lines.length ? lines.join("\n") : "No models with configured credentials.");
-			}
-			if (action === "status") {
-				const all = Object.entries(registry.agents);
-				const listed =
-					name === undefined ? all.filter(([, agent]) => !agent.archived) : all.filter(([each]) => each === name);
-				const lines: string[] = [];
-				for (const [each, agent] of listed) {
-					const busy = (await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined;
-					lines.push(
-						`${each}: ${busy ? "working" : "idle"}${agent.archived ? " · archived" : ""} · ${agent.model} · thinking ${agent.thinkingLevel} · tools ${agent.tools.join(", ") || "none"}${agent.location === undefined ? "" : ` · in ${locationText(agent.location)}`}`,
-					);
-				}
-				const archived = name === undefined ? all.length - listed.length : 0;
-				if (archived) lines.push(`${archived} archived (status with a name shows one).`);
-				return reply(lines.length ? lines.join("\n") : "No subagents.");
-			}
-			if (name === undefined || !name.trim()) return reply(`${action} needs a name.`, {}, true);
-			const agent = Object.hasOwn(registry.agents, name) ? registry.agents[name] : undefined;
-			if (action !== "spawn" && !agent) return reply(`No subagent named ${name}.`, {}, true);
-			if (action === "stop" && agent) {
-				await (await api.conversation(agent.conversationId, context))?.abort(context);
-				return reply(`Stopped ${name}.`, { conversationId: agent.conversationId });
-			}
-			if ((action === "archive" || action === "restore") && agent) {
-				await setArchived(api, ROOT_CONVERSATION_ID, agent.conversationId, action === "archive", context);
-				return reply(action === "archive" ? `Stopped and archived ${name}.` : `Restored ${name}.`, {
-					conversationId: agent.conversationId,
-				});
-			}
-			if (action === "answer" && agent) {
-				const answer = await latestAnswer(api, agent.conversationId, context);
-				const busy = (await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined;
-				const state = busy ? `${name} is still working.` : "";
-				const text =
-					answer === undefined
-						? `${name} has not answered yet.${state ? ` ${state}` : ""}`
-						: `${state ? `${state} Its latest answer:\n\n` : ""}${answer}`;
-				return reply(text, { conversationId: agent.conversationId });
-			}
-			if (action !== "configure" && (message === undefined || !message.trim()))
-				return reply(`${action} needs a message.`, {}, true);
-			const placing = args.cwd !== undefined || args.env !== undefined;
-			if (
-				action === "configure" &&
-				args.model === undefined &&
-				args.thinkingLevel === undefined &&
-				args.tools === undefined &&
-				!placing &&
-				!args.followSession
-			)
-				return reply("configure needs model, thinkingLevel, tools, env, cwd or followSession.", {}, true);
-
-			// Validate spawn/configure choices before a commit, so a typo changes nothing.
-			let change: { model?: ModelRef; thinkingLevel?: ModelThinkingLevel } = {};
-			let tools: ToolChoice = { chosen: [], tools: [], loaded: [] };
-			/** Its own location; `null`: it follows the session (again). */
-			let location: Location | null | undefined;
-			/** On a send, the tools it keeps when its caller can no longer give all it was given. */
-			let narrowed: ToolChoice | undefined;
-			if (placing && action !== "spawn" && action !== "configure")
-				return reply("Only spawn and configure take a location.", {}, true);
-			if (args.followSession && (action !== "configure" || placing))
-				return reply("followSession is for configure, without env or cwd.", {}, true);
-			// Who started this turn: the owner may choose another environment, and the subagent's turn inherits it.
-			const origin = action === "spawn" || action === "send" || placing ? await originOf(api, context) : undefined;
-			if (action === "spawn" || action === "configure") {
-				if (action === "spawn" && agent)
-					return reply(`${name} already exists${agent.archived ? " (archived)" : ""}; use send.`, {}, true);
-				const existing = action === "spawn" ? undefined : agent;
-				const choice = await resolveChoice(models, api, access(), args, existing, "subagent", context);
-				if (typeof choice === "string") return reply(choice, {}, true);
-				const { model, thinkingLevel, ...chosen } = choice;
-				change = { model, thinkingLevel };
-				tools = chosen;
-				// A location changes between runs, never under one: its tools would switch machines mid-task.
-				if (
-					agent &&
-					(placing || args.followSession) &&
-					(await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined
-				)
-					return reply(
-						`${name} is working: stop it or wait before changing its location.`,
-						{ refused: { working: true } },
-						true,
-					);
-				if (args.followSession) location = null;
-				else if (placing) {
-					// From the caller's location (the session's: subagents spawn none).
-					const caller = await locator.locate(api.conversationId, api, context);
-					if (args.env !== undefined && args.env !== caller.env && origin !== "owner")
-						return reply("Another environment needs a turn the owner started.", {}, true);
-					// A subagent in a sandbox: a cwd alone means a path in that sandbox (it cannot be placed elsewhere).
-					const kept =
-						agent?.location && args.env === undefined ? await locator.sandbox(agent.location) : undefined;
-					const target = kept === undefined ? args : { ...args, env: kept };
-					const placed = await placeTarget(locator, caller, target, context);
-					if (typeof placed === "string") return reply(placed, {}, true);
-					if ("refused" in placed)
-						return reply(placementRefusal(placed), { refused: { sandbox: placed.sandbox } }, true);
-					location = placed.location;
-				}
-				// A subagent working in a sandbox stays there, whoever configures it (only the owner's Relocate leaves one).
-				const sandbox = agent?.location === undefined ? undefined : await locator.sandbox(agent.location);
-				if (sandbox !== undefined && location !== undefined) {
-					const next = location ?? (await locator.locate(ROOT_CONVERSATION_ID, api, context));
-					if (next.env !== sandbox)
-						return reply(
-							`${name} works in sandbox ${sandbox} and cannot leave it.`,
-							{ refused: { sandbox } },
-							true,
-						);
-				}
-			} else if (agent) {
-				// A send: what it was given that its caller can no longer give is taken away (the caller's tools changed).
-				const own = await api.agent(context);
-				const kept = stillGiven(own, access(), agent);
-				if (kept && kept.length !== agent.tools.length) {
-					const resolved = resolveTools(own, access(), kept, [], "subagent");
-					if (typeof resolved !== "string") narrowed = resolved;
-				}
-			}
-			// A subagent following the session works at its cwd.
-			const session = location === null ? await locator.locate(ROOT_CONVERSATION_ID, api, context) : undefined;
-
-			const result = await api.commit(async (tx) => {
-				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
-				const background = { ownership: { kind: "conversation" }, background: true } as const;
-				if (action === "configure") {
-					const target = state.agents[name];
-					if (!target) return `No subagent named ${name}.`;
-					await configure(tx, target.conversationId, {
-						...change,
-						...agentTools(tools),
-						...(location ? { cwd: location.cwd } : session ? { cwd: session.cwd } : {}),
-					});
-					if (location) target.location = location;
-					else if (location === null) delete target.location;
-					target.model = `${change.model?.provider}/${change.model?.modelId}`;
-					target.thinkingLevel = change.thinkingLevel ?? "off";
-					target.tools = tools.chosen;
-					return `Configured ${name}.`;
-				}
-				if (action === "spawn") {
-					if (Object.hasOwn(state.agents, name)) return `${name} already exists; use send.`;
-					const anchor = await tx.createTask(Anchor, null, background);
-					const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-					await configure(tx, child.id, {
-						...change,
-						...agentTools(tools),
-						...(location ? { cwd: location.cwd } : {}),
-						instructions: `You are the subagent "${name}", working for a main agent. Do the requested work and answer concisely; your final answer is reported back to it. With the team tool you can ask the main agent a question or tell it something while you keep working, and message the other subagents.`,
-					});
-					state.agents[name] = {
-						conversationId: child.id,
-						model: `${change.model?.provider}/${change.model?.modelId}`,
-						thinkingLevel: change.thinkingLevel ?? "off",
-						tools: tools.chosen,
-						...(location ? { location } : {}),
-						reported: [],
-					};
-				}
-				const target = state.agents[name];
-				if (!target) return `No subagent named ${name}.`;
-				// Working with an archived subagent again brings it back.
-				delete target.archived;
-				target.parent = api.conversationId;
-				if (narrowed) {
-					await configure(tx, target.conversationId, agentTools(narrowed));
-					target.tools = narrowed.chosen;
-				}
-				const input = {
-					name,
-					conversationId: target.conversationId,
-					parent: api.conversationId,
-					message: message ?? "",
-					followUp: action === "send" && followUp === true,
-					...(origin === "owner" ? { origin } : {}),
-				};
-				state.reporters[api.taskId] = await tx.createTask(Reporter, input, background);
-				return action === "send" ? `Sent to ${name}.` : `Started ${name}.`;
-			}, context);
-			const current = (await api.snapshot(Subagents, ROOT_CONVERSATION_ID, context))?.agents[name];
-			return reply(
-				result,
-				current
-					? {
-							conversationId: current.conversationId,
-							model: current.model,
-							thinkingLevel: current.thinkingLevel,
-							tools: current.tools,
-							...locationDetails(current.location),
-						}
-					: {},
-			);
-		},
-	});
-	return defineExtension<P2Tool>({ name: SUBAGENT_EXTENSION, tasks: [Anchor, Reporter], tools: [tool] });
-}
-
 /**
  * An agent's tools as its Durable agent state takes them: exactly these enabled (nested calls resolve among them, so the
  * script-only ones are named too; the worker adds ones installed later, see `enableScriptTools`), and the deferred ones
@@ -699,12 +969,14 @@ export async function enableScriptTools(
 const teamTool: P2Tool = defineP2Tool({
 	name: TEAM_TOOL,
 	description: [
-		"Message the main agent or the other subagents while you work, without ending your turn.",
-		'- send (to: "parent" or a subagent name, message; optional intent "question" (default) or "note", steer):',
+		"Message whoever gave you work and your contacts while you work, without ending your turn. Your contacts: a manager",
+		"the other managers; an executor of a team its manager and the team's other executors; a direct executor the other",
+		"direct executors; the HR manager nobody (it asks the main agent only).",
+		'- send (to: "parent" or a contact\'s name, message; optional intent "question" (default) or "note", steer):',
 		"  delivers it as a message from you; it starts the receiver's turn if it is idle, else waits for its next step",
 		"  (steer: true interrupts its current step). A question asks for a reply, which arrives as a message to you; a note needs none.",
-		"- answer (name): the latest completed answer of another subagent.",
-		"- list: the other subagents and whether they are working.",
+		"- answer (name): the latest completed answer of a contact.",
+		"- list: your contacts and whether they are working.",
 		"Only message when it helps the work. Never send acknowledgements or thanks, and do not reply to notes.",
 	].join("\n"),
 	parameters: obj(
@@ -723,40 +995,53 @@ const teamTool: P2Tool = defineP2Tool({
 	deferred: true,
 	scope: "subagent",
 	execute: async (args, api, context) => {
-		const reply = (text: string, isError = false) => ({
+		const reply = (
+			text: string,
+			extra: { refused?: { contact: true } | { stopping: true } } = {},
+			isError = false,
+		) => ({
 			output: [{ type: "text" as const, text }],
-			details: { action: args.action, ...(args.to === undefined ? {} : { to: args.to }) },
+			details: { action: args.action, ...(args.to === undefined ? {} : { to: args.to }), ...extra },
 			isError,
 		});
 		const registry = await api.snapshot(Subagents, ROOT_CONVERSATION_ID, context);
-		const agents = Object.entries(registry?.agents ?? {});
-		const self = agents.find(([, agent]) => agent.conversationId === api.conversationId)?.[0];
-		if (self === undefined) return reply("Only subagents can use the team tool.", true);
-		const siblings = agents.filter(([name]) => name !== self);
+		const self = registry ? memberOf(registry, api.conversationId)?.[0] : undefined;
+		if (!registry || self === undefined) return reply("Only team members can use the team tool.", {}, true);
+		// Whom this member may message besides whoever gave it work: its role's contacts (`peersOf`).
+		const contacts = peersOf(registry, self);
 		if (args.action === "list") {
 			const lines: string[] = [];
-			for (const [name, agent] of siblings) {
+			for (const [name, agent] of contacts) {
 				const busy = (await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined;
-				lines.push(`${name}: ${busy ? "working" : "idle"}${agent.archived ? " · archived" : ""}`);
+				lines.push(
+					`${name}: ${roleText(agent)} · ${busy ? "working" : "idle"}${agent.archived ? " · archived" : ""}`,
+				);
 			}
-			return reply(lines.length ? lines.join("\n") : "No other subagents.");
+			return reply(lines.length ? lines.join("\n") : "No one to message but whoever gave you work.");
 		}
 		if (args.action === "answer") {
-			const sibling = siblings.find(([name]) => name === args.name)?.[1];
-			if (!sibling) return reply(`No other subagent named ${args.name ?? "(none)"}.`, true);
-			const answer = await latestAnswer(api, sibling.conversationId, context);
+			const contact = contacts.find(([name]) => name === args.name)?.[1];
+			if (!contact)
+				return reply(`${args.name ?? "(none)"} is not one of your contacts.`, { refused: { contact: true } }, true);
+			const answer = await latestAnswer(api, contact.conversationId, context);
 			return reply(answer ?? `${args.name} has not answered yet.`);
 		}
-		if (!args.to) return reply('send needs to ("parent" or a subagent name).', true);
-		if (!args.message?.trim()) return reply("send needs a message.", true);
-		const sibling = args.to === "parent" ? undefined : siblings.find(([name]) => name === args.to)?.[1];
-		if (args.to !== "parent" && !sibling) return reply(`No other subagent named ${args.to}.`, true);
-		const parent = registry?.agents[self]?.parent;
-		const target = await api.conversation(
-			sibling?.conversationId ?? parent ?? (await mainConversation(api, context)),
-			context,
-		);
-		if (!target) return reply(`${args.to} has no conversation.`, true);
+		if (!args.to) return reply('send needs to ("parent" or a contact\'s name).', {}, true);
+		if (!args.message?.trim()) return reply("send needs a message.", {}, true);
+		const contact = args.to === "parent" ? undefined : contacts.find(([name]) => name === args.to)?.[1];
+		if (args.to !== "parent" && !contact)
+			return reply(
+				`${args.to} is not one of your contacts (team list shows them).`,
+				{ refused: { contact: true } },
+				true,
+			);
+		const receiver =
+			contact?.conversationId ?? registry.agents[self]?.parent ?? (await mainConversation(api, context));
+		// No work reaches a member while it is being stopped.
+		if (memberOf(registry, receiver)?.[1].stopping !== undefined)
+			return reply(`${args.to} is being stopped; message it once it is.`, { refused: { stopping: true } }, true);
+		const target = await api.conversation(receiver, context);
+		if (!target) return reply(`${args.to} has no conversation.`, {}, true);
 		// The receiver's turn may act for the owner if this one may.
 		const origin = await originOf(api, context);
 		await target.submit(
@@ -769,7 +1054,7 @@ const teamTool: P2Tool = defineP2Tool({
 						text: args.message,
 						...(origin ? { origin } : {}),
 					},
-					sibling ? `team send to ${self}` : `subagent send to ${self}`,
+					replyToMember(registry, self, receiver),
 				),
 				whenBusy: args.steer ? "steer" : "followUp",
 				requestId: `team:${api.taskId}:${api.callId}`,

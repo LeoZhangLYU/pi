@@ -114,7 +114,7 @@ import { Models } from "../models/contract.ts";
 import type { ResourceSnapshot } from "../models/resources.ts";
 import { type Session, Sessions } from "../sessions/contract.ts";
 import { SessionMetrics, SessionStatus, WorkerControl } from "../status/contract.ts";
-import { type Child, conversationLocation, SubagentControl, Subagents } from "../subagents/contract.ts";
+import { type Child, conversationLocation, Subagents } from "../subagents/contract.ts";
 import { SessionTree } from "../tree/contract.ts";
 import { Chat, TranscriptEntries } from "./contract.ts";
 import { chatMessages } from "./messages.ts";
@@ -651,6 +651,7 @@ function TopBar({
 			</div>
 			{!connected && <span className="offline">{t("offline")}</span>}
 			<Slot name="artifact-actions" />
+			<Slot name="team-actions" />
 			<Slot name="terminal-actions" />
 			<Slot name="workspace-actions" />
 			<Slot name="session-options" />
@@ -788,8 +789,25 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 			),
 		[children, sessionId],
 	);
-	// Only subagents and the main conversation are shown: an earlier `/tree` branch (another device switched, or a link
-	// from before) and unknown conversations open the main one.
+	// A team member's conversation is no entry: a link to it from an incoming message does nothing.
+	const members = useMemo(
+		() =>
+			new Set(
+				(children?.[sessionId] ?? [])
+					.filter((agent) => agent.kind !== "agent")
+					.map((agent) => agent.conversationId),
+			),
+		[children, sessionId],
+	);
+	const openEntry = useCallback(
+		(conversation: number) => {
+			if (!members.has(conversation)) openConversation(conversation);
+		},
+		[members, openConversation],
+	);
+	// Only the main conversation (or one of its `/tree` branches) is a conversation entry, and one-shot agents open from
+	// their script's tool card. A team member's conversation (a link from before, the last route) opens the main one:
+	// the main agent is the team's only entry.
 	const main = session?.main;
 	useEffect(() => {
 		const current = nav.route;
@@ -797,7 +815,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 			children &&
 			main !== undefined &&
 			conversationId !== main &&
-			!child &&
+			child?.kind !== "agent" &&
 			current.session === sessionId &&
 			current.conversation === conversationId
 		)
@@ -850,10 +868,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	// Who may write decides what shows (as Pi Mobile's `canWrite`), not whether the chat object is live yet: during a
 	// load, a cold start or a reconnect the composer stays and only Send waits.
 	const canWrite = owner;
-	// Held with the view, not once the subagent list names the child: Archive works right after load.
-	const subagentControl = useObject(SubagentControl, canWrite ? { session: sessionId } : undefined);
-	// The bar's archived mark flips at the tap.
-	const [archived, archive] = useOptimisticCall(child?.archived ?? false, (_, next: boolean) => next, fail);
 	const composer = useComposerState();
 	const {
 		draft,
@@ -1235,35 +1249,17 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		</button>
 	);
 	// The dock (`Dock`): a subagent's bar above, then the composer, or a bar in its place for those who may not write.
-	const subagentBar = child && (
+	// A one-shot agent's view (a script's) has no composer: its bar carries the Stop and its read-only note. Team members
+	// have no view of their own (the main agent is the team's only entry).
+	const subagentBar = oneShot && child && (
 		<div className="composer-wrap subagent-wrap">
 			{toBottom}
 			<div className="subagent-bar">
 				<span>
 					{t("oneShotAgent")}
 					{t("tools")} {child.tools.join(", ") || t("none")}
-					{!oneShot && viewLocation && t("inLocation", locationLabel(viewLocation.env, viewLocation.cwd))}
-					{!oneShot && !child.location && t("followsSession")}
-					{archived ? t("archivedTag") : ""}
 				</span>
-				{canWrite && !oneShot && subagentControl && (
-					<button
-						type="button"
-						className="text-action"
-						title={archived ? t("restoreAction") : t("archiveAction")}
-						onClick={() =>
-							archive(!archived, () =>
-								subagentControl.archive(
-									{ conversation: child.conversationId, archived: !archived },
-									BACKGROUND_CONTEXT,
-								),
-							)
-						}
-					>
-						{archived ? t("restore") : t("archive")}
-					</button>
-				)}
-				{canWrite && oneShot && busy && (
+				{canWrite && busy && (
 					<button type="button" className="round stop" aria-label={t("stop")} onClick={stop}>
 						<StopIcon />
 					</button>
@@ -1338,8 +1334,8 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	const place = useChatScreen(
 		{
 			above: subagentBar,
-			// A one-shot agent's view has no composer: its bar above has the Stop.
-			...(oneShot && canWrite
+			// A member's or one-shot agent's view has no composer: its bar above has the Stop.
+			...(child && canWrite
 				? {}
 				: {
 						composer: readOnlyBar
@@ -1431,7 +1427,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 							<SessionId.Provider value={sessionId}>
 								<WorkingDirectory.Provider value={viewCwd}>
 									<ToolActivityContext.Provider value={tools}>
-										<OpenConversation.Provider value={openConversation}>
+										<OpenConversation.Provider value={openEntry}>
 											<OneShotAgents.Provider value={oneShots}>
 												<OpenWorkspaceFile.Provider value={canWrite ? openWorkspaceFile : undefined}>
 													<OpenTerminal.Provider value={owner ? openTerminal : undefined}>

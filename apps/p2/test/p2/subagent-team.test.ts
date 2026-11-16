@@ -10,7 +10,7 @@ import { Chat } from "../../plugins/chat/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { SessionStatus } from "../../plugins/status/contract.ts";
 import { AGENT_MESSAGE_ENTRY, type AgentMessage, Subagents } from "../../plugins/subagents/contract.ts";
-import { type Fixture, holdIn, startFixture, until } from "./helpers.ts";
+import { type Fixture, hire, holdIn, startFixture, until } from "./helpers.ts";
 
 const agentMessages = (view: ConversationView | null | undefined) =>
 	(view?.entries ?? [])
@@ -45,13 +45,7 @@ describe("subagent team messaging (fake provider)", () => {
 		const keep = follow(root.view, () => {});
 		const idle = () => until(status.statuses, (value) => value?.[session.id]?.tasks === 0, 30_000);
 		const spawn = async (name: string, message: string) => {
-			await root.send(
-				{
-					text: `subagent ${JSON.stringify({ action: "spawn", name, message, tools: [] })}`,
-					requestId: name,
-				},
-				BACKGROUND_CONTEXT,
-			);
+			await hire(root, agents, session.id, { name, tools: [], message });
 			await idle();
 		};
 
@@ -72,7 +66,10 @@ describe("subagent team messaging (fake provider)", () => {
 			JSON.stringify(value).includes("Echo: [asks; answer with subagent send to asker]"),
 		);
 		await idle();
-		const reports = agentMessages(root.view.value).filter((m) => m.data.intent === "answered");
+		// The HR manager's reports of the hires are entries too; these are the executors'.
+		const reports = agentMessages(root.view.value).filter(
+			(m) => m.data.intent === "answered" && m.data.from.name !== "hr",
+		);
 		assert.deepEqual(reports.map((m) => m.data.from.name).sort(), ["asker", "first"]);
 		assert.match(reports[0]?.model ?? "", /\[answered, no reply needed\]/);
 		assert.deepEqual(
@@ -81,7 +78,7 @@ describe("subagent team messaging (fake provider)", () => {
 		);
 
 		// A note to a sibling arrives in its conversation; reading a sibling's answer.
-		const children = await until(agents.children, (value) => (value?.[session.id]?.length ?? 0) === 2);
+		const children = await until(agents.children, (value) => (value?.[session.id]?.length ?? 0) === 3);
 		const first = children?.[session.id]?.find((child) => child.name === "first");
 		const asker = children?.[session.id]?.find((child) => child.name === "asker");
 		assert(first && asker);

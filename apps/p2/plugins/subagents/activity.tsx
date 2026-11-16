@@ -23,15 +23,24 @@ import {
 import { useContext } from "react";
 
 const VERBS: Record<string, string> = {
-	spawn: "Started subagent",
-	send: "Messaged",
+	hire: "Asked the HR manager",
+	send: "Gave work to",
 	answer: "Read the answer of",
 	status: "Checked on",
+	roster: "Checked the team",
+	models: "Listed models",
+	assign: "Moved",
 	archive: "Archived",
 	restore: "Restored",
 	configure: "Configured",
 	stop: "Stopped",
 };
+
+/** What a `staff hire` made, as a line: its role, its manager and its duty. */
+const hired = (args: Record<string, unknown>): string =>
+	[stringOf(args.role), stringOf(args.manager) && `of ${stringOf(args.manager)}`, stringOf(args.duty)]
+		.filter(Boolean)
+		.join(" · ");
 
 const nameOf = (tool: ToolView) => stringOf(tool.args.name) || stringOf(detailsOf(tool).name);
 
@@ -77,18 +86,26 @@ function SubagentDetail({ step }: { step: Step }) {
 	);
 }
 
+/** The call's words: the HR manager's `staff hire` makes a member, the main agent's `subagent hire` only asks for one. */
+const verbOf = (tool: ToolView): string => {
+	const action = stringOf(tool.args.action);
+	if (tool.name === "staff" && action === "hire") return "Hired";
+	return VERBS[action] ?? "Team";
+};
+
+/** What the call says it did, in a line under its label: a hire's role, manager and duty, else the message. */
+const describeLine = (tool: ToolView): string | undefined =>
+	tool.name === "staff" && stringOf(tool.args.action) === "hire"
+		? hired(tool.args) || undefined
+		: plainText(sentence(stringOf(tool.args.message))) || undefined;
+
 export const subagentActivity: ToolActivity = {
 	describe: (step) => ({
-		label: {
-			kind: "agent",
-			verb: VERBS[stringOf(step.tool.args.action)] ?? "Subagent",
-			object: nameOf(step.tool),
-			style: "file",
-		},
-		description: failureOf(step) ?? (plainText(sentence(stringOf(step.tool.args.message))) || undefined),
+		label: { kind: "agent", verb: verbOf(step.tool), object: nameOf(step.tool), style: "file" },
+		description: failureOf(step) ?? describeLine(step.tool),
 	}),
 	running: (step) => ({ kind: "agent", verb: "Asking", object: stringOf(step.tool.args.name), style: "file" }),
 	argument: (tool) => [stringOf(tool.args.action), nameOf(tool)].filter(Boolean).join(" "),
-	summary: (count) => (count === 1 ? "used a subagent" : `used subagents ${count} times`),
+	summary: (count) => (count === 1 ? "worked with the team" : `worked with the team ${count} times`),
 	Detail: SubagentDetail,
 };

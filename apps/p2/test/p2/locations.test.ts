@@ -1,6 +1,6 @@
 // The location tools (plugins/locations): every main agent lists environments and directories and moves its session
 // (after its turn); a subagent gets them only when its main agent chose them, and then moves only itself. The main agent
-// places subagents with spawn/configure. Only turns the owner started may use them.
+// (through the HR manager) places subagents with staff hire/configure. Only turns the owner started may use them.
 
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -80,6 +80,23 @@ test(
 				session
 			]?.find((each) => each.name === name);
 
+		let hr: RefIn<typeof Chat, "participant"> | undefined;
+		/** Has the HR manager run `staff <args>` (the main agent asks it to) and returns that call's result. */
+		const staff = async (args: object): Promise<ToolResultMessage> => {
+			const before = results(hr?.view.value, "staff").length;
+			await call(`subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(args)}` })}`);
+			hr ??= await holdIn(
+				owner,
+				Chat,
+				{ session, conversation: (await child("hr"))!.conversationId },
+				"participant",
+			);
+			const view = await until(hr.view, (value) => results(value, "staff").length > before && idle(value), 30_000);
+			await until(status.statuses, (value) => value?.[session]?.tasks === 0, 30_000);
+			return results(view, "staff").at(-1)!;
+		};
+		const member = { role: "executor", duty: "helps" };
+
 		// The main agent lists environments and folders.
 		const [envs] = await call("location_envs {}");
 		assert.equal(envs?.isError, false);
@@ -92,29 +109,34 @@ test(
 		assert.equal(missing?.isError, true);
 		assert.match(text(missing), /Unknown environment "nowhere"/);
 
-		// It places subagents: its own location (env and cwd) and tools; without them a subagent follows the session.
-		await call(
-			`subagent ${JSON.stringify({ action: "spawn", name: "placed", message: "hi", env: null, cwd: "../own", tools: ["bash", "location_move"] })}`,
-		);
+		// The HR manager places members: its own location (env and cwd) and tools; without them a member follows the session.
+		await staff({
+			action: "hire",
+			name: "placed",
+			...member,
+			env: null,
+			cwd: "../own",
+			tools: ["bash", "location_move"],
+		});
 		const placed = await child("placed");
 		assert.deepEqual(placed?.location, { env: null, cwd: own });
 		assert.deepEqual(placed?.tools, ["bash", "location_move"]);
-		await call(`subagent ${JSON.stringify({ action: "spawn", name: "plain", message: "hi", tools: ["bash"] })}`);
+		await staff({ action: "hire", name: "plain", ...member, tools: ["bash"] });
 		assert.equal((await child("plain"))?.location, undefined);
 		// Reconfigured while idle: another directory, then following the session again, then back.
-		await call(`subagent ${JSON.stringify({ action: "configure", name: "placed", cwd: other })}`);
+		await staff({ action: "configure", name: "placed", cwd: other });
 		await until(
 			agents.children,
 			(value) => value?.[session]?.find((each) => each.name === "placed")?.location?.cwd === other,
 		);
-		await call(`subagent ${JSON.stringify({ action: "configure", name: "placed", followSession: true })}`);
+		await staff({ action: "configure", name: "placed", followSession: true });
 		await until(
 			agents.children,
 			(value) => value?.[session]?.find((each) => each.name === "placed")?.location === undefined,
 		);
-		const [bad] = await call(`subagent ${JSON.stringify({ action: "configure", name: "placed", cwd: "nowhere" })}`);
+		const bad = await staff({ action: "configure", name: "placed", cwd: "nowhere" });
 		assert.match(text(bad), /cwd nowhere is not an existing directory/);
-		await call(`subagent ${JSON.stringify({ action: "configure", name: "placed", cwd: own })}`);
+		await staff({ action: "configure", name: "placed", cwd: own });
 		await until(
 			agents.children,
 			(value) => value?.[session]?.find((each) => each.name === "placed")?.location?.cwd === own,
@@ -136,10 +158,18 @@ test(
 		assert.equal(refused?.isError, true);
 		assert.equal((await child("plain"))?.location, undefined);
 		// A working subagent's location does not change under it.
-		await plain.send({ text: "slow work", requestId: "slow-plain" }, BACKGROUND_CONTEXT);
+		// Sent without waiting for the session to settle (`call` would wait for the work to end).
+		await chat.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "send", name: "plain", message: "slow work" })}`,
+				requestId: `locations-${++serial}`,
+			},
+			BACKGROUND_CONTEXT,
+		);
 		await until(plain.view, (view) => !idle(view));
-		const [busy] = await call(`subagent ${JSON.stringify({ action: "configure", name: "plain", cwd: other })}`);
-		assert.match(text(busy), /plain is working: stop it or wait before changing its location/);
+		const busy = await staff({ action: "configure", name: "plain", cwd: other });
+		assert.equal(busy.isError, true);
+		assert.deepEqual((busy.details as { refused?: object }).refused, { working: true });
 		await plain.stop(BACKGROUND_CONTEXT);
 		await until(status.statuses, (value) => value?.[session]?.tasks === 0);
 		assert.equal((await child("plain"))?.location, undefined);
@@ -167,6 +197,6 @@ test(
 		// Agent locations are host-internal: the owner's browser does not hold them either.
 		await expectChord(whenLive(owner.hold(AgentLocations, {}, BACKGROUND_CONTEXT)), "forbidden");
 		assert.equal((await until(sessions.sessions, Boolean))?.find((row) => row.id === session)?.cwd, next);
-		for (const ref of [chat, plain, mover]) ref.release();
+		for (const ref of [chat, plain, mover, hr]) ref?.release();
 	},
 );

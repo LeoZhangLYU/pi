@@ -42,6 +42,7 @@ import {
 import {
 	ContextTally,
 	ConversationConfigured,
+	ConversationStops,
 	HarnessConfig,
 	harnessOf,
 	InputGates,
@@ -356,6 +357,7 @@ export default defineFacet((host) => {
 		const call = <T>(fn: () => Promise<T>): Promise<T> => worker().liveness.call(fn);
 		/** Refuses writes a plugin does not allow here (a one-shot agent's conversation); Stop is not one of them. */
 		const readOnlyConversations = self.registry(ReadOnlyConversations);
+		const stops = self.registry(ConversationStops);
 		const routers = self.registry(SendRouters);
 		const gates = self.registry(InputGates);
 		const writable = async (ctx: Ctx): Promise<void> => {
@@ -435,6 +437,8 @@ export default defineFacet((host) => {
 					}),
 				stop: (ctx) =>
 					call(async () => {
+						// A team member stops through its team's flow, which settles the work given to it.
+						for (const take of stops.value.values()) if (await take(conversation, ctx)) return { restored: [] };
 						const { restored } = await chat.stop(ctx);
 						return { restored: await own(restored, ctx) };
 					}),

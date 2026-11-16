@@ -1,0 +1,737 @@
+// The team tools of the main agent and the HR manager. The main agent is the team's only entry: with the subagent tool
+// it asks the HR manager to hire (`hire`), gives work to managers and direct executors (`send`), stops members and reads
+// their answers. The HR manager staffs the team with the staff tool: it hires, configures, moves and archives members,
+// and gives no one work.
+
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Models } from "@earendil-works/pi-ai/models";
+import {
+	type Agent,
+	configure,
+	defineExtension,
+	type Extension,
+	LiveDoc,
+	type ModelRef,
+	ROOT_CONVERSATION_ID,
+	type ToolExecutionApi,
+	type Tx,
+} from "@earendil-works/pi-durable";
+import { arr, bool, nul, obj, opt, str, union } from "@earendil-works/pi-schema";
+import { type Context, type Location, literal } from "@p2/app/v1";
+import { defineP2Tool, originOf, type P2Tool } from "@p2/app/v1/worker";
+import {
+	choosableTools,
+	DELEGATE_TOOL,
+	type Giver,
+	type Role,
+	resolveChoice,
+	resolveTools,
+	roleOf,
+	STAFF_TOOL,
+	type Subagent,
+	type SubagentState,
+	Subagents,
+	stillGiven,
+	type ToolChoice,
+} from "./contract.worker.ts";
+import {
+	hrName,
+	hrOf,
+	instructionsFor,
+	MAIN,
+	MEMBER_NAME,
+	memberOf,
+	openDelegation,
+	openDelegations,
+	RESERVED_NAMES,
+	rosterText,
+} from "./team.ts";
+import {
+	ANCHORED,
+	Anchor,
+	agentTools,
+	BACKGROUND,
+	latestAnswer,
+	memberDetails,
+	placementRefusal,
+	placeTarget,
+	Reporter,
+	type ReporterInput,
+	Settle,
+	Stop,
+	type StopResult,
+	SUBAGENT_EXTENSION,
+	type SubagentDetails,
+	type SubagentLocator,
+	setArchived,
+	startStop,
+	stopResultOf,
+} from "./tools.ts";
+
+/** What the team tools need from the worker. */
+export type TeamDeps = {
+	readonly models: Models;
+	readonly locator: SubagentLocator;
+	/** The worker's tools by name, with what they declare: which ones members may get. */
+	readonly access: () => ReadonlyMap<string, P2Tool>;
+	/** The main agent, whose model, thinking level and tools members start from (the HR manager has none to give). */
+	readonly main: (context: Context) => Promise<Agent>;
+};
+
+/** A member about to be created, as the subagent and staff tools resolved it. */
+type NewMember = {
+	role: Role;
+	manager?: string;
+	duty?: string;
+	model: ModelRef;
+	thinkingLevel: ModelThinkingLevel;
+	tools: ToolChoice;
+	location?: Location;
+};
+
+/**
+ * Creates member `name` in `state`, in `tx`: its conversation (owned by a background anchor on conversation 1, so
+ * stopping whoever hired it never reaches it), its agent with its role's instructions, and its registry entry.
+ */
+async function createMember(tx: Tx, state: SubagentState, name: string, member: NewMember): Promise<void> {
+	const anchor = await tx.createTask(Anchor, null, ANCHORED);
+	const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
+	await configure(tx, child.id, {
+		model: member.model,
+		thinkingLevel: member.thinkingLevel,
+		...agentTools(member.tools),
+		...(member.location ? { cwd: member.location.cwd } : {}),
+		instructions: instructionsFor(member.role, name, member.duty, member.manager),
+	});
+	const boss = member.manager === undefined ? undefined : state.agents[member.manager];
+	state.agents[name] = {
+		conversationId: child.id,
+		model: `${member.model.provider}/${member.model.modelId}`,
+		thinkingLevel: member.thinkingLevel,
+		tools: member.tools.chosen,
+		...(member.location ? { location: member.location } : {}),
+		// A team executor's `team send to: "parent"` reaches its manager.
+		...(boss ? { parent: boss.conversationId } : {}),
+		reported: [],
+		role: member.role,
+		...(member.manager === undefined ? {} : { manager: member.manager }),
+		...(member.duty ? { duty: member.duty } : {}),
+	};
+}
+
+/** The names of the members working now. */
+async function busyNames(api: ToolExecutionApi, state: SubagentState, context: Context): Promise<Set<string>> {
+	const busy = new Set<string>();
+	for (const [name, agent] of Object.entries(state.agents))
+		if ((await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined) busy.add(name);
+	return busy;
+}
+
+/** Member `name` of `state`, never a property of every object (`constructor`, …). */
+const memberNamed = (state: Pick<SubagentState, "agents">, name: string): Subagent | undefined =>
+	Object.hasOwn(state.agents, name) ? state.agents[name] : undefined;
+
+/** A manager and its executors: whom stopping the manager stops. */
+const withTeam = (state: Pick<SubagentState, "agents">, name: string): string[] => [
+	name,
+	...Object.entries(state.agents)
+		.filter(([, agent]) => roleOf(agent) === "executor" && agent.manager === name)
+		.map(([each]) => each),
+];
+
+/**
+ * Stops `member` (a manager's team with it) for `by` through the stop flow, and waits until it has ended: the members'
+ * runs are aborted and confirmed ended, and whoever gave them work has been told.
+ */
+async function stopMember(
+	api: ToolExecutionApi,
+	member: string,
+	by: string,
+	context: Context,
+	archive = false,
+): Promise<StopResult> {
+	const id = await api.commit((tx) => startStop(tx, { member, by, ...(archive ? { archive } : {}) }), context);
+	return stopResultOf(await api.waitForTask(id, context), member);
+}
+
+const stoppedText = (result: StopResult): string =>
+	[
+		`Stopped ${result.names.join(", ")}.`,
+		result.stopped.length ? `Stopped work: ${result.stopped.map((id) => `#${id}`).join(", ")}.` : "",
+		result.verified ? "" : "Could not confirm that every run ended.",
+	]
+		.filter(Boolean)
+		.join(" ");
+
+/** Text of a member's latest answer, for the answer actions. */
+async function answerText(api: ToolExecutionApi, name: string, agent: Subagent, context: Context): Promise<string> {
+	const answer = await latestAnswer(api, agent.conversationId, context);
+	const busy = (await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined;
+	const state = busy ? `${name} is still working.` : "";
+	return answer === undefined
+		? `${name} has not answered yet.${state ? ` ${state}` : ""}`
+		: `${state ? `${state} Its latest answer:\n\n` : ""}${answer}`;
+}
+
+/** The tools the HR manager gets from the main agent's: looking at environments and directories, nothing to work with. */
+const HR_TOOLS = ["location_envs", "location_dirs"];
+
+/**
+ * The work message a member gets: its stop note first (why its last work was stopped), once. Clears the note in the
+ * commit that sends it.
+ */
+function withStopNote(agent: Subagent, message: string): string {
+	const note = agent.stopNote;
+	if (note === undefined) return message;
+	delete agent.stopNote;
+	return `${note}\n\nPlan again before you continue.\n\n${message}`;
+}
+
+/** The main agent's subagent tool: the team's only entry. */
+function subagentTool(deps: TeamDeps): P2Tool {
+	const { models, access } = deps;
+	const giver: Giver = { agent: deps.main };
+	return defineP2Tool({
+		name: "subagent",
+		description: [
+			"Work with your team: members that work in the background while you keep talking to the user. You are the team's",
+			"only entry. The HR manager hires and staffs the team; managers split work among their own executors; direct",
+			"executors work for you.",
+			"Actions:",
+			"- hire (message; optional followUp): ask the HR manager to hire or change members, e.g. 'a parser team: one",
+			"  manager and two executors, one for the lexer and one for the grammar'. Its answer, naming whom it hired, is",
+			"  reported to you as a message. The first hire creates the HR manager.",
+			"- send (name, message; followUp: true queues after the current answer instead of steering): give work to a",
+			"  manager or a direct executor. A manager's answer is reported once its whole team is done.",
+			"- stop (name): stop its current work; stopping a manager also stops its team's work. They stay usable.",
+			"- answer (name): return a member's latest completed answer, e.g. when a report did not reach you.",
+			"- status (optional name): the team in order (HR manager, each manager with its executors, direct executors), who is",
+			"  working, and the open work; archived members only by name.",
+			"Answers are reported back to you as messages when they arrive; do not wait or poll for them.",
+			'Members can also message you while they work: a <sender kind="subagent"> message marked [asks; …] needs your',
+			"answer (send to that member, or hire for the HR manager); a note needs none.",
+		].join("\n"),
+		parameters: obj(
+			{
+				action: union([literal("hire"), literal("send"), literal("stop"), literal("answer"), literal("status")]),
+				name: opt(str()),
+				message: opt(str()),
+				followUp: opt(bool()),
+			},
+			{ open: true },
+		),
+		// A crash-interrupted stop must not be repeated against newer work.
+		replay: "unsafe",
+		scope: "main",
+		execute: async (args, api, context) => {
+			const { action, message, followUp } = args;
+			const name = args.name?.trim() || undefined;
+			const reply = (text: string, extra: Partial<SubagentDetails> = {}, isError = false) => ({
+				output: [{ type: "text" as const, text }],
+				details: { action, ...(name === undefined ? {} : { name }), ...extra } satisfies SubagentDetails,
+				isError,
+			});
+			const registry: SubagentState = (await api.snapshot(Subagents, ROOT_CONVERSATION_ID, context)) ?? {
+				agents: {},
+				reporters: {},
+			};
+			if (action === "status") return reply(rosterText(registry, await busyNames(api, registry, context), name));
+			if (action === "hire") {
+				if (!message?.trim()) return reply("hire needs a message for the HR manager.", {}, true);
+				const hr = hrOf(registry);
+				if (hr?.[1].stopping !== undefined)
+					return reply(`${hr[0]} is being stopped; send again once it is.`, { refused: { stopping: true } }, true);
+				// The HR manager starts from the main agent's model and thinking level, with only the tools to look around.
+				let created: NewMember | undefined;
+				if (!hr) {
+					const own = await deps.main(context);
+					const given = choosableTools(own, access())
+						.map((tool) => tool.name)
+						.filter((each) => HR_TOOLS.includes(each));
+					const choice = await resolveChoice(models, giver, access(), { tools: given }, undefined, "hr", context);
+					if (typeof choice === "string") return reply(choice, {}, true);
+					const { model, thinkingLevel, ...tools } = choice;
+					created = { role: "hr", model, thinkingLevel, tools };
+				}
+				const origin = await originOf(api, context);
+				const result = await api.commit(async (tx) => {
+					const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+					let found = hrOf(state);
+					if (!found && created) {
+						await createMember(tx, state, hrName(state), created);
+						found = hrOf(state);
+					}
+					if (!found) throw new Error("The HR manager disappeared");
+					const [hrNameNow, agent] = found;
+					delete agent.archived;
+					agent.parent = api.conversationId;
+					const delegation = openDelegation(
+						state,
+						{ from: MAIN, to: hrNameNow, parent: api.conversationId, text: message },
+						api.now(),
+					);
+					const input: ReporterInput = {
+						name: hrNameNow,
+						conversationId: agent.conversationId,
+						parent: api.conversationId,
+						// A stopped hire is told once, with the next request (its stop note).
+						message: withStopNote(agent, message),
+						followUp: followUp === true,
+						...(origin === "owner" ? { origin } : {}),
+						delegation,
+					};
+					state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
+					return { name: hrNameNow, delegation, details: memberDetails(agent) };
+				}, context);
+				return reply(
+					`${created ? `Created the HR manager ${result.name} and asked it` : `Asked ${result.name}`} (#${result.delegation}).`,
+					{ ...result.details, name: result.name, delegation: result.delegation },
+				);
+			}
+			if (name === undefined) return reply(`${action} needs a name.`, {}, true);
+			const agent = memberNamed(registry, name);
+			if (!agent) return reply(`No team member named ${name}.`, {}, true);
+			if (action === "answer")
+				return reply(await answerText(api, name, agent, context), { conversationId: agent.conversationId });
+			if (action === "stop") {
+				const result = await stopMember(api, name, MAIN, context);
+				return reply(stoppedText(result), { conversationId: agent.conversationId });
+			}
+			// send
+			if (!message?.trim()) return reply("send needs a message.", {}, true);
+			if (roleOf(agent) === "hr")
+				return reply(`${name} is the HR manager: ask it with hire.`, { refused: { use: "hire" } }, true);
+			if (agent.manager !== undefined)
+				return reply(
+					`${name} works for the manager ${agent.manager}: give the work to ${agent.manager}.`,
+					{ refused: { manager: agent.manager } },
+					true,
+				);
+			if (agent.stopping !== undefined)
+				return reply(`${name} is being stopped; send again once it is.`, { refused: { stopping: true } }, true);
+			// What it was given that the main agent can no longer give is taken away (the main agent's tools changed).
+			const own = await deps.main(context);
+			const kept = stillGiven(own, access(), agent);
+			const narrowed =
+				kept && kept.length !== agent.tools.length
+					? resolveTools(own, access(), kept, [], roleOf(agent))
+					: undefined;
+			const origin = await originOf(api, context);
+			const result = await api.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const target = memberNamed(state, name);
+				if (!target) return undefined;
+				// A stop that committed while this call waited: its mark lists no work yet to be this one, so nothing would
+				// stop it. Checked here, in the commit that opens the delegation.
+				if (target.stopping !== undefined) return { refused: "stopping" } as const;
+				// Working with an archived member again brings it back.
+				delete target.archived;
+				target.parent = api.conversationId;
+				if (narrowed && typeof narrowed !== "string") {
+					await configure(tx, target.conversationId, agentTools(narrowed));
+					target.tools = narrowed.chosen;
+				}
+				const delegation = openDelegation(
+					state,
+					{ from: MAIN, to: name, parent: api.conversationId, text: message },
+					api.now(),
+				);
+				const input: ReporterInput = {
+					name,
+					conversationId: target.conversationId,
+					parent: api.conversationId,
+					message: withStopNote(target, message),
+					followUp: followUp === true,
+					...(origin === "owner" ? { origin } : {}),
+					delegation,
+				};
+				state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
+				return { delegation, details: memberDetails(target) };
+			}, context);
+			if (!result) return reply(`No team member named ${name}.`, {}, true);
+			if ("refused" in result)
+				return reply(`${name} is being stopped; send again once it is.`, { refused: { stopping: true } }, true);
+			return reply(`Sent to ${name} (#${result.delegation}).`, { ...result.details, delegation: result.delegation });
+		},
+	});
+}
+
+/** A manager's delegate tool: it gives work to its own executors, and to nobody else. */
+function delegateTool(deps: TeamDeps): P2Tool {
+	const { access } = deps;
+	return defineP2Tool({
+		name: DELEGATE_TOOL,
+		description: [
+			"Give work to your own executors. You are a manager: you split the work you were given, hand the pieces to your",
+			"executors, and answer once they are done.",
+			"Actions:",
+			"- send (name, message; followUp: true queues after its current answer instead of steering): give work to one of",
+			"  your executors. Its answer comes back to you as a message when it arrives; do not wait or poll for it.",
+			"- stop (name): stop its current work (it stays usable).",
+			"- answer (name): return an executor's latest completed answer.",
+			"- status (optional name): your executors, who is working, and the work you gave out.",
+			"Your own answer is reported to the main agent once all the work you gave out has ended.",
+		].join("\n"),
+		parameters: obj(
+			{
+				action: union([literal("send"), literal("stop"), literal("answer"), literal("status")]),
+				name: opt(str()),
+				message: opt(str()),
+				followUp: opt(bool()),
+			},
+			{ open: true },
+		),
+		// A crash-interrupted stop must not be repeated against newer work.
+		replay: "unsafe",
+		deferred: true,
+		scope: "manager",
+		execute: async (args, api, context) => {
+			const { action, message, followUp } = args;
+			const name = args.name?.trim() || undefined;
+			const reply = (text: string, extra: Partial<SubagentDetails> = {}, isError = false) => ({
+				output: [{ type: "text" as const, text }],
+				details: { action, ...(name === undefined ? {} : { name }), ...extra } satisfies SubagentDetails,
+				isError,
+			});
+			const registry: SubagentState = (await api.snapshot(Subagents, ROOT_CONVERSATION_ID, context)) ?? {
+				agents: {},
+				reporters: {},
+			};
+			const self = memberOf(registry, api.conversationId);
+			if (!self || roleOf(self[1]) !== "manager")
+				return reply("Only a manager can use the delegate tool.", { refused: { role: "manager" } }, true);
+			const manager = self[0];
+			const own = (agent: Subagent) => roleOf(agent) === "executor" && agent.manager === manager;
+			if (action === "status") {
+				const team: SubagentState = {
+					agents: Object.fromEntries(Object.entries(registry.agents).filter(([, agent]) => own(agent))),
+					reporters: {},
+					delegations: Object.fromEntries(
+						Object.entries(registry.delegations ?? {}).filter(([, delegation]) => delegation.from === manager),
+					),
+				};
+				return reply(rosterText(team, await busyNames(api, team, context), name));
+			}
+			if (name === undefined) return reply(`${action} needs a name.`, {}, true);
+			const agent = memberNamed(registry, name);
+			if (!agent || !own(agent))
+				return reply(`${name} is not one of your executors.`, { refused: { notYours: true } }, true);
+			if (action === "answer")
+				return reply(await answerText(api, name, agent, context), { conversationId: agent.conversationId });
+			if (action === "stop") {
+				const result = await stopMember(api, name, manager, context);
+				return reply(stoppedText(result), { conversationId: agent.conversationId });
+			}
+			// send
+			if (!message?.trim()) return reply("send needs a message.", {}, true);
+			if (agent.stopping !== undefined)
+				return reply(`${name} is being stopped; send again once it is.`, { refused: { stopping: true } }, true);
+			if (agent.archived) return reply(`${name} is archived: ask the main agent to have it restored.`, {}, true);
+			// What it was given that the main agent can no longer give is taken away (the main agent's tools changed).
+			const main = await deps.main(context);
+			const kept = stillGiven(main, access(), agent);
+			const narrowed =
+				kept && kept.length !== agent.tools.length ? resolveTools(main, access(), kept, [], "executor") : undefined;
+			const origin = await originOf(api, context);
+			const result = await api.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const target = memberNamed(state, name);
+				if (!target) return undefined;
+				// A stop or an archive that committed while this call waited: re-checked in the commit that opens the work.
+				if (target.stopping !== undefined) return { refused: "stopping" } as const;
+				if (target.archived) return { refused: "archived" } as const;
+				target.parent = api.conversationId;
+				if (narrowed && typeof narrowed !== "string") {
+					await configure(tx, target.conversationId, agentTools(narrowed));
+					target.tools = narrowed.chosen;
+				}
+				const delegation = openDelegation(
+					state,
+					{ from: manager, to: name, parent: api.conversationId, text: message },
+					api.now(),
+				);
+				const input: ReporterInput = {
+					name,
+					conversationId: target.conversationId,
+					parent: api.conversationId,
+					message: withStopNote(target, message),
+					followUp: followUp === true,
+					...(origin === "owner" ? { origin } : {}),
+					delegation,
+				};
+				state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
+				return { delegation, details: memberDetails(target) };
+			}, context);
+			if (!result) return reply(`No executor named ${name}.`, {}, true);
+			if ("refused" in result)
+				return result.refused === "stopping"
+					? reply(`${name} is being stopped; send again once it is.`, { refused: { stopping: true } }, true)
+					: reply(`${name} is archived: ask the main agent to have it restored.`, {}, true);
+			return reply(`Sent to ${name} (#${result.delegation}).`, { ...result.details, delegation: result.delegation });
+		},
+	});
+}
+
+/** The HR manager's staff tool: it staffs the team and gives no one work. */
+function staffTool(deps: TeamDeps): P2Tool {
+	const { models, access, locator } = deps;
+	const giver: Giver = { agent: deps.main };
+	return defineP2Tool({
+		name: STAFF_TOOL,
+		description: [
+			"Staff the team. You are the HR manager: you hire and change members, you never give them work.",
+			"Actions:",
+			"- hire (name, role, duty; optional manager, model, thinkingLevel, tools, env, cwd): create a member. role is",
+			'  "manager" (splits work among its own executors) or "executor" (does work). An executor with manager (an',
+			"  existing manager's name) works in that manager's team; without, it works directly for the main agent.",
+			"  duty is one line on what it is for. model is 'provider/modelId' (default: the main agent's); thinkingLevel is",
+			"  off|minimal|low|medium|high|xhigh|max (clamped to the model); tools names tools of the main agent's it gets",
+			"  (default: all it can give; [] for none). Without env and cwd it works where the session works and follows it;",
+			"  with them it gets its own location: cwd is an existing directory (relative to the session's cwd on its",
+			"  environment, to the home on another), env an environment name from location_envs or null for this device.",
+			"- configure (name; optional model, thinkingLevel, tools, env, cwd, followSession): change a member for later work;",
+			"  followSession: true makes it follow the session again. A location changes only while it is idle.",
+			"- assign (name, manager): move an executor into a manager's team, or with manager null back to the main agent.",
+			"- archive (name): stop it and hide it from the sidebar; restore (name) brings it back. A manager with executors",
+			"  cannot be archived: move or archive them first.",
+			"- roster (optional name): the team in order, who is working, and the open work.",
+			"- models: list models that have credentials configured.",
+		].join("\n"),
+		parameters: obj(
+			{
+				action: union([
+					literal("hire"),
+					literal("configure"),
+					literal("assign"),
+					literal("archive"),
+					literal("restore"),
+					literal("roster"),
+					literal("models"),
+				]),
+				name: opt(str()),
+				role: opt(union([literal("manager"), literal("executor")])),
+				duty: opt(str({ maxLength: 500 })),
+				manager: opt(union([str(), nul()])),
+				model: opt(str()),
+				thinkingLevel: opt(str()),
+				tools: opt(arr(str())),
+				cwd: opt(str()),
+				env: opt(union([str(), nul()])),
+				followSession: opt(bool()),
+			},
+			{ open: true },
+		),
+		// An archive stops work: a crash-interrupted one must not be repeated against newer work.
+		replay: "unsafe",
+		deferred: true,
+		scope: "hr",
+		execute: async (args, api, context) => {
+			const { action } = args;
+			const name = args.name?.trim() || undefined;
+			const reply = (text: string, extra: Partial<SubagentDetails> = {}, isError = false) => ({
+				output: [{ type: "text" as const, text }],
+				details: { action, ...(name === undefined ? {} : { name }), ...extra } satisfies SubagentDetails,
+				isError,
+			});
+			const registry: SubagentState = (await api.snapshot(Subagents, ROOT_CONVERSATION_ID, context)) ?? {
+				agents: {},
+				reporters: {},
+			};
+			const self = memberOf(registry, api.conversationId);
+			if (!self || roleOf(self[1]) !== "hr")
+				return reply("Only the HR manager can use the staff tool.", { refused: { role: "hr" } }, true);
+			if (action === "models") {
+				const available = await models.getAvailable(undefined, { signal: AbortSignal.timeout(10_000) });
+				const lines = available.slice(0, 200).map((model) => `${model.provider}/${model.id} (${model.name})`);
+				return reply(lines.length ? lines.join("\n") : "No models with configured credentials.");
+			}
+			if (action === "roster") return reply(rosterText(registry, await busyNames(api, registry, context), name));
+			if (name === undefined) return reply(`${action} needs a name.`, {}, true);
+			const agent = memberNamed(registry, name);
+			if (action !== "hire" && !agent) return reply(`No team member named ${name}.`, {}, true);
+			if (action !== "hire" && agent && roleOf(agent) === "hr")
+				return reply(`${name} is the HR manager: it stays as it is.`, { refused: { role: "hr" } }, true);
+
+			if (action === "restore" && agent) {
+				await setArchived(api, ROOT_CONVERSATION_ID, agent.conversationId, false, context);
+				return reply(`Restored ${name}.`, memberDetails(agent));
+			}
+			if (action === "archive" && agent) {
+				const team = withTeam(registry, name).filter((each) => each !== name && !registry.agents[each]?.archived);
+				if (roleOf(agent) === "manager" && team.length)
+					return reply(
+						`${name} still has executors (${team.join(", ")}): move or archive them first.`,
+						{ refused: { team: true } },
+						true,
+					);
+				// The stop flow ends its work first; its closing commit sets the archived flag.
+				const stopped = await stopMember(api, name, "hr", context, true);
+				return reply(`Archived ${name}. ${stoppedText(stopped)}`, memberDetails(agent));
+			}
+			if (action === "assign" && agent) {
+				if (roleOf(agent) !== "executor") return reply(`${name} is not an executor.`, {}, true);
+				if (args.manager === undefined) return reply("assign needs manager (a manager's name, or null).", {}, true);
+				const manager = args.manager === null ? undefined : args.manager;
+				const boss = manager === undefined ? undefined : memberNamed(registry, manager);
+				if (manager !== undefined && (!boss || roleOf(boss) !== "manager" || boss.archived))
+					return reply(`No manager named ${manager}.`, {}, true);
+				if (openDelegations(registry).some((each) => each.to === name))
+					return reply(
+						`${name} has open work: wait or stop it before moving it.`,
+						{ refused: { working: true } },
+						true,
+					);
+				await api.commit(async (tx) => {
+					const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+					const target = memberNamed(state, name);
+					if (!target) return;
+					if (manager === undefined) {
+						delete target.manager;
+						delete target.parent;
+					} else {
+						target.manager = manager;
+						const next = memberNamed(state, manager);
+						if (next) target.parent = next.conversationId;
+					}
+					await configure(tx, target.conversationId, {
+						instructions: instructionsFor("executor", name, target.duty, manager),
+					});
+				}, context);
+				return reply(
+					manager === undefined ? `${name} now works for the main agent.` : `${name} now works for ${manager}.`,
+					{
+						...memberDetails(agent),
+						...(manager === undefined ? {} : { manager }),
+					},
+				);
+			}
+
+			// hire and configure: validate every choice before a commit, so a typo changes nothing.
+			const placing = args.cwd !== undefined || args.env !== undefined;
+			if (args.followSession && (action !== "configure" || placing))
+				return reply("followSession is for configure, without env or cwd.", {}, true);
+			let role: Role = agent ? roleOf(agent) : "executor";
+			let manager: string | undefined = agent?.manager;
+			if (action === "hire") {
+				if (agent)
+					return reply(`${name} already exists${agent.archived ? " (archived: restore it)" : ""}.`, {}, true);
+				if (!MEMBER_NAME.test(name) || RESERVED_NAMES.has(name))
+					return reply(
+						`${name} is not a name a member can have: use letters, digits, ".", "_" and "-".`,
+						{},
+						true,
+					);
+				if (args.role === undefined) return reply('hire needs role ("manager" or "executor").', {}, true);
+				role = args.role;
+				if (!args.duty?.trim()) return reply("hire needs a duty: one line on what the member is for.", {}, true);
+				if (role === "manager" && args.manager !== undefined && args.manager !== null)
+					return reply("A manager works for the main agent: hire it without manager.", {}, true);
+				manager = args.manager ?? undefined;
+				const boss = manager === undefined ? undefined : memberNamed(registry, manager);
+				if (manager !== undefined && (!boss || roleOf(boss) !== "manager" || boss.archived))
+					return reply(`No manager named ${manager}: hire the manager first.`, {}, true);
+			} else if (
+				args.model === undefined &&
+				args.thinkingLevel === undefined &&
+				args.tools === undefined &&
+				!placing &&
+				!args.followSession
+			)
+				return reply("configure needs model, thinkingLevel, tools, env, cwd or followSession.", {}, true);
+			const choice = await resolveChoice(models, giver, access(), args, agent, role, context);
+			if (typeof choice === "string") return reply(choice, {}, true);
+			const { model, thinkingLevel, ...tools } = choice;
+			// A location changes between runs, never under one: its tools would switch machines mid-task.
+			if (
+				agent &&
+				(placing || args.followSession) &&
+				(await api.snapshot(LiveDoc, agent.conversationId, context))?.run !== undefined
+			)
+				return reply(
+					`${name} is working: wait before changing its location.`,
+					{ refused: { working: true } },
+					true,
+				);
+			/** Its own location; `null`: it follows the session (again). */
+			let location: Location | null | undefined;
+			if (args.followSession) location = null;
+			else if (placing) {
+				// From where the session works (the HR manager follows it).
+				const caller = await locator.locate(api.conversationId, api, context);
+				if (args.env !== undefined && args.env !== caller.env && (await originOf(api, context)) !== "owner")
+					return reply("Another environment needs a turn the owner started.", {}, true);
+				// A member in a sandbox: a cwd alone means a path in that sandbox (it cannot be placed elsewhere).
+				const kept = agent?.location && args.env === undefined ? await locator.sandbox(agent.location) : undefined;
+				const placed = await placeTarget(
+					locator,
+					caller,
+					kept === undefined ? args : { ...args, env: kept },
+					context,
+				);
+				if (typeof placed === "string") return reply(placed, {}, true);
+				if ("refused" in placed)
+					return reply(placementRefusal(placed), { refused: { sandbox: placed.sandbox } }, true);
+				location = placed.location;
+			}
+			// A member working in a sandbox stays there, whoever configures it (only the owner's Relocate leaves one).
+			const sandbox = agent?.location === undefined ? undefined : await locator.sandbox(agent.location);
+			if (sandbox !== undefined && location !== undefined) {
+				const next = location ?? (await locator.locate(ROOT_CONVERSATION_ID, api, context));
+				if (next.env !== sandbox)
+					return reply(`${name} works in sandbox ${sandbox} and cannot leave it.`, { refused: { sandbox } }, true);
+			}
+			// A member following the session works at its cwd.
+			const session = location === null ? await locator.locate(ROOT_CONVERSATION_ID, api, context) : undefined;
+			const result = await api.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				if (action === "hire") {
+					if (Object.hasOwn(state.agents, name)) return undefined;
+					await createMember(tx, state, name, {
+						role,
+						...(manager === undefined ? {} : { manager }),
+						duty: args.duty?.trim() ?? "",
+						model,
+						thinkingLevel,
+						tools,
+						...(location ? { location } : {}),
+					});
+					return memberDetails(state.agents[name]!);
+				}
+				const target = memberNamed(state, name);
+				if (!target) return undefined;
+				await configure(tx, target.conversationId, {
+					model,
+					thinkingLevel,
+					...agentTools(tools),
+					...(location ? { cwd: location.cwd } : session ? { cwd: session.cwd } : {}),
+				});
+				if (location) target.location = location;
+				else if (location === null) delete target.location;
+				target.model = `${model.provider}/${model.modelId}`;
+				target.thinkingLevel = thinkingLevel;
+				target.tools = tools.chosen;
+				return memberDetails(target);
+			}, context);
+			if (!result)
+				return reply(action === "hire" ? `${name} already exists.` : `No team member named ${name}.`, {}, true);
+			const what =
+				action === "configure"
+					? `Configured ${name}.`
+					: role === "manager"
+						? `Hired the manager ${name}.`
+						: manager === undefined
+							? `Hired the direct executor ${name}.`
+							: `Hired ${name} into ${manager}'s team.`;
+			return reply(what, result);
+		},
+	});
+}
+
+/** The team's tools, with the tasks behind them: installed in every conversation, each given by its scope. */
+export function createTeamExtension(deps: TeamDeps): Extension<P2Tool> {
+	return defineExtension<P2Tool>({
+		name: SUBAGENT_EXTENSION,
+		tasks: [Anchor, Reporter, Settle, Stop],
+		tools: [subagentTool(deps), staffTool(deps), delegateTool(deps)],
+	});
+}

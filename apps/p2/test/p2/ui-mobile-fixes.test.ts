@@ -259,8 +259,11 @@ describe("Pi Mobile audit fixes in the browser", { skip: !browserTests }, () => 
 		const chat = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
 		const list = await holdIn(owner, Subagents, {}, "reader");
 		await chat.send({ text: "subagent", requestId: "spawn" }, BACKGROUND_CONTEXT);
-		const children = await until(list.children, (value) => Boolean(value?.[session.id]?.length));
-		const helper = children![session.id]![0]!;
+		const children = await until(
+			list.children,
+			(value) => value?.[session.id]?.some((each) => each.name === "helper") === true,
+		);
+		const helper = children![session.id]!.find((each) => each.name === "helper")!;
 		const child = await holdIn(
 			owner,
 			Chat,

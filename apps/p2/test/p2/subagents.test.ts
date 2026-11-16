@@ -5,16 +5,16 @@ import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import type { ConversationView } from "@earendil-works/pi-durable";
-import { BACKGROUND_CONTEXT, whenLive } from "@p2/app/v1";
+import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { Chat } from "../../plugins/chat/contract.ts";
 import { Mcp } from "../../plugins/mcp/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { SessionStatus } from "../../plugins/status/contract.ts";
-import { type Child, ChildStore, SubagentControl, Subagents } from "../../plugins/subagents/contract.ts";
+import { type Child, SubagentControl, Subagents } from "../../plugins/subagents/contract.ts";
 import { Workspace } from "../../plugins/workspace/contract.ts";
 import { startServer } from "../../src/hosts/server.ts";
 import type { Host, RefIn } from "../../src/runtime/chord.ts";
-import { type Fixture, failureOf, holdIn, startFixture, until } from "./helpers.ts";
+import { type Fixture, failureOf, hire, holdIn, startFixture, until } from "./helpers.ts";
 
 const MCP_FIXTURE = fileURLToPath(new URL("../fixtures/mcp-server.mjs", import.meta.url));
 
@@ -45,6 +45,23 @@ describe("subagents (fake provider)", () => {
 	let status: RefIn<typeof SessionStatus, "reader">;
 	let session: string;
 	let child: Child;
+	/** The executor `helper` in the server's index (the session also lists its HR manager). */
+	const helper = (value: Record<string, Child[]> | undefined): Child | undefined =>
+		value?.[session]?.find((each) => each.name === "helper");
+	/** Waits until the main agent's turn ended (a report starts one). */
+	const mainIdle = () => until(chat.view, (view) => !(view?.docs["pi.live"] as { run?: unknown } | undefined)?.run);
+	const hrReports = (view: ConversationView | null | undefined) =>
+		texts(view).filter((text) => text.startsWith("[answered, no reply needed] Echo: staff ")).length;
+	/**
+	 * Sends a prompt that has the HR manager do something, and waits for its report and the main agent's turn on it: the
+	 * fake provider answers only the last message of a turn, so the next prompt must not join that turn.
+	 */
+	const askHr = async (prompt: string, requestId: string) => {
+		const before = hrReports(chat.view.value);
+		await chat.send({ text: prompt, requestId }, BACKGROUND_CONTEXT);
+		await until(chat.view, (view) => hrReports(view) > before);
+		await mainIdle();
+	};
 
 	before(async () => {
 		fixture = await startFixture({ idleMs: 1500, allowedHosts: ["share.test"] });
@@ -59,57 +76,82 @@ describe("subagents (fake provider)", () => {
 		await fixture?.close();
 	});
 
-	it("rejects invalid models without creating a child", async () => {
+	it("rejects invalid models without creating a member", async () => {
 		await chat.send({ text: "subagent-bad", requestId: "bad" }, BACKGROUND_CONTEXT);
-		await until(chat.view, (view) => texts(view).some((text) => text.includes("Unknown model nope/missing")));
-		assert.deepEqual((await until(children.children, (value) => value !== undefined))?.[session] ?? [], []);
+		// The first hire creates the HR manager; its `staff hire` fails on the model, in its own conversation.
+		const listed = await until(
+			children.children,
+			(value) => value?.[session]?.some((each) => each.role === "hr") === true,
+		);
+		const hr = listed![session]!.find((each) => each.role === "hr")!;
+		const sub = await holdIn(owner, Chat, { session, conversation: hr.conversationId }, "participant");
+		await until(sub.view, (view) => texts(view).some((text) => text.includes("Unknown model nope/missing")));
+		sub.release();
+		assert.deepEqual(
+			(await until(children.children, (value) => value !== undefined))?.[session]?.map((each) => each.name),
+			["hr"],
+		);
 	});
 
-	it("spawns a configured child and reports its answer once", async () => {
+	it("hires a configured executor through the HR manager and reports its answer once", async () => {
 		await chat.send({ text: "subagent", requestId: "spawn" }, BACKGROUND_CONTEXT);
 		const view = await until(chat.view, (value) =>
 			texts(value).some(
 				(text) => text.startsWith("[answered, no reply needed]") && text.includes("Echo: hello helper"),
 			),
 		);
-		const spawned = result(view, "spawn");
-		assert.equal(spawned?.isError, false);
+		// The first work goes out with `send` (the fake main agent's follow-up to the HR manager's report).
+		const sent = result(view, "send");
+		assert.equal(sent?.isError, false);
 		assert.deepEqual(
-			{ ...(spawned?.details as object), conversationId: undefined },
+			{ ...(sent?.details as object), conversationId: undefined },
 			{
-				action: "spawn",
+				action: "send",
 				name: "helper",
 				conversationId: undefined,
 				model: "faux/faux-1",
 				thinkingLevel: "off",
 				tools: ["read"],
+				role: "executor",
+				// The previous test's request to the HR manager was #1, this test's #2, the first work #3.
+				delegation: 3,
 			},
 		);
-		const listed = await until(children.children, (value) => value?.[session]?.length === 1);
-		child = listed![session]![0]!;
-		assert.equal(child.name, "helper");
+		const listed = await until(
+			children.children,
+			(value) => value?.[session]?.some((each) => each.name === "helper") === true,
+		);
+		child = listed![session]!.find((each) => each.name === "helper")!;
 		assert.ok(child.conversationId > 1);
+		assert.equal(child.role, "executor");
+		assert.equal(child.manager, undefined);
 		await chat.send({ text: "subagent-answer", requestId: "answer" }, BACKGROUND_CONTEXT);
 		const answered = await until(chat.view, (value) => Boolean(result(value, "answer")));
 		assert.deepEqual(result(answered, "answer")?.content, [{ type: "text", text: "Echo: hello helper" }]);
-		assert.equal(texts(answered).filter((text) => text.startsWith("[answered, no reply needed]")).length, 1);
+		const reports = texts(answered).filter(
+			(text) => text.startsWith("[answered, no reply needed]") && text.includes("Echo: hello helper"),
+		);
+		assert.equal(reports.length, 1);
 	});
 
-	it("configures tools and opens a child's independent transcript", async () => {
+	it("configures through the HR manager and opens a child's independent transcript", async () => {
 		await chat.send({ text: "subagent-configure", requestId: "configure" }, BACKGROUND_CONTEXT);
-		await until(children.children, (value) => value?.[session]?.[0]?.tools.join() === "bash,artifact");
+		await until(children.children, (value) => helper(value)?.tools.join() === "bash,artifact");
 		const sub = await holdIn(owner, Chat, { session, conversation: child.conversationId }, "participant");
 		const view = await until(sub.view, (value) => texts(value).includes("Echo: hello helper"));
 		// The sidebar lists the chosen tools; the agent also has `team` (`scope: "subagent"`), offered from the start.
 		const agent = view?.docs["pi.agent"] as { tools: string[]; modelTools: { add: string[] } };
 		assert.deepEqual(agent.tools, ["bash", "artifact", "team"]);
 		assert.deepEqual(agent.modelTools.add, ["team"]);
-		await sub.configure({ model: { provider: "faux", modelId: "faux-1" }, thinkingLevel: "off" }, BACKGROUND_CONTEXT);
-		await until(children.children, (value) => value?.[session]?.[0]?.thinkingLevel === "off");
-		await sub.send({ text: "direct child message", requestId: "direct" }, BACKGROUND_CONTEXT);
-		await until(sub.view, (value) => texts(value).includes("Echo: direct child message"));
-		const root = await until(chat.view, (value) => !(value?.docs["pi.live"] as { run?: unknown })?.run);
-		assert.ok(!texts(root).includes("Echo: direct child message"), "direct child prompts do not auto-report");
+		// The main agent is the team's only entry: a member takes no message or configuration from the browser.
+		await assert.rejects(
+			sub.configure({ model: { provider: "faux", modelId: "faux-1" }, thinkingLevel: "off" }, BACKGROUND_CONTEXT),
+			/Team members take no direct messages/,
+		);
+		await assert.rejects(
+			sub.send({ text: "direct child message", requestId: "direct" }, BACKGROUND_CONTEXT),
+			/Team members take no direct messages/,
+		);
 		sub.release();
 		const missing = owner.hold(Chat, { session, conversation: 999 }, BACKGROUND_CONTEXT);
 		// A failed open leaves its holders waiting (the conversation may appear): the failure names the cause.
@@ -117,44 +159,53 @@ describe("subagents (fake provider)", () => {
 		missing.release();
 	});
 
-	it("archives through the tool (hidden from status) and restores from the browser", async () => {
-		await chat.send({ text: "subagent-archive", requestId: "archive" }, BACKGROUND_CONTEXT);
-		await until(children.children, (value) => value?.[session]?.[0]?.archived === true);
+	it("archives and restores through the HR manager (hidden from status); the browser cannot", async () => {
+		// The previous test's answer of the helper is reported first.
+		await until(chat.view, (view) => texts(view).some((text) => text.includes("Echo: hello helper")));
+		await mainIdle();
+		await askHr("subagent-archive", "archive");
+		await until(children.children, (value) => helper(value)?.archived === true);
 		await chat.send({ text: "subagent-status", requestId: "status" }, BACKGROUND_CONTEXT);
 		const view = await until(chat.view, (value) => Boolean(result(value, "status")));
-		assert.deepEqual(result(view, "status")?.content, [
-			{ type: "text", text: "1 archived (status with a name shows one)." },
-		]);
+		const roster = (result(view, "status")?.content[0] as { text: string }).text;
+		assert.ok(roster.includes("1 archived (status with a name shows one)."), roster);
+		assert.ok(!roster.includes("helper:"), "an archived member is listed only by name");
+		await mainIdle();
+		await askHr("subagent-restore", "restore");
+		await until(children.children, (value) => helper(value)?.archived === undefined);
+		// The browser archives nothing: the main agent asks the HR manager.
 		const control = owner.hold(SubagentControl, { session }, BACKGROUND_CONTEXT);
-		// The worker pushes the sidebar's flag to the server before it answers: the server's index has it then.
-		const store = fixture.server.host.hold(ChildStore, {}, BACKGROUND_CONTEXT);
-		await whenLive(store);
-		await control.archive({ conversation: child.conversationId, archived: false }, BACKGROUND_CONTEXT);
-		assert.equal(store.children.value[session]?.[0]?.archived, undefined, "pushed before the answer");
-		store.release();
-		await until(children.children, (value) => value?.[session]?.[0]?.archived === undefined);
 		await assert.rejects(
-			control.archive({ conversation: 999, archived: true }, BACKGROUND_CONTEXT),
-			/Unknown conversation/,
+			control.archive({ conversation: child.conversationId, archived: true }, BACKGROUND_CONTEXT),
+			/Ask the main agent/,
 		);
-		// Archiving from the browser stops the child's work first.
+		control.release();
+		// Archiving stops the child's work first.
 		const sub = await holdIn(owner, Chat, { session, conversation: child.conversationId }, "participant");
-		await sub.send({ text: "slow archived", requestId: "slow-archived" }, BACKGROUND_CONTEXT);
+		const work = { action: "send", name: "helper", message: "slow archived" };
+		await chat.send({ text: `subagent ${JSON.stringify(work)}`, requestId: "slow-archived" }, BACKGROUND_CONTEXT);
 		await until(status.statuses, (value) => value?.[session]?.busy.includes(child.conversationId) === true);
-		await control.archive({ conversation: child.conversationId, archived: true }, BACKGROUND_CONTEXT);
+		await mainIdle();
+		await askHr("subagent-archive", "archive-busy");
 		await until(status.statuses, (value) => value?.[session]?.busy.includes(child.conversationId) === false);
-		await until(children.children, (value) => value?.[session]?.[0]?.archived === true);
+		await until(children.children, (value) => helper(value)?.archived === true);
 		// Sending to it again brings it back.
 		await chat.send({ text: "subagent-send", requestId: "send-archived" }, BACKGROUND_CONTEXT);
-		await until(children.children, (value) => value?.[session]?.[0]?.archived === undefined);
-		await until(sub.view, (value) => texts(value).includes("Echo: hello again"));
+		await until(children.children, (value) => helper(value)?.archived === undefined);
+		// The archive stopped its slow work: that is told once, in front of the next message.
+		await until(sub.view, (value) =>
+			texts(value).some((text) => text.startsWith("Echo: Your last work") && text.endsWith("hello again")),
+		);
+		// Its answer is reported, and the main agent's turn on it ended, before the next test sends.
+		await until(chat.view, (view) => texts(view).some((text) => text.includes("hello again")));
+		await mainIdle();
 		sub.release();
-		control.release();
 	});
 
 	it("keeps child work alive through main Stop and compatible reload", async () => {
 		const sub = await holdIn(owner, Chat, { session, conversation: child.conversationId }, "participant");
-		await sub.send({ text: "slow child", requestId: "slow" }, BACKGROUND_CONTEXT);
+		const work = { action: "send", name: "helper", message: "slow child" };
+		await chat.send({ text: `subagent ${JSON.stringify(work)}`, requestId: "slow" }, BACKGROUND_CONTEXT);
 		await until(status.statuses, (value) => value?.[session]?.busy.includes(child.conversationId) === true);
 		await chat.stop(BACKGROUND_CONTEXT);
 		await fixture.server.reload(["subagents"]);
@@ -166,8 +217,8 @@ describe("subagents (fake provider)", () => {
 		chat.release();
 		// The released Chats linger 30 s on the worker, which keeps it alive (Chord's activity counts lingering objects).
 		await until(status.statuses, (value) => value?.[session]?.running === false, 60_000);
-		const listed = await until(children.children, (value) => value?.[session]?.[0]?.lastEntryId !== undefined);
-		assert.equal(listed?.[session]?.[0]?.name, "helper");
+		const listed = await until(children.children, (value) => helper(value)?.lastEntryId !== undefined);
+		assert.equal(helper(listed)?.name, "helper");
 		chat = await holdIn(owner, Chat, { session, conversation: 1 }, "participant");
 		await until(chat.view, (view) => texts(view).some((text) => text.startsWith("[answered, no reply needed]")));
 		await chat.send({ text: "subagent-answer", requestId: "answer-again" }, BACKGROUND_CONTEXT);
@@ -187,7 +238,7 @@ describe("subagents (fake provider)", () => {
 			const client = fixture.browser();
 			const list = await holdIn(client, Subagents, {}, "reader");
 			const value = await until(list.children, (value) => Boolean(value?.[session]?.length));
-			assert.equal(value?.[session]?.[0]?.name, "helper");
+			assert.equal(helper(value)?.name, "helper");
 			const statuses = await until(
 				(await holdIn(client, SessionStatus, {}, "reader")).statuses,
 				(value) => value !== undefined,
@@ -219,46 +270,66 @@ describe("a subagent spawned with its own cwd (fake provider)", () => {
 			.id;
 		const chat = await holdIn(owner, Chat, { session, conversation: 1 }, "participant");
 		const children = await holdIn(owner, Subagents, {}, "reader");
-		const spawn = (args: object, requestId: string) =>
-			chat.send({ text: `subagent ${JSON.stringify(args)}`, requestId }, BACKGROUND_CONTEXT);
+		// The HR manager places members (its calls and their results are in its own conversation).
+		const staff = (args: object, requestId: string) =>
+			chat.send(
+				{
+					text: `subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(args)}` })}`,
+					requestId,
+				},
+				BACKGROUND_CONTEXT,
+			);
+		const member = { role: "executor", duty: "helps" };
+		let hr: RefIn<typeof Chat, "participant"> | undefined;
+		const hrView = async () => {
+			if (hr) return hr;
+			const listed = await until(
+				children.children,
+				(value) => value?.[session]?.some((each) => each.role === "hr") === true,
+			);
+			const found = listed![session]!.find((each) => each.role === "hr")!;
+			hr = await holdIn(owner, Chat, { session, conversation: found.conversationId }, "participant");
+			return hr;
+		};
 
-		// A missing directory fails the spawn and creates nothing; only spawn takes a cwd.
-		await spawn({ action: "spawn", name: "bad", message: "x", cwd: "missing" }, "missing");
-		await until(chat.view, (view) =>
+		// A missing directory fails the hire and creates nothing.
+		await staff({ action: "hire", name: "bad", ...member, cwd: "missing" }, "missing");
+		await until((await hrView()).view, (view) =>
 			texts(view).some((text) => text.includes("cwd missing is not an existing directory")),
 		);
-		await spawn({ action: "spawn", name: "file", message: "x", cwd: "worktree/marker.txt" }, "file");
-		await until(chat.view, (view) =>
+		await staff({ action: "hire", name: "file", ...member, cwd: "worktree/marker.txt" }, "file");
+		await until((await hrView()).view, (view) =>
 			texts(view).some((text) => text.includes("cwd worktree/marker.txt is not an existing directory")),
 		);
-		assert.deepEqual((await until(children.children, (value) => value !== undefined))?.[session] ?? [], []);
-
-		// A relative cwd resolves against the caller's.
-		await spawn({ action: "spawn", name: "wt", message: "bash", cwd: "worktree", tools: ["bash"] }, "spawn");
-		const view = await until(
-			chat.view,
-			(value) => texts(value).includes('<sender kind="subagent" name="wt"/>'),
-			20_000,
+		assert.deepEqual(
+			(await until(children.children, (value) => value !== undefined))?.[session]?.map((each) => each.name),
+			["hr"],
 		);
-		assert.equal((result(view, "spawn")?.details as { cwd?: string }).cwd, join(project, "worktree"));
-		const listed = await until(children.children, (value) => Boolean(value?.[session]?.length));
-		const agent = listed?.[session]?.[0];
-		assert(agent);
+
+		// A relative cwd resolves against the session's (the HR manager follows it).
+		const agent = await hire(chat, children, session, {
+			name: "wt",
+			cwd: "worktree",
+			tools: ["bash"],
+			message: "bash",
+		});
 		assert.deepEqual(
 			agent.location,
 			{ cwd: join(project, "worktree"), env: null },
 			"the sidebar listing carries the subagent's own location",
 		);
-		// Only spawn and configure take a location; configure places it again (here where it is).
-		await spawn({ action: "send", name: "wt", message: "x", cwd: "worktree" }, "send-cwd");
-		await until(chat.view, (value) => texts(value).includes("Only spawn and configure take a location."));
-		await spawn({ action: "configure", name: "wt", tools: ["bash"], cwd: "worktree" }, "configure");
-		await until(chat.view, (value) => texts(value).includes("Configured wt."));
-		await spawn({ action: "status" }, "status");
+		// Only the HR manager places a member; configure places it again (here where it is).
+		await staff({ action: "configure", name: "wt", tools: ["bash"], cwd: "worktree" }, "configure");
+		await until((await hrView()).view, (value) => texts(value).includes("Configured wt."));
+		await chat.send(
+			{ text: `subagent ${JSON.stringify({ action: "status" })}`, requestId: "status" },
+			BACKGROUND_CONTEXT,
+		);
 		const status = await until(chat.view, (value) => Boolean(result(value, "status")));
-		assert.match(
-			(result(status, "status")?.content[0] as { text: string }).text,
-			new RegExp(`· in ${join(project, "worktree")}$`),
+		assert.ok(
+			(result(status, "status")?.content[0] as { text: string }).text.includes(
+				` · in ${join(project, "worktree")} · helps`,
+			),
 		);
 
 		// Its bash ran in the worktree.
@@ -293,6 +364,7 @@ describe("a subagent spawned with its own cwd (fake provider)", () => {
 		);
 		assert.equal(upload.status, 200, upload.body);
 		assert.equal(await readFile(join(project, "worktree", "up.txt"), "utf8"), "uploaded");
+		hr?.release();
 		chat.release();
 		children.release();
 	});
@@ -313,6 +385,33 @@ describe("subagents with code mode (fake provider)", () => {
 			BACKGROUND_CONTEXT,
 		);
 		return results(await until(chat.view, (view) => results(view).length > count)).at(-1)!;
+	};
+	let hr: RefIn<typeof Chat, "participant"> | undefined;
+	const staffResults = (view: ConversationView | null | undefined) =>
+		(view?.entries ?? [])
+			.flatMap((entry) => entry.model ?? [])
+			.filter(
+				(message): message is ToolResultMessage => message.role === "toolResult" && message.toolName === "staff",
+			);
+	/** Has the HR manager run `staff <args>` (the main agent asks it to) and returns that call's result. */
+	const staff = async (args: object): Promise<ToolResultMessage> => {
+		const count = staffResults(hr?.view.value).length;
+		await chat.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(args)}` })}`,
+				requestId: `codemode-${++sent}`,
+			},
+			BACKGROUND_CONTEXT,
+		);
+		if (!hr) {
+			const listed = await until(
+				children.children,
+				(value) => value?.[session]?.some((each) => each.role === "hr") === true,
+			);
+			const found = listed![session]!.find((each) => each.role === "hr")!;
+			hr = await holdIn(owner, Chat, { session, conversation: found.conversationId }, "participant");
+		}
+		return staffResults(await until(hr.view, (view) => staffResults(view).length > count)).at(-1)!;
 	};
 	/** Waits until `name`'s answer was reported and the main agent's turn on it ended, so it cannot race a later send. */
 	const reported = (name: string) =>
@@ -371,22 +470,20 @@ describe("subagents with code mode (fake provider)", () => {
 		children = await holdIn(owner, Subagents, {}, "reader");
 	});
 	after(async () => {
+		hr?.release();
 		await fixture?.close();
 	});
 
 	it("validates tools against the caller's own, session-level ones excluded", async () => {
-		const bad = await subagent({ action: "spawn", name: "bad", message: "x", tools: ["codemode", "bogus"] });
+		const member = { action: "hire", role: "executor", duty: "helps" };
+		const bad = await staff({ ...member, name: "bad", tools: ["codemode", "bogus"] });
 		assert.equal(bad.isError, true);
-		assert.match(text(bad), /^Unknown tools: bogus\. Choose from your own tools: .*\bcodemode\b/);
-		const main = await subagent({
-			action: "spawn",
-			name: "bad",
-			message: "x",
-			tools: ["subagent", "rename_session"],
-		});
+		assert.match(text(bad), /^Unknown tools: bogus\. Choose from the main agent's tools: .*\bcodemode\b/);
+		const main = await staff({ ...member, name: "bad", tools: ["subagent", "rename_session"] });
 		assert.match(text(main), /^Unknown tools: subagent, rename_session\. /);
-		const chosen = await subagent({ action: "spawn", name: "chosen", message: "x", tools: ["bash", "codemode"] });
+		const chosen = await staff({ ...member, name: "chosen", tools: ["bash", "codemode"] });
 		assert.deepEqual((chosen.details as { tools?: string[] }).tools, ["bash", "codemode"]);
+		await subagent({ action: "send", name: "chosen", message: "x" });
 		await reported("chosen");
 	});
 
@@ -401,12 +498,13 @@ describe("subagents with code mode (fake provider)", () => {
 			'try { await tools.agent({ prompt: "x", schema: {}, tools: ["subagent"] }); } catch (error) { refused = String(error.message ?? error); }',
 			"return { read, answer, nested, refused };",
 		].join("\n");
-		const spawned = await subagent({ action: "spawn", name: "coder", message: `codemode ${script}` });
-		assert.equal(spawned.isError, false, text(spawned));
-		const given = (spawned.details as { tools?: string[] }).tools ?? [];
+		const hired = await staff({ action: "hire", name: "coder", role: "executor", duty: "writes scripts" });
+		assert.equal(hired.isError, false, text(hired));
+		const given = (hired.details as { tools?: string[] }).tools ?? [];
 		for (const each of ["read", "bash", "codemode", "history_search", "location_move"])
 			assert.ok(given.includes(each), each);
 		for (const each of ["subagent", "rename_session", "team", "agent"]) assert.ok(!given.includes(each), each);
+		await subagent({ action: "send", name: "coder", message: `codemode ${script}` });
 		const listed = await until(children.children, (value) =>
 			Boolean(value?.[session]?.some((each) => each.name === "coder")),
 		);
@@ -479,10 +577,11 @@ describe("subagents with code mode (fake provider)", () => {
 	it("leaves code mode out while the codemode setting is off, and refuses choosing it", async () => {
 		await writeFile(join(fixture.dataDir, "settings.json"), JSON.stringify({ codemode: false }));
 		await settle((view) => sections(view).codemode === undefined);
-		const refused = await subagent({ action: "spawn", name: "off", message: "x", tools: ["codemode"] });
+		const member = { action: "hire", role: "executor", duty: "helps" };
+		const refused = await staff({ ...member, name: "off", tools: ["codemode"] });
 		assert.equal(refused.isError, true);
-		assert.match(text(refused), /^Unknown tools: codemode\. Choose from your own tools: /);
-		const plain = await subagent({ action: "spawn", name: "plain", message: "x" });
+		assert.match(text(refused), /^Unknown tools: codemode\. Choose from the main agent's tools: /);
+		const plain = await staff({ ...member, name: "plain" });
 		const given = (plain.details as { tools?: string[] }).tools ?? [];
 		assert.ok(given.includes("read") && !given.includes("codemode"), given.join());
 	});

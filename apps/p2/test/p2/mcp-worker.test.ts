@@ -123,17 +123,17 @@ test(
 		);
 		assert.notEqual(after[0]!.id, instance!.id);
 		assert.equal(await echo("there"), "echo: there");
-		// A subagent spawned with its own cwd (a commit of the subagent registry): its location is leased too, until it is
-		// archived.
+		// A member hired with its own cwd (a commit of the subagent registry): its location is leased too, until it is
+		// archived. The HR manager hires and archives.
 		const own = join(moved, "own");
 		mkdirSync(own);
-		await call(
-			`subagent ${JSON.stringify({ action: "spawn", name: "own", message: "hi", cwd: "own", tools: ["bash"] })}`,
-		);
+		const staff = (args: object) =>
+			call(`subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(args)}` })}`);
+		await staff({ action: "hire", name: "own", role: "executor", duty: "helps", cwd: "own", tools: ["bash"] });
 		await until(mcp.instances, (instances) =>
 			instances.some((item) => item.location?.cwd === own && item.status === "connected"),
 		);
-		await call(`subagent ${JSON.stringify({ action: "archive", name: "own" })}`);
+		await staff({ action: "archive", name: "own" });
 		await until(mcp.instances, (instances) => instances.length === 1 && instances[0]!.location?.cwd === moved);
 		// Code mode off: as pi falls back, `tool_search` loads the tools and the model calls them. The worker's settings
 		// observer is asynchronous: turns go until one runs with `tool_search` installed.

@@ -20,6 +20,9 @@ import {
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { NativeWatchable, Watchable } from "@earendil-works/chord/watch";
 import { WebSocket as NodeWebSocket } from "ws";
+import type { Chat } from "../../plugins/chat/contract.ts";
+import type { FakeHire } from "../../plugins/models/fake.ts";
+import type { Child, Subagents } from "../../plugins/subagents/contract.ts";
 import type { WebManifest } from "../../src/hosts/bundles.ts";
 import { type P2Server, type ServerOptions, startServer } from "../../src/hosts/server.ts";
 import { WEB_MANIFEST_PATH } from "../../src/hosts/web.ts";
@@ -33,6 +36,7 @@ import {
 	type Host,
 	type HostError,
 	hostErrorText,
+	type RefIn,
 	type Self,
 	Server,
 	serveNative,
@@ -595,4 +599,71 @@ export async function webBundle(port: number, headers: Record<string, string> = 
 	const response = await http(port, WEB_MANIFEST_PATH, { headers });
 	assert.equal(response.status, 200, response.body);
 	return JSON.parse(response.body) as WebManifest;
+}
+
+const REPORT = "[answered, no reply needed]";
+let hires = 0;
+
+type TextView = { entries?: readonly { model?: readonly { content: unknown }[] }[] } | null | undefined;
+
+/** The text of every message in a conversation view. */
+export function textsOf(view: TextView): string[] {
+	return (view?.entries ?? []).flatMap((entry) =>
+		(entry.model ?? []).flatMap((message) =>
+			typeof message.content === "string"
+				? [message.content]
+				: (message.content as { type: string; text?: string }[]).flatMap((part) =>
+						part.type === "text" && part.text !== undefined ? [part.text] : [],
+					),
+		),
+	);
+}
+
+/**
+ * The main agent has the HR manager hire `member` (what `staff hire` takes; an executor with duty "helps" unless said
+ * otherwise) and waits until the HR manager reported and the member is listed. With `message` it then gives the member
+ * that work and waits for the member's answer to be reported.
+ */
+export async function hire(
+	chat: RefIn<typeof Chat, "participant">,
+	children: RefIn<typeof Subagents, "reader">,
+	session: string,
+	member: Omit<FakeHire, "greet"> & { message?: string },
+): Promise<Child> {
+	const { message, ...call } = member;
+	const id = ++hires;
+	const staff = { action: "hire", role: "executor", duty: "helps", ...call };
+	// The fake provider answers only a turn's last message: a message joining a report's turn would go unanswered.
+	const idle = () => until(chat.view, (view) => !(view?.docs["pi.live"] as { run?: unknown } | undefined)?.run);
+	await idle();
+	await chat.send(
+		{
+			text: `subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(staff)}` })}`,
+			requestId: `hire-${id}`,
+		},
+		BACKGROUND_CONTEXT,
+	);
+	const named = `"name":${JSON.stringify(call.name)}`;
+	await until(chat.view, (view) =>
+		textsOf(view).some((text) => text.startsWith(REPORT) && text.includes("Echo: staff ") && text.includes(named)),
+	);
+	const listed = await until(
+		children.children,
+		(value) => value?.[session]?.some((each) => each.name === call.name) === true,
+	);
+	const child = listed![session]!.find((each) => each.name === call.name)!;
+	await idle();
+	if (message !== undefined) {
+		await chat.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "send", name: call.name, message })}`,
+				requestId: `hire-send-${id}`,
+			},
+			BACKGROUND_CONTEXT,
+		);
+		await until(chat.view, (view) =>
+			textsOf(view).some((text) => text.startsWith(REPORT) && text.includes(`Echo: ${message}`)),
+		);
+	}
+	return child;
 }

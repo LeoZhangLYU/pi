@@ -237,14 +237,29 @@ describe("conversations (fake provider)", () => {
 		ingress.release();
 		await a.send({ text: "subagent", requestId: "child" }, BACKGROUND_CONTEXT);
 		const childList = await holdIn(owner, Subagents, {}, "reader");
-		const children = await until(childList.children, (value) => Boolean(value?.[alpha]?.length));
+		const children = await until(
+			childList.children,
+			(value) => value?.[alpha]?.some((each) => each.name === "helper") === true,
+		);
 		const child = await holdIn(
 			owner,
 			Chat,
-			{ session: alpha, conversation: children![alpha]![0]!.conversationId },
+			{ session: alpha, conversation: children![alpha]!.find((each) => each.name === "helper")!.conversationId },
 			"participant",
 		);
-		const result = await call(child, { action: "list" });
+		// A member takes no direct message: the main agent gives it the work, and its own transcript holds the result.
+		await a.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "send", name: "helper", message: `conversations ${JSON.stringify({ action: "list" })}` })}`,
+				requestId: "child-conversations",
+			},
+			BACKGROUND_CONTEXT,
+		);
+		const view = await until(
+			child.view,
+			(value) => results(value).length > 0 && !(value?.docs["pi.live"] as { run?: unknown })?.run,
+		);
+		const result = results(view).at(-1)!;
 		assert.equal(result.isError, true);
 		assert.match(text(result), /not available/);
 		child.release();

@@ -86,19 +86,33 @@ describe("tools given to agents", () => {
 		tool("subagent", { scope: "main" }),
 		tool("rename_session", { scope: "main" }),
 		tool("team", { deferred: true, scope: "subagent" }),
+		tool("staff", { deferred: true, scope: "hr" }),
+		tool("delegate", { deferred: true, scope: "manager" }),
 	];
 	const access = new Map(registered.map((each) => [each.name, each]));
 	const pick = (...names: string[]) => registered.filter((each) => names.includes(each.name));
-	// The main agent: its model is offered these, `powershell` and `team` are deferred, scripts call the rest.
+	// The main agent: its model is offered these, `powershell` and the members' own tools are deferred, scripts call the
+	// rest.
 	const caller = {
 		tools: pick("read", "bash", "codemode", "subagent", "rename_session"),
-		deferred: pick("powershell", "team"),
-		callable: pick("read", "bash", "agent", "mcp__files__echo", "subagent", "rename_session", "powershell", "team"),
+		deferred: pick("powershell", "team", "staff", "delegate"),
+		callable: pick(
+			"read",
+			"bash",
+			"agent",
+			"mcp__files__echo",
+			"subagent",
+			"rename_session",
+			"powershell",
+			"team",
+			"staff",
+			"delegate",
+		),
 	};
 	const names = (tools: readonly ToolRegistration[]) => tools.map((each) => each.name);
 
 	it("gives a subagent every tool its caller may give by default, with the script-only ones and team", () => {
-		const choice = resolveTools(caller, access, undefined, [], "subagent");
+		const choice = resolveTools(caller, access, undefined, [], "executor");
 		assert(typeof choice !== "string");
 		assert.deepEqual(choice.chosen, ["read", "bash", "codemode", "powershell"]);
 		assert.deepEqual(names(choice.tools), [
@@ -123,13 +137,30 @@ describe("tools given to agents", () => {
 		assert.deepEqual(names(choice.loaded), ["powershell"]);
 	});
 
-	it("refuses session-level, subagent-only, script-only and unknown tools", () => {
-		for (const name of ["subagent", "rename_session", "team", "agent", "bogus"]) {
-			const refused = resolveTools(caller, access, ["read", name], [], "subagent");
+	it("gives each role its own tools: the HR manager staff, a manager delegate, an executor neither", () => {
+		const own = (kind: "hr" | "manager" | "executor") => {
+			const choice = resolveTools(caller, access, [], [], kind);
+			assert(typeof choice !== "string");
+			return { tools: names(choice.tools), loaded: names(choice.loaded) };
+		};
+		assert.deepEqual(own("hr"), { tools: ["team", "staff"], loaded: ["team", "staff"] });
+		assert.deepEqual(own("manager"), { tools: ["team", "delegate"], loaded: ["team", "delegate"] });
+		assert.deepEqual(own("executor"), { tools: ["team"], loaded: ["team"] });
+		// Code mode never brings a role's tools along with the script-only ones.
+		const coder = resolveTools(caller, access, ["codemode"], [], "executor");
+		assert(typeof coder !== "string");
+		assert.deepEqual(names(coder.tools), ["codemode", "agent", "mcp__files__echo", "team"]);
+	});
+
+	it("refuses session-level, member-only, script-only and unknown tools", () => {
+		for (const name of ["subagent", "rename_session", "team", "staff", "delegate", "agent", "bogus"]) {
+			const refused = resolveTools(caller, access, ["read", name], [], "executor");
 			assert.equal(typeof refused, "string", name);
 			assert.match(
 				refused as string,
-				new RegExp(`^Unknown tools: ${name}\\. Choose from your own tools: read, bash, codemode, powershell\\.$`),
+				new RegExp(
+					`^Unknown tools: ${name}\\. Choose from the main agent's tools: read, bash, codemode, powershell\\.$`,
+				),
 			);
 		}
 	});

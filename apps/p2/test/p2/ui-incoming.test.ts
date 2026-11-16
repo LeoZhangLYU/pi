@@ -180,11 +180,16 @@ describe("incoming messages", { skip: !browserTests }, () => {
 		const b = await holdIn(owner, Chat, { session: beta, conversation: 1 }, "participant");
 		const list = await holdIn(owner, Subagents, {}, "reader");
 		await a.send({ text: "subagent", requestId: "spawn" }, BACKGROUND_CONTEXT);
-		const children = await until(list.children, (value) => value?.[alpha]?.length === 1);
-		const helper = children![alpha]![0]!;
+		const children = await until(
+			list.children,
+			(value) => value?.[alpha]?.some((each) => each.name === "helper") === true,
+		);
+		const helper = children![alpha]!.find((each) => each.name === "helper")!;
+		// The HR manager's report comes first: wait for the helper's.
 		await until(
 			a.view,
-			(view) => !live(view)?.run && JSON.stringify(view).includes("Echo: [answered, no reply needed]"),
+			(view) =>
+				!live(view)?.run && JSON.stringify(view).includes("Echo: [answered, no reply needed] Echo: hello helper"),
 			30_000,
 		);
 		await a.send(
@@ -201,16 +206,22 @@ describe("incoming messages", { skip: !browserTests }, () => {
 
 		// The subagent's answer in the main conversation.
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${alpha}`);
-		await browser.wait(
-			"document.querySelector('[data-from=agent] button.incoming-from') && !document.querySelector('.offline')",
-		);
+		// The HR manager's report is an agent message too: mark the helper's.
+		const mark = `(() => {
+			const found = [...document.querySelectorAll('[data-from=agent]')].find((each) =>
+				each.querySelector('.incoming-line')?.textContent.startsWith('helper ·'),
+			);
+			found?.setAttribute('data-test-helper', '');
+			return Boolean(found);
+		})()`;
+		await browser.wait(`${mark} && !document.querySelector('.offline')`);
 		assert.match(
-			await browser.evaluate<string>("document.querySelector('[data-from=agent] .incoming-line').textContent"),
+			await browser.evaluate<string>("document.querySelector('[data-test-helper] .incoming-line').textContent"),
 			/^helper · answered · /,
 		);
 		// The turns after it may have scrolled it under the header.
-		await browser.evaluate(`document.querySelector('[data-from=agent]').scrollIntoView({ block: "center" })`);
-		await browser.click("[data-from=agent] button.incoming-from");
+		await browser.evaluate(`document.querySelector('[data-test-helper]').scrollIntoView({ block: "center" })`);
+		await browser.click("[data-test-helper] button.incoming-from");
 		await browser.wait(`location.pathname==='/s/${alpha}/c/${helper.conversationId}'`);
 		await browser.evaluate("history.back()");
 		await browser.wait(`location.pathname==='/s/${alpha}' && document.querySelector('[data-from=agent]')`);

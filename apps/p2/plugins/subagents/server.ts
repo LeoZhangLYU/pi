@@ -1,13 +1,35 @@
 import { chmodSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { contribute, defineFacet, deriveTyped, forbidden, isOwner, isWorker } from "@p2/app/v1";
+import { type AcceptsTable, contribute, defineFacet, deriveTyped, forbidden, isOwner, isWorker } from "@p2/app/v1";
 import { Hosts, Server, WorkerInitValues } from "@p2/app/v1/server";
 import { Catalog, type Session } from "../sessions/contract.ts";
 import { type Child, ChildStore, Subagents } from "./contract.ts";
 
 /** A child as an older version stored it: its own cwd without the environment. */
 type StoredChild = Child & { cwd?: string };
+
+/**
+ * Pages and workers built with version 2 of `Subagents`, before team roles: a page reads the children without role,
+ * manager and duty (every member is a plain subagent to it), and a worker's report, which has none, is taken as it is
+ * (a member without a role is a direct executor).
+ */
+const SUBAGENTS_ACCEPTS: AcceptsTable<typeof Subagents> = {
+	2: {
+		state: {
+			reader: {
+				children: (bySession) =>
+					Object.fromEntries(
+						Object.entries(bySession).map(([session, children]) => [
+							session,
+							children.map(({ role: _role, manager: _manager, duty: _duty, ...child }) => child),
+						]),
+					),
+			},
+		},
+		methods: { report: { args: (old) => old } },
+	},
+};
 
 /**
  * A stored child in the current form: an own cwd stored before locations existed is on the session's environment (a
@@ -81,16 +103,20 @@ export default defineFacet((host) => {
 		});
 	});
 
-	host.serve(Subagents, (_params, principal, self) => {
-		const store = self.get(ChildStore, {});
-		if (isWorker(principal)) {
-			const { session, generation } = principal;
-			return {
-				variant: "reporter",
-				members: { report: ({ children }, ctx) => store.report({ session, generation, children }, ctx) },
-			};
-		}
-		if (!isOwner(principal)) throw forbidden("owners only");
-		return { variant: "reader", members: { children: store.children } };
-	});
+	host.serve(
+		Subagents,
+		(_params, principal, self) => {
+			const store = self.get(ChildStore, {});
+			if (isWorker(principal)) {
+				const { session, generation } = principal;
+				return {
+					variant: "reporter",
+					members: { report: ({ children }, ctx) => store.report({ session, generation, children }, ctx) },
+				};
+			}
+			if (!isOwner(principal)) throw forbidden("owners only");
+			return { variant: "reader", members: { children: store.children } };
+		},
+		{ accepts: SUBAGENTS_ACCEPTS },
+	);
 });

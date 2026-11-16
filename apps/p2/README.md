@@ -198,6 +198,35 @@ after ~50-80 ms on slayer), Supertonic and Kokoro send a chunk per sentence (~0.
 compose up -d`, token in `.env`); rebuild with `docker build -t p2-voice apps/p2/voice-server`. Browsers never reach
 it directly: p2 proxies `/voice/listen` (WebSocket) and `/voice/speak` for the signed-in owner.
 
+### Team
+
+The main agent works with a team of agents that run in the background, in three layers:
+
+| Role | Created by | Gets work from | Messages with `team` | Own tool |
+| --- | --- | --- | --- | --- |
+| Main agent | | you | | `subagent`: hire, send, stop, answer, status |
+| HR manager (`hr`) | p2, at the first `subagent hire` | the main agent only | the main agent | `staff`: hire, configure, assign, archive, restore, roster, models |
+| Manager | the HR manager | the main agent | the main agent, other managers | `delegate`: send, stop, answer, status (its own executors only) |
+| Executor in a team | the HR manager, with a manager | its manager | its manager, its teammates | |
+| Direct executor | the HR manager, without a manager | the main agent | the main agent, other direct executors | |
+
+The main agent is the team's only entry: you talk to it, and the members have no conversation of their own in the UI.
+The Team panel shows the members and the work given out; to staff, stop or archive a member, ask the main agent,
+which asks the HR manager. Subagents from before the team are direct executors and keep working as they did.
+
+Every piece of work given to a member is a delegation: working, then done, failed or stopped. A manager's answer is
+reported to whoever gave it the work only once all the work it gave its executors has ended; until then its
+delegation is waiting for its team. Every stop goes through one flow (`subagent stop`, `delegate stop`, the HR manager
+archiving, the Stop button in a member's conversation): it stops the member (a manager's executors with it), confirms
+nothing runs or waits in them, and tells whoever gave the stopped work so it can hand it out again or change its plan.
+The member is told at its next work that its last work was stopped. Plugins can add their own handlers for stopped
+work (`DelegationStopped` in `plugins/subagents/contract.worker.ts`).
+
+The sidebar lists the session; the header's team button opens the Team panel: the members, who is working, and the
+work given out with its state.
+
+Code mode's one-shot agents (`tools.agent` in a script) are not members: they belong to the script that started them.
+
 ## Tests
 
 ```sh

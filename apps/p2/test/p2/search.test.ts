@@ -124,13 +124,42 @@ describe("search (fake provider)", () => {
 		const chat = await chatOf(other.id);
 		await chat.send({ text: "subagent", requestId: "child" }, BACKGROUND_CONTEXT);
 		const children = await holdIn(owner, Subagents, {}, "reader");
-		const listed = await until(children.children, (value) => Boolean(value?.[other.id]?.length));
-		const id = listed![other.id]![0]!.conversationId;
+		const listed = await until(
+			children.children,
+			(value) => value?.[other.id]?.some((each) => each.name === "helper") === true,
+		);
+		const id = listed![other.id]!.find((each) => each.name === "helper")!.conversationId;
 		await found("hello helper", (value) => value.messages.some((hit) => hit.conversationId === id));
 		const sub = await holdIn(owner, Chat, { session: other.id, conversation: id }, "participant");
-		await sub.send({ text: "child axolotl", requestId: "ax" }, BACKGROUND_CONTEXT);
-		const results = await found("axolotl", (value) => value.messages.length === 2);
-		assert.ok(results.messages.every((hit) => hit.session === other.id && hit.conversationId === id));
+		// The helper's answer starts a turn of the main agent: it ends before the next work, which a message joining it
+		// would otherwise skip (the fake provider answers only a turn's last message).
+		await until(
+			chat.view,
+			(view) =>
+				JSON.stringify(view?.entries ?? []).includes("Echo: hello helper") &&
+				!(view?.docs["pi.live"] as { run?: unknown } | undefined)?.run,
+			20_000,
+		);
+		const sent = () =>
+			(chat.view.value?.entries ?? []).flatMap((entry) =>
+				(entry.model ?? []).filter((message) => message.role === "toolResult" && message.toolName === "subagent"),
+			).length;
+		const before = sent();
+		// A member takes no direct message: the main agent gives it the work, and the search index follows its transcript.
+		await chat.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "send", name: "helper", message: "child axolotl" })}`,
+				requestId: "ax",
+			},
+			BACKGROUND_CONTEXT,
+		);
+		await until(chat.view, () => sent() > before, 20_000);
+		// The main agent's own turn carries the work text too: the member's transcript is what matters here.
+		const results = await found(
+			"axolotl",
+			(value) => value.messages.filter((hit) => hit.conversationId === id).length === 2,
+		);
+		assert.ok(results.messages.every((hit) => hit.session === other.id));
 		await fixture.server.host.root(async (ctx) => {
 			const index = await ctx.get(SearchIndex, {});
 			assert.ok((await index.cursor({ session: other.id, conversation: id }, ctx)) > 0);

@@ -141,6 +141,14 @@ export const ConversationConfigured =
 export const ReadOnlyConversations =
 	keyedRegistry<(conversation: number, ctx: Ctx) => Promise<string | undefined>>("p2.read-only-conversations");
 
+/**
+ * Plugins take over Stop for the conversations they own: `Chat.stop` asks each handler, and the first that returns true
+ * has stopped it (and answered only once it is stopped). Example: the subagents plugin's team members, which stop
+ * through one flow that also settles the work given to them.
+ */
+export const ConversationStops =
+	keyedRegistry<(conversation: number, ctx: Ctx) => Promise<boolean>>("p2.conversation-stops");
+
 /** Model access and run settings for the Harness (the models plugin contributes key "default"). */
 export type HarnessConfigEntry = { readonly models: () => Models; readonly settings: () => HarnessSettings };
 export const HarnessConfig = keyedRegistry<HarnessConfigEntry>("p2.harness-config");
@@ -384,6 +392,7 @@ export function serveWorkerRegistries(host: FacetHost): void {
 		ExtensionSwitches,
 		InputGates,
 		ConversationConfigured,
+		ConversationStops,
 		ReadOnlyConversations,
 		HarnessConfig,
 		HarnessEnvironments,

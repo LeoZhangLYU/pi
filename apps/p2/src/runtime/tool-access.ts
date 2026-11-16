@@ -14,9 +14,11 @@ export type ToolAccess = {
 	readonly origin?: "any" | "owner";
 	/**
 	 * Where it works: anywhere; only in the session's top-level conversations (`main`: the main conversation and its
-	 * `/tree` branches, never a subagent or one-shot agent); or offered only to subagents, which get it without choosing.
+	 * `/tree` branches, never a team member or one-shot agent); or offered only to team members, which get it without
+	 * choosing: every member (`subagent`), only the HR manager (`hr`), or only managers (`manager`). A member-only tool
+	 * checks its caller's role itself (the subagents plugin's registry knows it), as the scope does not.
 	 */
-	readonly scope?: "any" | "main" | "subagent";
+	readonly scope?: "any" | "main" | "subagent" | "hr" | "manager";
 	/**
 	 * In a locked session (`SessionLock`) the lock replaces the origin check of an `origin: "owner"` tool, whoever's turn
 	 * it is: `pass` (the default: what it reaches is limited by the lock elsewhere, MCP servers by their leases, location

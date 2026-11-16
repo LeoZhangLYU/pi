@@ -118,19 +118,24 @@ function NativePanel({
 			cwd={cwd}
 			{...(location ? { where: locationLabel(location.env, location.cwd) } : {})}
 			owner={owner}
-			onSend={async (text) => {
-				try {
-					const writer = liveIn(chat, "participant");
-					if (!writer) throw new Error(t("readOnlyConversation"));
-					await writer.send(
-						{ text, requestId: crypto.randomUUID(), whenBusy: steer ? "steer" : "followUp" },
-						BACKGROUND_CONTEXT,
-					);
-				} catch (error) {
-					setError(error instanceof Error ? error.message : t("couldNotSendComments"));
-					throw error;
-				}
-			}}
+			// A member's or one-shot agent's conversation takes no messages: no review comments to send there.
+			onSend={
+				children?.[session]?.some((child) => child.conversationId === conversation)
+					? undefined
+					: async (text) => {
+							try {
+								const writer = liveIn(chat, "participant");
+								if (!writer) throw new Error(t("readOnlyConversation"));
+								await writer.send(
+									{ text, requestId: crypto.randomUUID(), whenBusy: steer ? "steer" : "followUp" },
+									BACKGROUND_CONTEXT,
+								);
+							} catch (error) {
+								setError(error instanceof Error ? error.message : t("couldNotSendComments"));
+								throw error;
+							}
+						}
+			}
 		/>
 	);
 }

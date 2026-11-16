@@ -2770,6 +2770,19 @@ button.diff-number:hover {
 .subagent-stored {
 	color: var(--faint);
 }
+/* An executor of a manager's team sits under it; the HR and manager rows carry their role. */
+.subagent-row.team-executor {
+	padding-inline-start: calc(var(--space-3, 12px) + 14px);
+}
+.role-tag {
+	flex: none;
+	padding: 0 5px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	color: var(--faint);
+	font-size: var(--fs-xs, 11px);
+	line-height: 16px;
+}
 .subagent-row .session-meta {
 	max-width: 40%;
 	overflow: hidden;
@@ -3159,6 +3172,68 @@ button.diff-number:hover {
 }
 .artifact-row > small {
 	flex: none;
+}
+/* The Team panel: member and work rows look like the artifact list's; executors sit under their manager. */
+.team-row,
+.team-work {
+	display: flex;
+	align-items: center;
+	gap: var(--s2);
+	width: calc(100% + 2 * var(--x));
+	min-height: var(--row);
+	margin: 0 calc(-1 * var(--x));
+	padding: var(--s2) var(--x);
+	color: var(--text);
+	text-align: start;
+}
+.team-row strong,
+.team-work strong {
+	display: block;
+	overflow: hidden;
+	font-size: var(--fs-md);
+	font-weight: var(--fw-medium);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.team-row small,
+.team-work small {
+	display: block;
+	color: var(--muted);
+	font-family: var(--mono);
+	font-size: var(--fs-xs);
+}
+.team-row > span,
+.team-work > span {
+	display: block;
+	flex: 1;
+	min-width: 0;
+}
+.team-row > small,
+.team-work > small {
+	flex: none;
+}
+.team-work .team-result {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.team-row.team-executor {
+	padding-inline-start: calc(var(--x) + 14px);
+}
+.team-heading {
+	padding-top: var(--s4);
+	color: var(--muted);
+	font-size: var(--fs-xs);
+	font-weight: var(--fw-strong);
+	text-transform: uppercase;
+}
+@media (hover: hover) {
+	.team-row:hover {
+		background: var(--hover);
+	}
+}
+.team-row:active {
+	background: var(--hover);
 }
 
 /* Provider login */

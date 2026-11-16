@@ -17,7 +17,7 @@ import { Workspace } from "../../plugins/workspace/contract.ts";
 import { expectVariant } from "../../src/runtime/chord.ts";
 import { Hosts, type RelocationSteps, ServerNatives } from "../../src/runtime/server.ts";
 import { WorkerBoundary } from "../../src/runtime/worker.ts";
-import { type Fixture, holdIn, poll, startFixture, until } from "./helpers.ts";
+import { type Fixture, hire, holdIn, poll, startFixture, until } from "./helpers.ts";
 
 const text = (view: ConversationView | null | undefined) =>
 	(view?.entries ?? [])
@@ -136,18 +136,18 @@ describe("session relocation (fake provider)", () => {
 		}
 		const session = await sessions.create({ cwd: start }, BACKGROUND_CONTEXT);
 		const root = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
-		const subagent = async (args: object, requestId: string) => {
-			await root.send({ text: `subagent ${JSON.stringify(args)}`, requestId }, BACKGROUND_CONTEXT);
-			await until(root.view, (view) => text(view).includes(`Echo: subagent ${JSON.stringify(args)}`));
+		// The HR manager hires the member, which then does its first work; the session settles before the next step.
+		const staffed = async (member: Parameters<typeof hire>[3]) => {
+			await hire(root, agents, session.id, member);
 			await until(status.statuses, (value) => value?.[session.id]?.tasks === 0);
 		};
-		await subagent({ action: "spawn", name: "follow", message: "hi", tools: ["bash"] }, "follow");
-		await subagent({ action: "spawn", name: "own", message: "hi", cwd: own, tools: ["bash"] }, "own");
+		await staffed({ name: "follow", tools: ["bash"], message: "hi" });
+		await staffed({ name: "own", cwd: own, tools: ["bash"], message: "hi" });
 		await sessions.relocate({ id: session.id, cwd: next, env: null }, BACKGROUND_CONTEXT);
 		root.release();
 		const current = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
 		await until(current.view, (view) => (view?.docs["pi.agent"] as { cwd?: string })?.cwd === next);
-		const children = await until(agents.children, (value) => value?.[session.id]?.length === 2);
+		const children = await until(agents.children, (value) => value?.[session.id]?.length === 3);
 		const pwd = async (name: string, requestId: string) => {
 			const child = children?.[session.id]?.find((entry) => entry.name === name);
 			assert(child);
@@ -423,11 +423,9 @@ describe("session relocation (fake provider)", () => {
 		const s = await idleSession("own-location");
 		const own = join(fixture.workspace, "own-location-own");
 		mkdirSync(own);
-		const spawn = { action: "spawn", name: "mine", message: "hi", cwd: own, tools: ["bash"] };
-		await s.chat.send(
-			{ text: `subagent ${JSON.stringify(spawn)}`, requestId: "own-location-spawn" },
-			BACKGROUND_CONTEXT,
-		);
+		const members = await holdIn(s.owner, Subagents, {}, "reader");
+		await hire(s.chat, members, s.session.id, { name: "mine", cwd: own, tools: ["bash"], message: "hi" });
+		members.release();
 		await until(
 			s.chat.view,
 			(view) =>
@@ -557,8 +555,11 @@ describe("session relocation (fake provider)", () => {
 		await until(status.statuses, (value) => value?.[session.id]?.tasks === 0);
 		await root.send({ text: "subagent", requestId: "helper" }, BACKGROUND_CONTEXT);
 		const agents = await holdIn(owner, Subagents, {}, "reader");
-		const children = await until(agents.children, (value) => Boolean(value?.[session.id]?.length));
-		const child = children?.[session.id]?.[0];
+		const children = await until(
+			agents.children,
+			(value) => value?.[session.id]?.some((each) => each.name === "helper") === true,
+		);
+		const child = children?.[session.id]?.find((each) => each.name === "helper");
 		assert(child);
 		await until(status.statuses, (value) => value?.[session.id]?.tasks === 0);
 		const helper = await holdIn(
@@ -567,7 +568,17 @@ describe("session relocation (fake provider)", () => {
 			{ session: session.id, conversation: child.conversationId },
 			"participant",
 		);
-		await helper.send({ text: "slow helper", requestId: "slow-child" }, BACKGROUND_CONTEXT);
+		// A member takes no direct message: the main agent gives it the work, and the move is refused while it runs.
+		await root.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "send", name: "helper", message: "slow helper" })}`,
+				requestId: "slow-child",
+			},
+			BACKGROUND_CONTEXT,
+		);
+		// The move is refused while the member runs; the main agent's own turn on the send ends first.
+		await until(status.statuses, (value) => value?.[session.id]?.busy.includes(child.conversationId) === true);
+		await until(root.view, (view) => !(view?.docs["pi.live"] as { run?: unknown } | undefined)?.run);
 		await refused(/Subagent helper is still running/);
 		await helper.stop(BACKGROUND_CONTEXT);
 		await until(status.statuses, (value) => value?.[session.id]?.tasks === 0);

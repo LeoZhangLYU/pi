@@ -1,45 +1,52 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { type ConversationId, type Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
+import { type Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import {
 	type Ctx,
 	canSend,
+	canView,
 	contribute,
 	defineFacet,
 	defineRegistry,
+	deriveTyped,
 	expectVariant,
 	forbidden,
+	serveKeyed,
 	signalOf,
 } from "@p2/app/v1";
 import { ExtensionSwitches } from "@p2/app/v1/node";
 import {
 	CommitSignal,
-	ConversationConfigured,
 	ConversationLocations,
 	type ConversationPlacement,
+	ConversationStops,
 	Extensions,
 	HarnessConfig,
 	HarnessNative,
 	harnessOf,
 	locateConversation,
+	mainConversation,
 	ReadOnlyConversations,
 	resolveDirectory,
 	toolsByName,
-	workerOf,
 } from "@p2/app/v1/worker";
-import { type Child, SubagentControl, Subagents } from "./contract.ts";
-import { calledByModel, choosableTools, Subagents as Registry } from "./contract.worker.ts";
+import { type Child, SubagentControl, Subagents, TeamWork } from "./contract.ts";
+import { calledByModel, DelegationStopped, Subagents as Registry, roleOf } from "./contract.worker.ts";
+import { createTeamExtension } from "./member-tools.ts";
+import { memberOf, stoppedNotices } from "./team.ts";
 import {
-	createSubagentExtension,
+	bindStoppedHandlers,
 	enableScriptTools,
 	ownLocation,
 	placeSubagents,
-	setArchived,
 	spawnEnvironments,
+	startStop,
 	teamExtension,
 } from "./tools.ts";
 
 const READ_ONLY = "One-shot agents are read-only";
+const MEMBER_READ_ONLY =
+	"Team members take no direct messages: ask the main agent, which gives them work (you can still stop them)";
 
 /** Pushes the session's child list to the server, one push at a time, each reading the registry when it starts. */
 class ChildReporter {
@@ -75,6 +82,9 @@ async function childrenOf(durable: Harness, ctx: Ctx): Promise<Child[]> {
 			...(agent.location === undefined ? {} : { location: agent.location }),
 			lastEntryId: latest?.items[0]?.id ?? 0,
 			...(agent.archived ? { archived: true } : {}),
+			role: roleOf(agent),
+			...(agent.manager === undefined ? {} : { manager: agent.manager }),
+			...(agent.duty ? { duty: agent.duty } : {}),
 		});
 	}
 	for (const [callId, agent] of Object.entries(registry?.oneShots ?? {}))
@@ -93,6 +103,9 @@ async function childrenOf(durable: Harness, ctx: Ctx): Promise<Child[]> {
 
 export default defineFacet((host, self) => {
 	host.serve(ChildReports, { compose: (table) => table[0]?.value });
+	serveKeyed(host, DelegationStopped);
+	// The plugin's own hook: whoever gave stopped work hears of it (other plugins add theirs).
+	self.contribute(DelegationStopped, { subagents: stoppedNotices });
 	// Subagents spawned without a cwd and one-shot agents follow the session: the opening Harness gets this (without a
 	// Harness dependency) and moves them with it. Only a subagent's own registry `location` keeps it elsewhere.
 	self.contribute(ConversationLocations, {
@@ -119,16 +132,23 @@ export default defineFacet((host, self) => {
 		// The worker's tools by name, with what they declare: which ones an agent may give to its subagents.
 		const extensions = self.registry(Extensions);
 		const access = () => toolsByName(extensions.value);
-		// A spawned subagent's own location is on its caller's machine: where the caller works now.
-		const extension = createSubagentExtension(
+		// A hired member's own location is on the session's machine: where the session works now.
+		const extension = createTeamExtension({
 			models,
-			{
+			locator: {
 				locate: (conversationId, read, context) => locateConversation(harnessValue, conversationId, context, read),
 				directory: (target, from, context) => resolveDirectory(harness().environments, target, from, context),
 				sandbox: (location) => harness().environments.sandbox(location.env),
 			},
 			access,
-		);
+			// Members start from the main agent's model, thinking level and tools, whoever hires or configures them.
+			main: async (context) => {
+				const durable = harness().durable;
+				const main = await durable.conversation(await mainConversation(durable, context), context);
+				if (!main) throw new Error("The main conversation is gone");
+				return main.agent(context);
+			},
+		});
 		self.contribute(Extensions, { [extension.name]: extension, [teamExtension.name]: teamExtension });
 		// The tools behind code mode, as the Harness's registry installs them (switched-off extensions left out).
 		const scriptTools = self.derive(
@@ -144,26 +164,32 @@ export default defineFacet((host, self) => {
 		self.on(scriptTools, async ({ value }, ctx) => {
 			await enableScriptTools(harness().durable, value, ctx);
 		});
-		self.contribute(ConversationConfigured, {
+		// The stop flow tells the hooks which work it stopped; the HR manager's flow reads them here (a Harness task has no
+		// access to Chord registries).
+		const stoppedHooks = self.registry(DelegationStopped);
+		bindStoppedHandlers(() => [...stoppedHooks.value.values()]);
+		// A team member stops through its team's flow (Stop and the owner's stop button both come here), which also ends
+		// and reports the work given to it.
+		self.contribute(ConversationStops, {
 			subagents: async (conversation, ctx) => {
-				if (conversation.id === ROOT_CONVERSATION_ID) return;
-				const agent = await conversation.agent(ctx);
-				await harness().durable.commit(async (tx) => {
-					const registry = await tx.doc(Registry, ROOT_CONVERSATION_ID);
-					const child = Object.values(registry.agents).find((entry) => entry.conversationId === conversation.id);
-					if (!child) return;
-					child.model = agent.model ? `${agent.model.provider}/${agent.model.modelId}` : child.model;
-					child.thinkingLevel = agent.thinkingLevel;
-					child.tools = choosableTools(agent, access()).map((tool) => tool.name);
-				}, ctx);
+				const durable = harness().durable;
+				const registry = await durable.snapshot(Registry, ROOT_CONVERSATION_ID, ctx);
+				const member = registry ? memberOf(registry, conversation) : undefined;
+				if (!member) return false;
+				const id = await durable.commit((tx) => startStop(tx, { member: member[0], by: "owner" }), ctx);
+				await durable.waitForTask(id, ctx);
+				return true;
 			},
 		});
-		// A one-shot agent belongs to the script waiting for its answer: it can be read and stopped, not steered.
+		// A one-shot agent belongs to the script waiting for its answer; a team member works for the main agent, the team's
+		// only entry: either can be read and stopped, not steered.
 		self.contribute(ReadOnlyConversations, {
 			subagents: async (conversation, ctx) => {
 				const registry = await harness().durable.snapshot(Registry, ROOT_CONVERSATION_ID, ctx);
-				return Object.values(registry?.oneShots ?? {}).some((agent) => agent.conversationId === conversation)
-					? READ_ONLY
+				if (Object.values(registry?.oneShots ?? {}).some((agent) => agent.conversationId === conversation))
+					return READ_ONLY;
+				return Object.values(registry?.agents ?? {}).some((agent) => agent.conversationId === conversation)
+					? MEMBER_READ_ONLY
 					: undefined;
 			},
 		});
@@ -207,27 +233,42 @@ export default defineFacet((host, self) => {
 		});
 	});
 
-	host.serve(SubagentControl, ({ session }, principal, self) => {
-		if (!canSend(principal, session)) throw forbidden("participants only");
+	// The Team panel's work list: the registry's delegations, newest first, followed.
+	host.serve(TeamWork, ({ session }, principal, self) => {
+		if (!canView(principal, session)) throw forbidden("viewers only");
 		const harness = harnessOf(self);
-		const worker = workerOf(self);
-		const reports = self.registry(ChildReports);
+		const registry = self.follow(async (observer, ctx) => {
+			const durable = harness().durable;
+			const observed = await durable.observeDoc(Registry, ROOT_CONVERSATION_ID, observer, ctx);
+			if (observed !== undefined) return observed;
+			// No member yet: the document is absent, and an absent address cannot be followed. Create it empty.
+			await durable.commit(async (tx) => {
+				await tx.doc(Registry, ROOT_CONVERSATION_ID);
+			}, ctx);
+			return durable.observeDoc(Registry, ROOT_CONVERSATION_ID, observer, ctx);
+		});
+		return {
+			variant: "reader",
+			members: {
+				delegations: deriveTyped(self, [registry], ([value]) =>
+					Object.values(value.delegations ?? {})
+						.toSorted((a, b) => b.id - a.id)
+						.map(({ parent: _parent, ...delegation }) => delegation),
+				),
+			},
+		};
+	});
+
+	// Kept for pages opened before the team (a Chord contract cannot lose a method): the main agent is the team's only
+	// entry, so nobody archives a member here; the HR manager does, when the main agent asks it to.
+	host.serve(SubagentControl, ({ session }, principal) => {
+		if (!canSend(principal, session)) throw forbidden("participants only");
 		return {
 			variant: "participant",
 			members: {
-				archive: ({ conversation, archived }, ctx) =>
-					worker().liveness.call(async () => {
-						const durable = harness().durable;
-						const registry = await durable.snapshot(Registry, ROOT_CONVERSATION_ID, ctx);
-						if (Object.values(registry?.oneShots ?? {}).some((agent) => agent.conversationId === conversation))
-							throw forbidden(READ_ONLY);
-						if (!Object.values(registry?.agents ?? {}).some((agent) => agent.conversationId === conversation))
-							throw new Error("Unknown conversation");
-						await setArchived(durable, ROOT_CONVERSATION_ID, conversation as ConversationId, archived, ctx);
-						// The sidebar's archived flag is the server's: pushed before the answer.
-						await reports.value?.push(ctx);
-						return null;
-					}),
+				archive: () => {
+					throw forbidden("Ask the main agent to have the HR manager archive or restore a member");
+				},
 			},
 		};
 	});

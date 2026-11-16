@@ -87,6 +87,7 @@ export function AppLayout() {
 			</main>
 			<div id="side-dock" className="side-dock" />
 			<Slot name="workspace-panel" />
+			<Slot name="team-panel" />
 		</div>
 	);
 }

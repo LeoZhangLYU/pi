@@ -20,7 +20,7 @@ import { localSystem, terminalDaemon } from "../../plugins/terminals/daemon.ts";
 import { connectTerminalHost } from "../../plugins/terminals/detached.ts";
 import { encodeFrame, type TerminalEvent, type TerminalInfo } from "../../plugins/terminals/protocol.ts";
 import { Hosts } from "../../src/runtime/server.ts";
-import { APP, expectChord, holdIn, poll, startFixture, until } from "./helpers.ts";
+import { APP, expectChord, holdIn, poll, startFixture, textsOf, until } from "./helpers.ts";
 
 let unavailable: string | undefined;
 try {
@@ -194,8 +194,22 @@ test(
 			mkdirSync(own);
 			const opener =
 				'return await tools.terminal({ command: "new-window", args: ["-n", "sub", "-w", "/^in-sub$/", "echo in-s\'\'ub"] });';
-			const spawn = { action: "spawn", name: "own", message: `codemode ${opener}`, cwd: "own" };
-			const spawned = await call(`subagent ${JSON.stringify(spawn)}`);
+			const staff = { action: "hire", name: "own", role: "executor", duty: "opens windows", cwd: "own" };
+			const hired = await call(
+				`subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(staff)}` })}`,
+			);
+			assert.equal(hired.isError, false, text(hired));
+			// The HR manager's report names the member it hired; that turn ends before the work goes out.
+			await until(
+				chat.view,
+				(value) =>
+					textsOf(value).some(
+						(each) => each.startsWith("[answered, no reply needed]") && each.includes('"name":"own"'),
+					) && !(value?.docs["pi.live"] as { run?: unknown })?.run,
+			);
+			const spawned = await call(
+				`subagent ${JSON.stringify({ action: "send", name: "own", message: `codemode ${opener}` })}`,
+			);
 			assert.equal(spawned.isError, false, text(spawned));
 			// Its answer is reported to the main conversation; that turn ends before the next script.
 			await until(

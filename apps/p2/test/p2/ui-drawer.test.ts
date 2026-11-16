@@ -156,7 +156,7 @@ describe("drawer and new-session parity", { skip: !browserTests }, () => {
 		await browser.evaluate("localStorage.removeItem('pi-sidebar-width')");
 	});
 
-	it("groups cwd identities, orders pinned sessions first, expands child rows in the header, and keeps child busy dots visible when collapsed", async () => {
+	it("groups cwd identities, orders pinned sessions first, lists no team member, and keeps a working member's busy dot", async () => {
 		const owner = fixture.browser();
 		const sessions = await holdIn(owner, Sessions, {}, "owner");
 		const second = join(fixture.workspace, "second");
@@ -195,64 +195,67 @@ describe("drawer and new-session parity", { skip: !browserTests }, () => {
 		const chat = await holdIn(owner, Chat, { session: pinned.id, conversation: 1 }, "participant");
 		await chat.send({ text: "subagent", requestId: "drawer-child" }, BACKGROUND_CONTEXT);
 		const agents = await holdIn(owner, Subagents, {}, "reader");
-		const children = await until(agents.children, (children) => Boolean(children?.[pinned.id]?.length));
-		const child = children?.[pinned.id]?.[0];
+		const children = await until(
+			agents.children,
+			(children) => children?.[pinned.id]?.some((each) => each.name === "helper") === true,
+		);
+		const child = children?.[pinned.id]?.find((each) => each.name === "helper");
 		assert(child);
-		await browser.wait(`document.querySelector('.session-header.has-subagents .subagent-toggle')`);
+		// The team's members are not sidebar entries: the main agent is the only conversation entry.
+		assert.equal(await browser.evaluate(`document.querySelectorAll('.subagent-row').length`), 0, "no member rows");
+		assert.equal(
+			await browser.evaluate(`document.querySelector('.subagent-toggle')===null`),
+			true,
+			"no toggle without branches",
+		);
 		assert.equal(
 			await browser.evaluate<number>(
 				`document.querySelectorAll('.drawer button[aria-label="Session options"]').length`,
 			),
 			0,
 		);
-		await browser.click(".session-header.has-subagents .subagent-toggle");
-		await browser.wait(
-			`document.querySelector('.subagent-row') && !document.querySelector('.subagent-row').parentElement.hidden`,
+		// Their work still shows in the session row: a busy dot while a member works.
+		await until(
+			chat.view,
+			(view) =>
+				JSON.stringify(view?.entries ?? []).includes("Echo: hello helper") &&
+				!(view?.docs["pi.live"] as { run?: unknown } | undefined)?.run,
+			30_000,
 		);
-		assert.equal(
-			await browser.evaluate<string>(`document.querySelector('.subagent-row .session-meta').textContent.trim()`),
-			"faux-1",
+		await chat.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "send", name: "helper", message: "slow child" })}`,
+				requestId: "drawer-busy",
+			},
+			BACKGROUND_CONTEXT,
 		);
-		await browser.click(".session-header.has-subagents .subagent-toggle");
-		const childChat = await holdIn(
-			owner,
-			Chat,
-			{ session: pinned.id, conversation: child.conversationId },
-			"participant",
-		);
-		await childChat.send({ text: "slow child", requestId: "drawer-busy" }, BACKGROUND_CONTEXT);
-		await browser.wait(`document.querySelector('.session-header.has-subagents .live-dot')`);
-		await browser.click(".session-header.has-subagents .subagent-toggle");
-		await browser.wait(`document.querySelector('.subagent-row .live-dot')`);
-		await browser.click(".subagent-row");
-		await browser.wait(
-			`location.pathname.endsWith('/c/${child.conversationId}') && document.querySelector('.subagent-row.active')`,
-		);
+		await browser.wait(`document.querySelector('.session-header .live-dot')`);
+		// The main agent stops it again: the browser has no member entry to stop from.
 		const status = await holdIn(owner, SessionStatus, {}, "reader");
-		await childChat.stop(BACKGROUND_CONTEXT);
+		await until(status.statuses, (states) => states?.[pinned.id]?.busy.includes(child.conversationId) === true);
+		await chat.send(
+			{ text: `subagent ${JSON.stringify({ action: "stop", name: "helper" })}`, requestId: "drawer-stop" },
+			BACKGROUND_CONTEXT,
+		);
 		await until(status.statuses, (states) => !states?.[pinned.id]?.busy.includes(child.conversationId));
-		// With `/tree` branches as well, the one control shows the branch rows, then the subagents, and hides both.
+		// With `/tree` branches, the one control shows the branch rows (the members have none) and hides them.
 		await until(status.statuses, (states) => states?.[pinned.id]?.tasks === 0);
 		const tree = await holdIn(owner, SessionTree, { session: pinned.id }, "owner");
 		const first = (await tree.tree(BACKGROUND_CONTEXT)).nodes.find((node) => node.role === "user")!;
 		await tree.navigate({ entry: first.entry }, BACKGROUND_CONTEXT);
 		await tree.select({ conversation: 1 }, BACKGROUND_CONTEXT);
 		tree.release();
-		const toggle = `document.querySelector('.subagent-toggle[aria-controls="branches-${pinned.id} subagents-${pinned.id}"]')`;
-		await browser.wait(`${toggle}?.getAttribute('aria-label')==='Collapse branches and subagents'`);
+		const toggle = `document.querySelector('.subagent-toggle[aria-controls="branches-${pinned.id}"]')`;
+		await browser.wait(`${toggle}?.getAttribute('aria-label')==='Expand branches'`);
 		assert.deepEqual(
 			await browser.evaluate<string[]>(
 				`[...document.getElementById('branches-${pinned.id}').parentElement.children].slice(1).map(e=>e.id+(e.hidden?':hidden':''))`,
 			),
-			[`branches-${pinned.id}`, `subagents-${pinned.id}`],
+			[`branches-${pinned.id}:hidden`],
 		);
 		await browser.evaluate(`${toggle}.click()`);
 		await browser.wait(
-			`document.getElementById('branches-${pinned.id}').hidden && document.getElementById('subagents-${pinned.id}').hidden`,
-		);
-		assert.equal(
-			await browser.evaluate<string>(`${toggle}.getAttribute('aria-label')`),
-			"Expand branches and subagents",
+			`!document.getElementById('branches-${pinned.id}').hidden && ${toggle}.getAttribute('aria-label')==='Collapse branches'`,
 		);
 	});
 

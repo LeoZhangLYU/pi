@@ -26,30 +26,25 @@ const SCRIPTED: Record<string, () => ReturnType<typeof fauxToolCall>> = {
 			type: "html",
 			content: "<!doctype html><title>Demo</title><h1>Artifact demo</h1>",
 		}),
-	subagent: () =>
-		fauxToolCall("subagent", {
-			action: "spawn",
-			name: "helper",
-			message: "hello helper",
-			thinkingLevel: "high",
-			tools: ["read"],
-		}),
+	// Staffing goes through the HR manager: the main agent asks it to hire, and the fake HR manager runs the `staff`
+	// call its request spells out (`staff <json>`). With `greet`, the main agent then gives the new member its first
+	// work (`hello <name>`) once the HR manager reports (see `greeting`), as the one-call spawn it replaces did.
+	subagent: () => hire({ name: "helper", thinkingLevel: "high", tools: ["read"], greet: true }),
 	"subagent-configure": () =>
-		fauxToolCall("subagent", {
+		askHr({
 			action: "configure",
 			name: "helper",
 			model: "faux/faux-1",
 			thinkingLevel: "high",
 			tools: ["bash", "artifact"],
 		}),
-	"subagent-second": () =>
-		fauxToolCall("subagent", { action: "spawn", name: "second", message: "hello second", tools: ["read"] }),
+	"subagent-second": () => hire({ name: "second", tools: ["read"], greet: true }),
 	"subagent-answer": () => fauxToolCall("subagent", { action: "answer", name: "helper" }),
 	"subagent-send": () => fauxToolCall("subagent", { action: "send", name: "helper", message: "hello again" }),
-	"subagent-archive": () => fauxToolCall("subagent", { action: "archive", name: "helper" }),
+	"subagent-archive": () => askHr({ action: "archive", name: "helper" }),
+	"subagent-restore": () => askHr({ action: "restore", name: "helper" }),
 	"subagent-status": () => fauxToolCall("subagent", { action: "status" }),
-	"subagent-bad": () =>
-		fauxToolCall("subagent", { action: "spawn", name: "bad", message: "x", model: "nope/missing" }),
+	"subagent-bad": () => hire({ name: "bad", model: "nope/missing" }),
 	// Code mode: a script whose nested calls are two tools (codemode plugin).
 	codemode: () =>
 		fauxToolCall("codemode", {
@@ -77,6 +72,33 @@ const SCRIPTED: Record<string, () => ReturnType<typeof fauxToolCall>> = {
 
 /** The system prompt of a one-shot agent (plugins/agent) ends its instructions with its schema on this line's end. */
 const ONE_SHOT_SCHEMA = "matching this JSON Schema, without prose or code fences:\n";
+
+/** The main agent asks the HR manager to run `staff <call>`: the fake HR manager makes exactly that call. */
+const askHr = (call: object) => fauxToolCall("subagent", { action: "hire", message: `staff ${JSON.stringify(call)}` });
+
+/** What `staff hire` takes, plus `greet`: the first work the main agent gives the member once it is hired. */
+export type FakeHire = { name: string; greet?: boolean | string } & Record<string, unknown>;
+
+/** The main agent asks the HR manager to hire an executor `member` (a name and what else `staff hire` takes). */
+const hire = (member: FakeHire) => askHr({ action: "hire", role: "executor", duty: "helps", ...member });
+
+/**
+ * The main agent's next call after the HR manager's report of a hire with `greet`: it gives the new member its first
+ * work, `greet` itself when it is text, else `hello <name>`. The report is the fake HR manager's echo of its request
+ * (`Echo: staff <json>`).
+ */
+function greeting(text: string): ReturnType<typeof fauxToolCall> | undefined {
+	const report = /^\[answered, no reply needed\] Echo: staff (\{.*\})$/s.exec(text);
+	if (!report) return undefined;
+	try {
+		const call = JSON.parse(report[1]!) as { action?: string; name?: string; greet?: boolean | string };
+		if (call.action !== "hire" || !call.greet || !call.name) return undefined;
+		const message = typeof call.greet === "string" ? call.greet : `hello ${call.name}`;
+		return fauxToolCall("subagent", { action: "send", name: call.name, message });
+	} catch {
+		return undefined;
+	}
+}
 
 /** The text of a user message, without the sender block in front. */
 function userText(message: Message | undefined): string {
@@ -220,29 +242,48 @@ export function createFakeModels(options: CreateModelsOptions = {}) {
 					// A section that changed during the run (tools loaded by `tool_search`) adds a system message after the result.
 					const last = transcript.messages.findLast((message) => message.role !== "system");
 					if (last?.role !== "toolResult") {
+						// A fake manager's `delegates [<json>, …]`: one `delegate` call each, in one turn.
+						if (text.startsWith("delegates "))
+							return fauxAssistantMessage(
+								[
+									fauxText("Running delegate."),
+									...(JSON.parse(text.slice("delegates ".length)) as Parameters<typeof fauxToolCall>[1][]).map(
+										(args) => fauxToolCall("delegate", args),
+									),
+								],
+								{ stopReason: "toolUse" },
+							);
 						const call = Object.hasOwn(SCRIPTED, text)
 							? SCRIPTED[text]?.()
-							: text.startsWith("conversations ")
-								? fauxToolCall("conversations", JSON.parse(text.slice("conversations ".length)))
-								: text.startsWith("rename-session ")
-									? fauxToolCall("rename_session", { title: text.slice("rename-session ".length) })
-									: text.startsWith("ports ")
-										? fauxToolCall("ports", JSON.parse(text.slice("ports ".length)))
-										: // `codemode <script>` runs that script (the bare `codemode` above is a fixed one).
-											text.startsWith("codemode ")
-											? fauxToolCall("codemode", { code: text.slice("codemode ".length) })
-											: text.startsWith("subagent ")
-												? fauxToolCall("subagent", JSON.parse(text.slice("subagent ".length)))
-												: text.startsWith("team ")
-													? fauxToolCall("team", JSON.parse(text.slice("team ".length)))
-													: /^(artifact|history_(search|read|handoff)|location_(envs|dirs|move)|tool_search|terminal|mcp__\w+) /.test(
-																text,
-															)
-														? fauxToolCall(
-																text.slice(0, text.indexOf(" ")),
-																JSON.parse(text.slice(text.indexOf(" ") + 1)),
-															)
-														: undefined;
+							: greeting(text)
+								? greeting(text)
+								: // The team's members make the call their work spells out: the fake HR manager `staff <json>`, a fake
+									// manager `delegate <json>`.
+									text.startsWith("staff ")
+									? fauxToolCall("staff", JSON.parse(text.slice("staff ".length)))
+									: text.startsWith("delegate ")
+										? fauxToolCall("delegate", JSON.parse(text.slice("delegate ".length)))
+										: text.startsWith("conversations ")
+											? fauxToolCall("conversations", JSON.parse(text.slice("conversations ".length)))
+											: text.startsWith("rename-session ")
+												? fauxToolCall("rename_session", { title: text.slice("rename-session ".length) })
+												: text.startsWith("ports ")
+													? fauxToolCall("ports", JSON.parse(text.slice("ports ".length)))
+													: // `codemode <script>` runs that script (the bare `codemode` above is a fixed one).
+														text.startsWith("codemode ")
+														? fauxToolCall("codemode", { code: text.slice("codemode ".length) })
+														: text.startsWith("subagent ")
+															? fauxToolCall("subagent", JSON.parse(text.slice("subagent ".length)))
+															: text.startsWith("team ")
+																? fauxToolCall("team", JSON.parse(text.slice("team ".length)))
+																: /^(artifact|history_(search|read|handoff)|location_(envs|dirs|move)|tool_search|terminal|mcp__\w+) /.test(
+																			text,
+																		)
+																	? fauxToolCall(
+																			text.slice(0, text.indexOf(" ")),
+																			JSON.parse(text.slice(text.indexOf(" ") + 1)),
+																		)
+																	: undefined;
 						if (call)
 							return fauxAssistantMessage(
 								[fauxText(text === "tool" ? "Reading fixture." : `Running ${call.name}.`), call],

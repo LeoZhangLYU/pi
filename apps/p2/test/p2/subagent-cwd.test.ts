@@ -21,7 +21,7 @@ import { Subagents } from "../../plugins/subagents/contract.ts";
 import { startServer } from "../../src/hosts/server.ts";
 import type { Host } from "../../src/runtime/chord.ts";
 import { openSessionStorage } from "../../src/runtime/session-store.ts";
-import { holdIn, startFixture, until } from "./helpers.ts";
+import { hire, holdIn, startFixture, until } from "./helpers.ts";
 
 const context = BACKGROUND_CONTEXT;
 const text = (view: ConversationView | null | undefined) =>
@@ -69,14 +69,29 @@ test(
 			}
 		};
 
+		// The HR manager hires `member`, which then does its first work; the session settles before the next step.
+		const staffed = async (owner: Host, session: string, member: Parameters<typeof hire>[3]) => {
+			const chat = await holdIn(owner, Chat, { session, conversation: 1 }, "participant");
+			const children = await holdIn(owner, Subagents, {}, "reader");
+			const status = await holdIn(owner, SessionStatus, {}, "reader");
+			try {
+				await hire(chat, children, session, member);
+				await until(status.statuses, (value) => value?.[session]?.tasks === 0, 30_000);
+			} finally {
+				chat.release();
+				children.release();
+				status.release();
+			}
+		};
+
 		let owner = fixture.browser();
 		const session = (await (await holdIn(owner, Sessions, {}, "owner")).create({ cwd: project }, BACKGROUND_CONTEXT))
 			.id;
-		await subagent(owner, session, { action: "spawn", name: "old", message: "hi", tools: ["bash"] }, "old");
-		await subagent(owner, session, { action: "spawn", name: "own", message: "hi", cwd: own, tools: ["bash"] }, "own");
+		await staffed(owner, session, { name: "old", tools: ["bash"], message: "hi" });
+		await staffed(owner, session, { name: "own", cwd: own, tools: ["bash"], message: "hi" });
 		const listed = await until(
 			(await holdIn(owner, Subagents, {}, "reader")).children,
-			(value) => value?.[session]?.length === 2,
+			(value) => value?.[session]?.length === 3,
 		);
 		const children = new Map(listed?.[session]?.map((child) => [child.name, child.conversationId]));
 

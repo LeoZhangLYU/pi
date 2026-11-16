@@ -330,7 +330,13 @@ export const rowEstimates = new RowEstimator<TranscriptRow>(rowFeatures, 120);
 const incoming = (item: Extract<Item, { type: "user" }>): boolean =>
 	Boolean(item.agent || item.peer || item.author?.kind === "guest");
 
-const AGENT_VERB_KEYS = { answered: "answered", question: "asks", note: "wrote", failed: "failed" } as const;
+const AGENT_VERB_KEYS = {
+	answered: "answered",
+	question: "asks",
+	note: "wrote",
+	failed: "failed",
+	stopped: "wasStopped",
+} as const;
 
 /**
  * Someone else's message, one shape for every kind (owner decision: kinds differ only by icon and word, no coloured

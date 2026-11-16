@@ -130,7 +130,7 @@ describe("code mode agent (fake provider)", () => {
 			control.archive({ conversation: first.conversationId, archived: true }, BACKGROUND_CONTEXT),
 			"forbidden",
 		);
-		assert.match(archive.message, /read-only/);
+		assert.match(archive.message, /Ask the main agent/);
 		// Stop stays allowed (nothing runs).
 		assert.deepEqual(await sub.stop(BACKGROUND_CONTEXT), { restored: [] });
 		sub.release();

@@ -414,17 +414,35 @@ test(
 		// session when it moves (to this machine and back), never resolving a path of the other machine.
 		const agents = await holdIn(owner, Subagents, {}, "reader");
 		let sent = 0;
+		/** Gives member `name` the work "bash": the HR manager hires it first (with `hireArgs`) when it is not listed yet. */
+		const giveWork = async (name: string, requestId: string, hireArgs: object) => {
+			const root = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
+			try {
+				const listed = () => agents.children.value?.[session.id]?.some((child) => child.name === name) === true;
+				if (!listed()) {
+					const staff = { action: "hire", name, role: "executor", duty: "helps", ...hireArgs };
+					await root.send(
+						{
+							text: `subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify(staff)}` })}`,
+							requestId: `${requestId}-hire`,
+						},
+						BACKGROUND_CONTEXT,
+					);
+					await until(
+						agents.children,
+						(value) => value?.[session.id]?.some((child) => child.name === name) === true,
+						60000,
+					);
+				}
+				const work = { action: "send", name, message: "bash" };
+				await root.send({ text: `subagent ${JSON.stringify(work)}`, requestId }, BACKGROUND_CONTEXT);
+			} finally {
+				root.release();
+			}
+		};
 		const subagentPwd = async (requestId: string) => {
 			await until(status.statuses, (statuses) => statuses?.[session.id]?.tasks === 0, 60000);
-			const known = (await until(agents.children, (value) => value !== undefined))?.[session.id]?.some(
-				(child) => child.name === "follow",
-			);
-			const args = known
-				? { action: "send", name: "follow", message: "bash" }
-				: { action: "spawn", name: "follow", message: "bash", tools: ["bash"] };
-			const root = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
-			await root.send({ text: `subagent ${JSON.stringify(args)}`, requestId }, BACKGROUND_CONTEXT);
-			root.release();
+			await giveWork("follow", requestId, { tools: ["bash"] });
 			sent++;
 			const listed = await until(agents.children, (value) =>
 				Boolean(value?.[session.id]?.some((child) => child.name === "follow")),
@@ -466,13 +484,7 @@ test(
 		let ownRuns = 0;
 		const ownPwd = async (requestId: string) => {
 			await until(status.statuses, (statuses) => statuses?.[session.id]?.tasks === 0, 60000);
-			const known = agents.children.value?.[session.id]?.some((child) => child.name === "mine");
-			const args = known
-				? { action: "send", name: "mine", message: "bash" }
-				: { action: "spawn", name: "mine", message: "bash", cwd: own, tools: ["bash"] };
-			const root = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
-			await root.send({ text: `subagent ${JSON.stringify(args)}`, requestId }, BACKGROUND_CONTEXT);
-			root.release();
+			await giveWork("mine", requestId, { cwd: own, tools: ["bash"] });
 			ownRuns++;
 			const listed = await until(agents.children, (value) =>
 				Boolean(value?.[session.id]?.some((child) => child.name === "mine")),
