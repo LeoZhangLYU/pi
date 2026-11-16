@@ -21,7 +21,6 @@ import {
 	ChevronIcon,
 	CloseIcon,
 	ContextUsage,
-	CostPanel,
 	closeLayers,
 	conversationRoute,
 	type Detail,
@@ -117,7 +116,7 @@ import { type Session, Sessions } from "../sessions/contract.ts";
 import { SessionMetrics, SessionStatus, WorkerControl } from "../status/contract.ts";
 import { type Child, conversationLocation, SubagentControl, Subagents } from "../subagents/contract.ts";
 import { SessionTree } from "../tree/contract.ts";
-import { Chat, ChatCosts, TranscriptEntries } from "./contract.ts";
+import { Chat, TranscriptEntries } from "./contract.ts";
 import { chatMessages } from "./messages.ts";
 
 type ChatTranslator = Translator<"p2.chat", MessagesOf<typeof chatMessages>>;
@@ -914,10 +913,8 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	);
 	const metrics = useObject(SessionMetrics, { session: sessionId, viewer });
 	const clients = useReadable(metrics?.clients) ?? 0;
-	const usage = useReadable(metrics?.usage) ?? undefined;
 	const cwdSheet = useSheet("cwd");
 	const modelSheet = useSheet("model");
-	const costSheet = useSheet("cost");
 	/**
 	 * Restored text goes into the composer, which takes the focus, as in Pi Mobile; sending it again is a new message
 	 * (each send has its own request ID). Stop and others' withdrawals put it before the draft, a queue edit after.
@@ -1219,7 +1216,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	const modelControl = owner ? <ModelControl resources={resources} {...(choice ? { choice } : {})} /> : null;
 	const footer = (
 		<SessionStats
-			usage={usage}
 			cacheUsage={stats?.latestAssistantUsage}
 			clients={clients}
 			context={
@@ -1230,7 +1226,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 						? "pending"
 						: undefined
 			}
-			onCost={() => openLayer({ kind: "sheet", name: "cost" })}
 			controls={modelControl}
 		/>
 	);
@@ -1242,11 +1237,10 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	// The dock (`Dock`): a subagent's bar above, then the composer, or a bar in its place for those who may not write.
 	const subagentBar = child && (
 		<div className="composer-wrap subagent-wrap">
-			{/* A one-shot view has no composer, which otherwise carries this button. */}
-			{oneShot && toBottom}
+			{toBottom}
 			<div className="subagent-bar">
 				<span>
-					{oneShot ? t("oneShotAgent") : ""}
+					{t("oneShotAgent")}
 					{t("tools")} {child.tools.join(", ") || t("none")}
 					{!oneShot && viewLocation && t("inLocation", locationLabel(viewLocation.env, viewLocation.cwd))}
 					{!oneShot && !child.location && t("followsSession")}
@@ -1404,24 +1398,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 					onClose={closeLayers}
 				/>
 			)}
-			{costSheet && (
-				<CostPanel
-					load={async () => {
-						const costs = host.hold(
-							ChatCosts,
-							{ session: sessionId, conversation: conversationId },
-							BACKGROUND_CONTEXT,
-						);
-						try {
-							return await costs.costs(BACKGROUND_CONTEXT);
-						} finally {
-							costs.release();
-						}
-					}}
-					onClose={closeLayers}
-				/>
-			)}
-
 			<ErrorToast error={error} onDismiss={() => setError(undefined)} />
 			{place(
 				<div className="scroller transcript" ref={follow.scroller}>

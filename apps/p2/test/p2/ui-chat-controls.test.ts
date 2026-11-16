@@ -28,7 +28,7 @@ describe("chat control parity", { skip: !browserTests }, () => {
 		await browser?.close();
 		await fixture?.close();
 	});
-	it("shows one canonical toolbar, opens model/cost/share from the footer, and counts separate browser pages", async () => {
+	it("shows one canonical toolbar, opens the model picker from the footer, shows no spend, and counts separate browser pages", async () => {
 		await browser.metrics(390, 844);
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${id}`);
 		await browser.wait(`document.querySelector('.session-stats .client-count')?.textContent.trim()==='1'`);
@@ -53,8 +53,15 @@ describe("chat control parity", { skip: !browserTests }, () => {
 		await browser.evaluate(input(".composer textarea", "hello controls"));
 		await browser.click("button[aria-label=Send]");
 		await browser.wait(
-			`document.querySelector('.messages .assistant')?.textContent.includes('Echo: hello controls') && document.querySelector('.cost-link')`,
+			`document.querySelector('.messages .assistant')?.textContent.includes('Echo: hello controls') && !document.querySelector('.composer .round.stop')`,
 		);
+		// The footer has viewers, the cache hit rate and the context bar; no spend.
+		const footer = await browser.evaluate<{ text: string; costLink: boolean }>(
+			`({ text: document.querySelector('.session-stats').textContent, costLink: Boolean(document.querySelector('.cost-link')) })`,
+		);
+		assert.match(footer.text, /chr/);
+		assert.doesNotMatch(footer.text, /\$/);
+		assert.equal(footer.costLink, false);
 		// The sent message and the answer show their time, with the full moment as the tooltip; the message has Copy.
 		const times = await browser.evaluate<{ actions: string[]; sent: number; title: boolean }[]>(
 			`[...document.querySelectorAll('.messages .user, .messages .assistant')].filter((e) => e.querySelector('.message-actions')).map((e) => { const time = e.querySelector('.message-actions .message-time'); return { actions: [...e.querySelector('.message-actions').children].map((child) => child.classList.contains('message-time') ? 'time' : child.getAttribute('aria-label')), sent: Date.now() - Date.parse(time.dateTime), title: Boolean(time.title) }; })`,
@@ -67,9 +74,6 @@ describe("chat control parity", { skip: !browserTests }, () => {
 			],
 		);
 		assert.ok(times.every(({ sent }) => sent >= 0 && sent < 60_000));
-		await browser.click(".cost-link");
-		await browser.wait(`document.querySelector('.cost-table tbody tr')`);
-		await browser.click("[role=dialog] button[aria-label=Close]");
 	});
 	it("keeps unsent draft/attachments while navigating and relocates through both cwd entries without losing history", async () => {
 		await browser.metrics(1280, 900);

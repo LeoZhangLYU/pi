@@ -155,7 +155,13 @@ export function deriveTyped<const S extends readonly (Watchable<unknown> | Nativ
  */
 export function defineTypedState<T extends object>(
 	name: string,
-	options: { readonly schema: Schema<T>; readonly version: number; readonly initial: () => NoInfer<T> },
+	options: {
+		readonly schema: Schema<T>;
+		readonly version: number;
+		readonly initial: () => NoInfer<T>;
+		/** Maps a value of an older version `from` (a reload changed the definition) to this version's shape; pure. */
+		readonly migrate?: (old: JsonObject, from: number) => NoInfer<T>;
+	},
 ): StateDefinition<T & JsonObject, false, false> {
 	// Typed as Chord's defineState is, but for any object type `T` (see above).
 	return defineState(name, options as never) as unknown as StateDefinition<T & JsonObject, false, false>;

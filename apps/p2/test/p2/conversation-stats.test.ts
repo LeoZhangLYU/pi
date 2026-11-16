@@ -69,7 +69,7 @@ test("appended entries give what pi-ai's estimate gives over the whole context",
 		assert.equal(tally.advance(window(all.slice(Math.max(0, end - 3), end), all[end - 4]?.id)), true);
 		assert.equal(tally.stats.contextTokens, estimateContextTokens(contextOf(all.slice(0, end)).messages).tokens);
 	}
-	// The latest response's usage, also a failed one, as the cost line shows it.
+	// The latest response's usage, also a failed one, as the footer's cache hit rate reads it.
 	assert.deepEqual(tally.stats.latestAssistantUsage, usage(0));
 	// A view without new entries changes nothing.
 	const before = tally.stats;

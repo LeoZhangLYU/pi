@@ -30,18 +30,6 @@ export const ViewSchema = unsafe<ConversationView | null>(unknown());
 /** Numbers about the conversation's active context, which the window does not hold; null until computed. */
 export const StatsSchema = unsafe<ActiveStats | null>(unknown());
 
-/** One response's cost, for the cost sheet (`Chat.costs`). */
-export const AssistantCostSchema = obj({
-	entryId: str(),
-	timestamp: num(),
-	cost: num(),
-	/** Absent when the response reported no prompt tokens. */
-	cacheHit: opt(num()),
-	provider: str(),
-	model: str(),
-	stopReason: str(),
-});
-
 const AuthorSchema = obj({
 	kind: union([literal("owner"), literal("guest")]),
 	id: str(),
@@ -163,16 +151,14 @@ export type Submit = Static<typeof SubmitSchema>;
  * watch, and the operations that need an author, which callers pass explicitly.
  */
 export const Conversation = local("p2.conversation", {
-	/** 2: user shell commands moved to `ShellCommands` (chat/shell.ts). */
-	version: 2,
+	/** 2: user shell commands moved to `ShellCommands` (chat/shell.ts). 3: `costs` is gone with the cost sheet. */
+	version: 3,
 	params: { conversation: param.int() },
 	members: {
 		/** The view's window, as every viewer holds it. */
 		view: ViewSchema,
 		/** The active context's numbers. */
 		stats: StatsSchema,
-		/** Each response of the active range with its cost. */
-		costs: method(undefined, arr(AssistantCostSchema)),
 		submit: method(SubmitSchema, obj({ submissionId: num() })),
 		/**
 		 * Appends a display-only entry (no model message) through a Durable write submission: placed at once when idle,
@@ -255,19 +241,6 @@ export const Chat = remote("p2.chat", {
 				abortShell: method(obj({ shellId: str() }), obj({ aborted: bool() })),
 			},
 		},
-	},
-});
-
-/**
- * Each response of a conversation's active range with its cost, for whoever may view it (the cost sheet: a client's
- * view holds only a window).
- */
-export const ChatCosts = remote("p2.chat-costs", {
-	version: 1,
-	params: { session: param.str(), conversation: param.int() },
-	hostAddress: sessionHost,
-	variants: {
-		viewer: { methods: { costs: method(undefined, arr(AssistantCostSchema)) } },
 	},
 });
 

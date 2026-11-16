@@ -6,7 +6,6 @@ export * from "../../web/ArtifactPicker.tsx";
 export * from "../../web/activity/api.ts";
 export * from "../../web/Chat.tsx";
 export * from "../../web/Code.tsx";
-export * from "../../web/CostPanel.tsx";
 export * from "../../web/composer-state.tsx";
 export * from "../../web/conversation-cache.ts";
 export * from "../../web/Drawer.tsx";

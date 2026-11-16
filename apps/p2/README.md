@@ -171,7 +171,7 @@ project picker; the `conversations` tool lists projects and can create a session
 entry of a conversation's last request expires (5 minutes for Anthropic and Claude on Radius), p2 sends the request
 again with a one-token answer, while that is cheaper than writing the cache again. `"streaming"` warms while a run
 streams (up to an hour, e.g. during a long tool call); `"idle"` also warms the main conversation for up to 30 minutes
-after its run answered. The refreshes count in the conversation's cost. `stream.cacheRetention: "long"` writes 1-hour
+after its run answered. The refreshes count in the conversation's recorded token usage. `stream.cacheRetention: "long"` writes 1-hour
 cache entries instead (at twice the input price).
 
 ### Voice mode

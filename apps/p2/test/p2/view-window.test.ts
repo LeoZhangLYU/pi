@@ -1,14 +1,14 @@
 // The windowed conversation view on the real server and a Durable session worker: a long conversation's view holds
 // Durable's window (its newest entries, `before` the one just before them); the client's transcript pages in the rest
-// through `entries` (also to reach one entry); the active context's numbers come as `stats` and from `costs`; and a
-// lingering conversation (`CLIENT_LINGER`) keeps view and pages.
+// through `entries` (also to reach one entry); the active context's numbers come as `stats`; and a lingering
+// conversation (`CLIENT_LINGER`) keeps view and pages.
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { BACKGROUND_CONTEXT, follow, UI_LINGER, whenLive } from "@p2/app/v1";
-import { Chat, ChatCosts } from "../../plugins/chat/contract.ts";
+import { Chat } from "../../plugins/chat/contract.ts";
 import { Sessions, SessionTransfer } from "../../plugins/sessions/contract.ts";
 import type { Host } from "../../src/runtime/chord.ts";
 import { transcriptOf } from "../../src/web/history.ts";
@@ -42,7 +42,7 @@ describe("windowed conversation view", () => {
 		await fixture?.close();
 	});
 
-	it("holds Durable's window; the transcript pages in the rest; stats and costs cover the active context", async () => {
+	it("holds Durable's window; the transcript pages in the rest; stats cover the active context", async () => {
 		const chat = await chatOf();
 		const store = storeOf(`${session}#1`, chat);
 		const stop = store.subscribe(() => {});
@@ -61,7 +61,7 @@ describe("windowed conversation view", () => {
 				all.map((entry) => entry.id),
 				all.map((entry) => entry.id).toSorted((a, b) => a - b),
 			);
-			// The numbers are those of the whole active context, and `costs` lists every response.
+			// The numbers are those of the whole active context.
 			const stats = await until(chat.stats, (value) => Boolean(value));
 			const answers = all.flatMap((entry) => {
 				const message = entry.model?.[0];
@@ -69,10 +69,6 @@ describe("windowed conversation view", () => {
 			});
 			assert.ok((stats?.contextTokens ?? 0) > 0);
 			assert.deepEqual(stats?.latestAssistantUsage, answers.at(-1)?.usage);
-			const sheet = owner.hold(ChatCosts, { session, conversation: 1 }, BACKGROUND_CONTEXT);
-			const costs = await sheet.costs(BACKGROUND_CONTEXT);
-			sheet.release();
-			assert.equal(costs.length, answers.length);
 		} finally {
 			stop();
 			chat.release();

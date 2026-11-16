@@ -1,5 +1,6 @@
 import { num, obj } from "@earendil-works/pi-schema";
 import {
+	type AcceptsTable,
 	canView,
 	defineFacet,
 	defineTypedState,
@@ -13,12 +14,42 @@ import {
 import { Hosts, serverOf } from "@p2/app/v1/server";
 import { ReportFields, SessionMetrics, SessionStatus, type Status, StatusStore, WorkerControl } from "./contract.ts";
 
-/** The latest report of each session's worker, with the generation that sent it. */
+type Report = { generation: number; tasks: number; busy: number[] };
+
+/** The latest report of each session's worker, with the generation that sent it. 2: no usage. */
 const Reports = defineTypedState("p2.status-reports", {
 	schema: obj({ reports: record(obj({ generation: num(), ...ReportFields })) }),
-	version: 1,
+	version: 2,
 	initial: () => ({ reports: {} }),
+	// A reload from version 1 drops each report's usage.
+	migrate: (old) => {
+		const reports = (old.reports ?? {}) as Record<string, Report>;
+		return {
+			reports: Object.fromEntries(
+				Object.entries(reports).map(([session, { generation, tasks, busy }]) => [
+					session,
+					{ generation, tasks, busy },
+				]),
+			),
+		};
+	},
 });
+
+/**
+ * Pages and workers built with version 1 of `SessionStatus`: statuses read as they are (their usage was optional), and
+ * a report's usage is dropped.
+ */
+const SESSION_STATUS_ACCEPTS: AcceptsTable<typeof SessionStatus> = {
+	1: {
+		state: { reader: { statuses: (statuses) => statuses } },
+		methods: { report: { args: ({ usage: _usage, ...report }) => report } },
+	},
+};
+
+/** Pages built with version 1 of `SessionMetrics` read no spend. */
+const SESSION_METRICS_ACCEPTS: AcceptsTable<typeof SessionMetrics> = {
+	1: { state: { reader: { usage: () => null } } },
+};
 
 export default defineFacet((host) => {
 	// Who looks at a session: one entry per `SessionMetrics` reference (its params name the session and the viewer).
@@ -46,17 +77,12 @@ export default defineFacet((host) => {
 		);
 		return {
 			statuses,
-			report: async ({ session, generation, tasks, busy, usage }, ctx) => {
+			report: async ({ session, generation, tasks, busy }, ctx) => {
 				// A report of an older worker (one that exited while its report travelled) is dropped.
 				const worker = hosts.workers.value[session];
 				if (worker === undefined || !worker.running || worker.generation !== generation) return null;
 				await reports.change((draft) => {
-					draft.reports[session] = {
-						generation,
-						tasks,
-						busy: [...busy].sort((a, b) => a - b),
-						...(usage ? { usage } : {}),
-					};
+					draft.reports[session] = { generation, tasks, busy: [...busy].sort((a, b) => a - b) };
 				}, ctx);
 				return null;
 			},
@@ -79,29 +105,35 @@ export default defineFacet((host) => {
 		};
 	});
 
-	host.serve(SessionMetrics, ({ session }, principal, self) => {
-		if (!canView(principal, session)) throw forbidden("viewers only");
-		const status = self.get(StatusStore, {});
-		const clients = self.derive(
-			[metrics],
-			([references]) =>
-				new Set(references.filter((each) => each.params.session === session).map((each) => each.params.viewer))
-					.size,
-		);
-		const usage = deriveTyped(self, [status.statuses], ([value]) => value[session]?.usage ?? null);
-		return { variant: "reader", members: { clients, usage } };
-	});
+	host.serve(
+		SessionMetrics,
+		({ session }, principal, self) => {
+			if (!canView(principal, session)) throw forbidden("viewers only");
+			const clients = self.derive(
+				[metrics],
+				([references]) =>
+					new Set(references.filter((each) => each.params.session === session).map((each) => each.params.viewer))
+						.size,
+			);
+			return { variant: "reader", members: { clients } };
+		},
+		{ accepts: SESSION_METRICS_ACCEPTS },
+	);
 
-	host.serve(SessionStatus, (_params, principal, self) => {
-		const store = self.get(StatusStore, {});
-		if (isWorker(principal)) {
-			const { session, generation } = principal;
-			return {
-				variant: "reporter",
-				members: { report: (report, ctx) => store.report({ ...report, session, generation }, ctx) },
-			};
-		}
-		if (!isOwner(principal)) throw forbidden("owners only");
-		return { variant: "reader", members: { statuses: store.statuses } };
-	});
+	host.serve(
+		SessionStatus,
+		(_params, principal, self) => {
+			const store = self.get(StatusStore, {});
+			if (isWorker(principal)) {
+				const { session, generation } = principal;
+				return {
+					variant: "reporter",
+					members: { report: (report, ctx) => store.report({ ...report, session, generation }, ctx) },
+				};
+			}
+			if (!isOwner(principal)) throw forbidden("owners only");
+			return { variant: "reader", members: { statuses: store.statuses } };
+		},
+		{ accepts: SESSION_STATUS_ACCEPTS },
+	);
 });

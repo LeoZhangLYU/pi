@@ -25,7 +25,6 @@ import {
 	type Context,
 	type Ctx,
 	canSend,
-	canView,
 	DEFAULT_OWNER_NAME,
 	defineFacet,
 	defineTypedState,
@@ -48,7 +47,6 @@ import {
 	InputGates,
 	mainConversation,
 	ReadOnlyConversations,
-	responseCosts,
 	workerOf,
 } from "@p2/app/v1/worker";
 import { DraftStore } from "../drafts/contract.ts";
@@ -56,15 +54,7 @@ import { type Attachment, Attachments } from "../files/contract.ts";
 import { WorkerModels } from "../models/contract.ts";
 import { Sessions } from "../sessions/contract.ts";
 import { StatusReport } from "../status/contract.ts";
-import {
-	Chat,
-	ChatCosts,
-	Conversation,
-	type EntriesPage,
-	type ModelMeta,
-	SendRouters,
-	StatsSchema,
-} from "./contract.ts";
+import { Chat, Conversation, type EntriesPage, type ModelMeta, SendRouters, StatsSchema } from "./contract.ts";
 import { ShellCommands, serveShellCommands } from "./shell.ts";
 
 /** Who wrote a queued input and what they typed, from its entry data; tool-originated input has none. */
@@ -203,10 +193,6 @@ export default defineFacet((host) => {
 				view,
 				stats: deriveTyped(self, [live], ([value]) => value.stats),
 				model: modelState,
-				costs: async (ctx) =>
-					responseCosts((await target().conversation.context(ctx)).entries).map(({ cacheHit, ...cost }) =>
-						cacheHit === undefined ? cost : { ...cost, cacheHit },
-					),
 				compact: async ({ instructions }, ctx) => {
 					const taskId = await target().conversation.compact(instructions?.trim() || undefined, ctx);
 					await status.push(ctx);
@@ -486,10 +472,5 @@ export default defineFacet((host) => {
 			},
 		};
 	};
-	host.serve(ChatCosts, ({ session, conversation }, principal, self) => {
-		if (!canView(principal, session)) throw forbidden("viewers only");
-		const chat = self.get(Conversation, { conversation });
-		return { variant: "viewer", members: { costs: (ctx) => chat.costs(ctx) } };
-	});
 	host.serve(Chat, chatFactory);
 });

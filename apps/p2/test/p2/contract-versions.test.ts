@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { arr, bool, int, nul, num, obj, opt, str, union } from "@earendil-works/pi-schema";
+import { arr, bool, int, nul, num, obj, opt, str, union, unknown } from "@earendil-works/pi-schema";
 import {
 	BACKGROUND_CONTEXT,
 	DirectoryListingSchema,
@@ -20,6 +20,7 @@ import {
 	propertiesOf,
 	remote,
 	serverHost,
+	record,
 	sessionHost,
 	ThinkingLevelSchema,
 } from "@p2/app/v1";
@@ -357,6 +358,31 @@ const EnvsV2 = evolve(EnvsV1, (e) =>
 describe("older contract versions against the current server (fake provider)", () => {
 	let fixture: Fixture;
 	let owner: Host;
+/** `SessionStatus` version 1, as released before the cost display was removed: statuses and reports with `usage`. */
+const SessionStatusV1 = remote("p2.session-status", {
+	version: 1,
+	params: {},
+	hostAddress: serverHost,
+	variants: {
+		reader: {
+			state: {
+				statuses: record(
+					obj({ running: bool(), error: opt(str()), usage: opt(unknown()), tasks: num(), busy: arr(num()) }),
+				),
+			},
+		},
+		reporter: { methods: { report: method(obj({ tasks: num(), busy: arr(num()), usage: opt(unknown()) })) } },
+	},
+});
+
+/** `SessionMetrics` version 1: the session's spend beside its viewers. */
+const SessionMetricsV1 = remote("p2.session-metrics", {
+	version: 1,
+	params: { session: param.str(), viewer: param.str({ min: 1, max: 80 }) },
+	hostAddress: serverHost,
+	variants: { reader: { state: { clients: num(), usage: union([unknown(), nul()]) } } },
+});
+
 	let session: Session;
 	let branch: number;
 
@@ -467,3 +493,19 @@ describe("older contract versions against the current server (fake provider)", (
 		v3.release();
 	});
 });
+
+	it("binds SessionStatus v1: statuses as they are, without usage", async () => {
+		const ref = await boundIn(owner, SessionStatusV1, {}, "reader");
+		const statuses = await until(ref.statuses, (value) => value?.[session.id] !== undefined);
+		const status = statuses[session.id]!;
+		assert.equal(typeof status.running, "boolean");
+		assert.equal("usage" in status, false);
+		ref.release();
+	});
+
+	it("binds SessionMetrics v1: viewers, and no spend", async () => {
+		const ref = await boundIn(owner, SessionMetricsV1, { session: session.id, viewer: "old-tab" }, "reader");
+		await until(ref.clients, (value) => typeof value === "number");
+		assert.equal(await until(ref.usage, (value) => value !== undefined), null);
+		ref.release();
+	});

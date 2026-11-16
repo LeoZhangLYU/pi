@@ -20,7 +20,7 @@ import type { ArtifactInfo } from "../runtime/schemas.ts";
 
 type ConversationPeer = { id: string; title: string };
 
-import { type AssistantCost, cacheHitRate } from "../runtime/conversation-stats.ts";
+import { cacheHitRate } from "../runtime/conversation-stats.ts";
 import { type MessageData, messageData } from "../runtime/input.ts";
 import type { Author } from "../runtime/sender.ts";
 import { SHELL_ENTRY, shellData } from "../runtime/shell.ts";
@@ -97,7 +97,7 @@ export type Item =
 	| { type: "tool"; key: string; tool: ToolView }
 	/** Entries between two loaded ones are missing (`TranscriptStore.fillGap`); `loading` while they load. */
 	| { type: "gap"; key: string; gap: Gap; loading: boolean };
-export { type AssistantCost, cacheHitRate };
+export { cacheHitRate };
 
 type Gap = Extract<TranscriptItem, { kind: "gap" }>;
 

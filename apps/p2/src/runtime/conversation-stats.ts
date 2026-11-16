@@ -1,25 +1,13 @@
 // Numbers about a conversation's active context, which the worker keeps: the estimated context size and the latest
-// response's usage (from the entries its view's window appends), and each response's cost (from Durable's
-// `Conversation.context()`). A client holds only a window of the transcript (`Chat.view`), so it gets them from the
-// worker (`Chat.stats`, `ChatCosts`).
-import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
+// response's usage (from the entries its view's window appends). A client holds only a window of the transcript
+// (`Chat.view`), so it gets them from the worker (`Chat.stats`).
+import type { Message, Usage } from "@earendil-works/pi-ai";
 import {
 	calculateContextTokens,
 	estimateContextTokens,
 	estimateMessageTokens,
 } from "@earendil-works/pi-ai/utils/estimate";
-import type { ContextView, ConversationView, EntryRecord } from "@earendil-works/pi-durable";
-
-export type AssistantCost = {
-	entryId: string;
-	timestamp: number;
-	cost: number;
-	/** Undefined when the response reported no prompt tokens. */
-	cacheHit: number | undefined;
-	provider: string;
-	model: string;
-	stopReason: string;
-};
+import type { ContextView, ConversationView } from "@earendil-works/pi-durable";
 
 /** Share of prompt tokens served from the provider cache, or undefined without prompt tokens. */
 export function cacheHitRate(usage: Usage): number | undefined {
@@ -102,24 +90,4 @@ export class ContextTally {
 			this.#trailing = 0;
 		} else this.#trailing += estimateMessageTokens(message);
 	}
-}
-
-/** Each response of the active entries with its cost, in commit order. */
-export function responseCosts(entries: readonly EntryRecord[]): AssistantCost[] {
-	return entries.flatMap((entry) => {
-		const message = entry.model?.[0];
-		if (message?.role !== "assistant") return [];
-		const response = message as AssistantMessage;
-		return [
-			{
-				entryId: String(entry.id),
-				timestamp: response.timestamp,
-				cost: response.usage.cost.total,
-				cacheHit: cacheHitRate(response.usage),
-				provider: response.provider,
-				model: response.model,
-				stopReason: response.stopReason,
-			},
-		];
-	});
 }
