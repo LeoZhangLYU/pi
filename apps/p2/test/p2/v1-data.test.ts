@@ -25,6 +25,19 @@ import { clientHost, holdIn, http, localOwner, until } from "./helpers.ts";
 
 const fixture = new URL("../fixtures/v1-data/", import.meta.url);
 const expected = JSON.parse(readFileSync(new URL("report.json", fixture), "utf8")) as DataReport;
+/**
+ * A report without the HR managers: every session whose worker starts gets its resident HR manager, which the data of
+ * before the team does not have. It is an addition of the start, not data lost, so it is not compared.
+ */
+const withoutHr = (report: DataReport): DataReport => ({
+	...report,
+	sessions: Object.fromEntries(
+		Object.entries(report.sessions).map(([id, session]) => [
+			id,
+			{ ...session, subagents: session.subagents.filter((child) => child.name !== "hr") },
+		]),
+	),
+});
 const byTitle = (title: string): string => {
 	const found = Object.entries(expected.sessions).find(([, session]) => session.title === title);
 	assert(found, title);
@@ -89,7 +102,10 @@ test("a v1 data directory opens with everything in it", { timeout: 120_000 }, as
 		t.after(() => owner.close(BACKGROUND_CONTEXT));
 
 		const children = await holdIn(owner, Subagents, {}, "reader");
-		const worktree = (await until(children.children, (value) => Boolean(value?.[alpha]?.length)))?.[alpha]?.[0];
+		// Beside the resident HR manager: found by name, not by its place in the list.
+		const worktree = (
+			await until(children.children, (value) => value?.[alpha]?.some((child) => child.name === "worktree") === true)
+		)?.[alpha]?.find((child) => child.name === "worktree");
 		assert.equal(worktree?.name, "worktree");
 		assert.deepEqual(worktree?.location, { env: null, cwd: "/" });
 
@@ -146,7 +162,15 @@ test("a v1 data directory opens with everything in it", { timeout: 120_000 }, as
 	} finally {
 		await server.close();
 	}
-	const after = dataReport(dataDir);
+	const started = dataReport(dataDir);
+	// The sessions whose worker started (not the archived one) got their resident HR manager.
+	for (const title of ["Alpha", "Beta"])
+		assert.ok(
+			started.sessions[byTitle(title)]?.subagents.some((child) => child.name === "hr"),
+			`${title} has its HR manager`,
+		);
+	assert.ok(!started.sessions[byTitle("Archived")]?.subagents.some((child) => child.name === "hr"));
+	const after = withoutHr(started);
 	// The upload sent above is a message more in Beta, and nothing else changed.
 	assert.deepEqual(
 		{ ...after, sessions: { ...after.sessions, [byTitle("Beta")]: expected.sessions[byTitle("Beta")] } },
