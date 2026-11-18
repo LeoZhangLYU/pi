@@ -5,7 +5,6 @@ import { chatMessages } from "../../plugins/chat/messages.ts";
 import { chatModeMessages } from "../../plugins/chat-mode/messages.ts";
 import { devicesMessages } from "../../plugins/devices/messages.ts";
 import { envsMessages } from "../../plugins/envs/messages.ts";
-import { familiarMessages } from "../../plugins/familiar/messages.ts";
 import { historyMessages } from "../../plugins/history/messages.ts";
 import { loginMessages } from "../../plugins/login/messages.ts";
 import { logsMessages } from "../../plugins/logs/messages.ts";
@@ -56,7 +55,6 @@ test("every catalog has the same keys and value types in English and Chinese", (
 		["p2.chat-mode", chatModeMessages],
 		["p2.sessions", sessionsMessages],
 		["p2.envs", envsMessages],
-		["p2.familiar", familiarMessages],
 		["p2.workspace", workspaceMessages],
 		["p2.login", loginMessages],
 		["p2.ports", portsMessages],

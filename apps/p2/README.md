@@ -9,6 +9,9 @@ A self-hosted Pi Durable UI built from independent [Chord](../../packages/chord)
 shell control on that server and its workers; this is not server-side filesystem isolation. The Web UI is the only
 client.
 
+This build keeps **one session** on the server: `/` opens it, the drawer lists no other, and nothing in the product
+starts another. Its team therefore lasts as long as the session does.
+
 ## Run
 
 Requires Node 22.19+ and the monorepo's installed dependencies and model data. From the repository root:
@@ -160,7 +163,7 @@ A project is one codebase in several places, one per environment. `<P2_DATA_DIR>
 Object order is display order; array order is preference. A place without `env` is this device; `path` is absolute or
 starts with `~` (that machine's home); a project has at most one place per environment. p2 watches the file: valid edits
 apply at once, an invalid one keeps the last valid projects and shows why. Projects are owner-only. The Web UI has no
-project picker; the `conversations` tool lists projects and can create a session in one:
+project picker; the `conversations` tool lists projects (this build keeps a single session, so it starts none):
 
 - A session belongs to a project only when it was created there, or copied (`/clone`, `/fork`) from a session that
   does. Its folder does not matter: a new session from the Web never puts it in a project, and moving it keeps its
@@ -213,6 +216,10 @@ The main agent works with a team of agents that run in the background, in three 
 The main agent is the team's only entry: you talk to it, and the members have no conversation of their own in the UI.
 The Team panel shows the members and the work given out; to staff, stop or archive a member, ask the main agent,
 which asks the HR manager. Subagents from before the team are direct executors and keep working as they did.
+
+Members evolve in place: their conversations and configuration live as long as the session, and a member can keep
+notes with the `remember` tool. A note becomes part of that member's instructions, so it survives compaction and
+restarts; the newest 20 are kept. (Scheduled restarts and compaction of long member conversations come later.)
 
 Every piece of work given to a member is a delegation: working, then done, failed or stopped. A manager's answer is
 reported to whoever gave it the work only once all the work it gave its executors has ended; until then its

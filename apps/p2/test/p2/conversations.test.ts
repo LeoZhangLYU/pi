@@ -187,17 +187,19 @@ describe("conversations (fake provider)", () => {
 			message: "in a folder",
 		});
 		assert.ok(folder.action === "create" && folder.title === "Folder" && folder.to !== fresh);
-		assert.equal(
-			(await call(a, { action: "create", project: "ws", cwd: "/tmp", message: "both" } as Query)).isError,
-			true,
-		);
-		assert.equal((await call(a, { action: "create", project: "nope", message: "unknown" })).isError, true);
+		// The tool starts no session: this build keeps a single one (the broker itself still can, for the server).
+		const refused = await call(a, query);
+		assert.equal(refused.isError, true);
+		assert.match(text(refused), /single session/);
 		// Without a model the sender's; a named one must be signed in.
 		const rows = await until(sessions.sessions, (list) => Boolean(list?.some((row) => row.id === folder.to)));
 		assert.deepEqual(rows?.find((row) => row.id === folder.to)?.model, rows?.find((row) => row.id === alpha)?.model);
-		const unknown = { action: "create", cwd: fixture.workspace, model: "faux/missing", message: "x" } as const;
-		assert.match(text(await call(a, unknown)), /not a signed-in model/);
-		const named = await broker(alpha, "create-named", { ...unknown, model: "faux/faux-1" });
+		const named = await broker(alpha, "create-named", {
+			action: "create",
+			cwd: fixture.workspace,
+			model: "faux/faux-1",
+			message: "x",
+		});
 		assert.equal(named.action, "create");
 
 		await until(status.statuses, (value) => value?.[fresh]?.tasks === 0);
@@ -216,8 +218,9 @@ describe("conversations (fake provider)", () => {
 		});
 		chat.release();
 
-		for (const action of ["stop", "archive"] as const)
-			assert.match(text(await call(a, { action, to: alpha })), /yourself/);
+		assert.match(text(await call(a, { action: "stop", to: alpha })), /yourself/);
+		// The single session cannot be archived (the tool refuses before the broker).
+		assert.match(text(await call(a, { action: "archive", to: alpha })), /single session/);
 		await broker(alpha, "archive-fresh", { action: "archive", to: fresh });
 		await until(sessions.sessions, (rows) => rows?.find((row) => row.id === fresh)?.archivedAt !== null);
 		const without = await broker(alpha, "list-archived", { action: "list" });

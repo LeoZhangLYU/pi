@@ -13,7 +13,6 @@ import {
 } from "@p2/app/v1";
 import {
 	closeLayers,
-	conversationRoute,
 	Drawer,
 	LanguageSetting,
 	MoreIcon,
@@ -31,8 +30,6 @@ import {
 	useConnected,
 	useHost,
 	useMessages,
-	useNavigation,
-	useNewSessionState,
 	useObject,
 	useOptimisticCall,
 	useOwner,
@@ -48,7 +45,6 @@ import { SessionStatus } from "../status/contract.ts";
 import { SessionTree } from "../tree/contract.ts";
 import { BranchSheet } from "./BranchSheet.tsx";
 import { type Operation, type Session, Sessions } from "./contract.ts";
-import { type DrawerRows, DrawerRowsContext } from "./contract.web.tsx";
 import { sessionsMessages } from "./messages.ts";
 import { SessionSheet } from "./SessionSheet.tsx";
 
@@ -175,7 +171,6 @@ function Sidebar() {
 	const { t } = useMessages(sessionsMessages);
 	const connected = useConnected();
 	const route = useRoute();
-	const nav = useNavigation();
 	const service = useObject(Sessions, {});
 	const catalog = liveIn(service, "owner");
 	// As the server last said (kept across starts): unread marks and search hold without waiting for the catalog.
@@ -220,17 +215,19 @@ function Sidebar() {
 			}),
 		[list, statuses, answers, reads, operations, dismiss, t],
 	);
-	// Sessions a `drawer-head` entry shows are left out of the folders.
-	const [apart, setApart] = useState<Readonly<Record<string, readonly string[]>>>({});
-	const listApart = useCallback(
-		(key: string, ids: readonly string[]) => setApart((current) => ({ ...current, [key]: ids })),
-		[],
+	// This build keeps a single session: the most recently used active one. Others stay in storage, unlisted: there is
+	// no entry to start another, and the team lives in this one.
+	const single = useMemo(
+		() =>
+			sessions
+				.filter((session) => session.archivedAt === null)
+				.reduce<SessionSummary | undefined>(
+					(kept, session) => (kept === undefined || session.updatedAt > kept.updatedAt ? session : kept),
+					undefined,
+				),
+		[sessions],
 	);
-	const rows = useMemo<DrawerRows>(() => ({ sessions, listApart }), [sessions, listApart]);
-	const folders = useMemo(() => {
-		const hidden = new Set(Object.values(apart).flat());
-		return hidden.size ? sessions.filter((session) => !hidden.has(session.id)) : sessions;
-	}, [sessions, apart]);
+	const folders = useMemo(() => (single ? [single] : []), [single]);
 	// The open session's main conversation, shown on a visible page, is read through its latest answer.
 	const visible = usePageVisible();
 	const viewed = list?.find((session) => session.id === route.session);
@@ -266,17 +263,6 @@ function Sidebar() {
 		(session: string, conversation?: number) =>
 			navigate({ session, conversation: conversation ?? list?.find((each) => each.id === session)?.main ?? 1 }),
 		[list],
-	);
-	// The restored row is back at once; the session opens once the server has it (an archived one would bounce).
-	const onRestore = useCallback(
-		(id: string, conversation?: number) => {
-			if (!catalog) return;
-			edit({ id, change: { archivedAt: null } }, async () => {
-				await catalog.restore({ id }, BACKGROUND_CONTEXT);
-				onOpen(id, conversation);
-			});
-		},
-		[catalog, edit, onOpen],
 	);
 	// A branch's switch or rename: a reference of its own (the change also reaches the session row).
 	const host = useHost();
@@ -322,22 +308,8 @@ function Sidebar() {
 			() => withTree(session.id, (tree) => tree.rename({ conversation, label }, BACKGROUND_CONTEXT)),
 		);
 	const sessionSheet = useSheet("session");
-	const { setChoice, setLocation } = useNewSessionState();
-	const onNew = useCallback(() => {
-		setChoice(undefined);
-		navigate({});
-		setTimeout(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus(), 50);
-	}, [setChoice]);
-	// A folder's "+": the new session starts in that folder's location.
-	const onNewIn = useCallback(
-		(env: string | null, cwd: string) => {
-			setLocation({ env, cwd });
-			onNew();
-		},
-		[setLocation, onNew],
-	);
 	return (
-		<DrawerRowsContext.Provider value={rows}>
+		<>
 			<Drawer
 				sessions={folders}
 				sandboxes={sandboxes}
@@ -347,11 +319,8 @@ function Sidebar() {
 				onOpen={onOpen}
 				onBranch={catalog ? onBranch : undefined}
 				onRenameBranch={catalog ? onRenameBranch : undefined}
-				onNew={onNew}
-				onNewIn={owner ? onNewIn : undefined}
 				onCollapse={toggleSidebar}
 				onSearch={search ? onSearch : undefined}
-				onRestore={onRestore}
 				head={head}
 				footer={footer}
 				onProviders={() => openLayer({ kind: "sheet", name: "providers" }, { fromDrawer: true })}
@@ -376,27 +345,15 @@ function Sidebar() {
 							catalog.rename({ id: viewed.id, title }, BACKGROUND_CONTEXT),
 						)
 					}
-					onPin={() =>
-						edit({ id: viewed.id, change: { pinned: !viewed.pinned } }, () =>
-							catalog.pin({ id: viewed.id, pinned: !viewed.pinned }, BACKGROUND_CONTEXT),
-						)
-					}
 					onCwd={() => openLayer(directoryPickerLayer(viewed.env ?? null, viewed.cwd))}
 					reindex={rebuilds.find((each) => each.session === viewed.id)}
 					onReindex={
 						search &&
 						(() => reindex(viewed.id, () => search.rebuildIndex({ session: viewed.id }, BACKGROUND_CONTEXT)))
 					}
-					onArchive={() => {
-						closeLayers();
-						void nav.replace(conversationRoute(route, undefined));
-						edit({ id: viewed.id, change: { archivedAt: Date.now() } }, () =>
-							catalog.archive({ id: viewed.id }, BACKGROUND_CONTEXT),
-						);
-					}}
 				/>
 			)}
-		</DrawerRowsContext.Provider>
+		</>
 	);
 }
 

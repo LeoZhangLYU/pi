@@ -133,6 +133,26 @@ describe("the team (fake provider)", () => {
 		sub.release();
 	});
 
+	it("lets a member keep notes that become part of its instructions", async () => {
+		const exec = await holdIn(owner, Chat, { session, conversation: member("exec-1").conversationId }, "participant");
+		// The previous test's report chain starts a turn of the main agent: it ends before this test's messages.
+		await until(chat.view, (value) => !(value?.docs["pi.live"] as { run?: unknown } | undefined)?.run);
+		const fromLead = (view: ConversationView | null | undefined) =>
+			agentMessages(view).filter((each) => each.from.name === "lead");
+		const reported = fromLead(chat.view.value).length;
+		const note = "Use pnpm, never npm, in this repository.";
+		const work = [{ action: "send", name: "exec-1", message: `remember ${JSON.stringify({ text: note })}` }];
+		await sendTo("lead", `delegates ${JSON.stringify(work)}`);
+		await until(exec.view, (view) => JSON.stringify(view?.entries ?? []).includes("Noted."));
+		const instructions = (exec.view.value?.docs["pi.agent"] as { instructions?: string }).instructions ?? "";
+		assert.match(instructions, /What you have learned so far/);
+		assert.ok(instructions.includes(note));
+		// Its report reaches the manager, whose own answer the settle task then reports: wait for that, so the tests
+		// after this one start clean.
+		await until(chat.view, (view) => fromLead(view).length > reported, 60_000);
+		exec.release();
+	});
+
 	it("takes no message or configuration for a member from the browser, but stops", async () => {
 		const sub = await holdIn(owner, Chat, { session, conversation: member("exec-2").conversationId }, "participant");
 		await assert.rejects(

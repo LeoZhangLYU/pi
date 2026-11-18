@@ -1689,6 +1689,24 @@ function NewSession() {
 function Main() {
 	const nav = useNavigation();
 	const route = useRoute();
+	// This build keeps a single session: `/` enters the most recently used active one. The new-session screen shows only
+	// when there is none yet (the first run), and a session being created there navigates itself: no redirect races it.
+	const listed = useReadable(liveIn(useObject(Sessions, {}), "owner")?.sessions);
+	const pending = useSyncExternalStore(sessionStart.subscribe, sessionStart.snapshot);
+	const single = useMemo(
+		() =>
+			(listed ?? [])
+				.filter((session) => session.archivedAt === null)
+				.reduce<Session | undefined>(
+					(kept, session) => (kept === undefined || session.updatedAt > kept.updatedAt ? session : kept),
+					undefined,
+				),
+		[listed],
+	);
+	useEffect(() => {
+		if (!route.session && single && !pending)
+			void nav.replace(conversationRoute(route, single.id, single.main), route);
+	}, [route, single, pending, nav]);
 	// The frame outlives the screens in it: its dock, with the one composer, stays while they change.
 	const [view, setView] = useState<HTMLDivElement | null>(null);
 	const [dock, setDock] = useState<HTMLDivElement | null>(null);

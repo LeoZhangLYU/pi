@@ -156,42 +156,38 @@ describe("drawer and new-session parity", { skip: !browserTests }, () => {
 		await browser.evaluate("localStorage.removeItem('pi-sidebar-width')");
 	});
 
-	it("groups cwd identities, orders pinned sessions first, lists no team member, and keeps a working member's busy dot", async () => {
+	it("lists only the one session, with no new-session entry, and keeps a working member's busy dot", async () => {
 		const owner = fixture.browser();
 		const sessions = await holdIn(owner, Sessions, {}, "owner");
 		const second = join(fixture.workspace, "second");
 		mkdirSync(second);
-		const pinned = await sessions.create({ cwd: fixture.workspace, title: "Pinned parent" }, BACKGROUND_CONTEXT);
-		const recent = await sessions.create({ cwd: fixture.workspace, title: "Recent sibling" }, BACKGROUND_CONTEXT);
+		const older = await sessions.create({ cwd: fixture.workspace, title: "Older" }, BACKGROUND_CONTEXT);
 		const other = await sessions.create({ cwd: second, title: "Other directory" }, BACKGROUND_CONTEXT);
-		await sessions.pin({ id: pinned.id, pinned: true }, BACKGROUND_CONTEXT);
+		const pinned = await sessions.create({ cwd: fixture.workspace, title: "Pinned parent" }, BACKGROUND_CONTEXT);
 		await fixture.server.host.root(async (ctx) => {
 			const catalog = await ctx.get(Catalog, {});
-			await catalog.activity({ id: pinned.id, timestamp: Date.now() + 1000 }, ctx);
-			await catalog.activity({ id: recent.id, timestamp: Date.now() + 2000 }, ctx);
-			await catalog.activity({ id: other.id, timestamp: Date.now() + 3000 }, ctx);
+			await catalog.activity({ id: older.id, timestamp: Date.now() + 1000 }, ctx);
+			await catalog.activity({ id: other.id, timestamp: Date.now() + 2000 }, ctx);
+			await catalog.activity({ id: pinned.id, timestamp: Date.now() + 3000 }, ctx);
 		}, BACKGROUND_CONTEXT);
 		await browser.metrics(1280, 900);
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${pinned.id}`);
 		await browser.wait(`[...document.querySelectorAll('.session-title')].some(e=>e.textContent==='Pinned parent')`);
-		const groups = await browser.evaluate<{ cwd: string; titles: string[] }[]>(
-			`[...document.querySelectorAll('.session-scroll .group')].map(g=>({cwd:g.querySelector('h3').title,titles:[...g.querySelectorAll('.session-main .session-title')].map(e=>e.textContent)}))`,
+		// One session only: the most recently used one, in its folder; no entry starts another.
+		assert.deepEqual(
+			await browser.evaluate<string[]>(
+				`[...document.querySelectorAll('.session-scroll .session-main .session-title')].map(e=>e.textContent)`,
+			),
+			["Pinned parent"],
 		);
-		assert.equal(groups[0].cwd, second);
-		assert.deepEqual(groups.find((group) => group.cwd === fixture.workspace)?.titles.slice(0, 2), [
-			"Pinned parent",
-			"Recent sibling",
-		]);
-		// A folder's "+" opens a new session in that folder.
-		const label = await browser.evaluate<string>(
-			`document.querySelector('.session-scroll .group h3 .group-label').textContent`,
+		assert.equal(await browser.evaluate(`document.querySelectorAll('.session-scroll .group').length`), 1);
+		assert.equal(await browser.evaluate(`document.querySelector('.group-new')===null`), true);
+		assert.equal(await browser.evaluate(`document.querySelector('.new-session')===null`), true);
+		// No archived mode either (the session cannot be archived).
+		assert.equal(
+			await browser.evaluate(`document.querySelector('.drawer-foot .foot-button[aria-pressed]')===null`),
+			true,
 		);
-		await browser.click(".session-scroll .group h3 .group-new");
-		await browser.wait(
-			`location.pathname==='/' && document.querySelector('.cwd-pick span')?.textContent===${JSON.stringify(label)}`,
-		);
-		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${pinned.id}`);
-		await browser.wait(`[...document.querySelectorAll('.session-title')].some(e=>e.textContent==='Pinned parent')`);
 		const chat = await holdIn(owner, Chat, { session: pinned.id, conversation: 1 }, "participant");
 		await chat.send({ text: "subagent", requestId: "drawer-child" }, BACKGROUND_CONTEXT);
 		const agents = await holdIn(owner, Subagents, {}, "reader");
@@ -259,34 +255,24 @@ describe("drawer and new-session parity", { skip: !browserTests }, () => {
 		);
 	});
 
-	it("preserves rename, pin and archive after moving actions out of session rows", async () => {
+	it("renames the session from its options sheet; pin and archive are gone", async () => {
 		await browser.metrics(1280, 900);
 		const sessions = await holdIn(fixture.browser(), Sessions, {}, "owner");
 		const session = await sessions.create({ cwd: fixture.workspace, title: "Options original" }, BACKGROUND_CONTEXT);
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${session.id}`);
 		await browser.click('.main button[aria-label="Session options"]');
 		await browser.wait(`document.querySelector('[role=dialog][aria-label=Session] input[aria-label=Title]')`);
+		// The single session is never pinned or archived: the sheet offers neither.
+		assert.equal(
+			await browser.evaluate(
+				`[...document.querySelectorAll('[role=dialog] .list .row-button')].some((button) => /Pin to top|Unpin|Archive/.test(button.textContent))`,
+			),
+			false,
+		);
 		await browser.evaluate(setInput("input[aria-label=Title]", "Options renamed"));
 		await browser.click("[role=dialog] button[type=submit]");
 		await browser.wait(`document.querySelector('.topbar h1')?.textContent==='Options renamed'`);
-		await browser.click('.main button[aria-label="Session options"]');
-		await browser.evaluate(
-			`[...document.querySelectorAll('[role=dialog] .list .row-button')].find((button) => button.textContent.trim() === 'Pin to top').click()`,
-		);
-		await until(sessions.sessions, (list) => Boolean(list?.find((row) => row.id === session.id)?.pinned));
-		await browser.click("[role=dialog] .row-button.danger");
-		await browser.wait(`location.pathname==='/' && !document.querySelector('[role=dialog]')`);
-		await until(sessions.sessions, (list) => Boolean(list?.find((row) => row.id === session.id)?.archivedAt));
-		await browser.click(".drawer-foot .foot-button");
-		await browser.wait(
-			`[...document.querySelectorAll('.session-main .session-title')].some(e=>e.textContent==='Options renamed')`,
-		);
-		await browser.evaluate(
-			`[...document.querySelectorAll('.session-main')].find(e=>e.querySelector('.session-title').textContent==='Options renamed').classList.add('test-restored')`,
-		);
-		await browser.click(".test-restored");
-		await browser.wait(`location.pathname==='/s/${session.id}'`);
-		await until(sessions.sessions, (list) => list?.find((row) => row.id === session.id)?.archivedAt === null);
+		await until(sessions.sessions, (list) => list?.find((row) => row.id === session.id)?.title === "Options renamed");
 	});
 
 	it("drags the phone drawer open from anywhere on the chat and closed on the drawer, never while scrolling, mirrored in RTL", async () => {

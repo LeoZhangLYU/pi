@@ -88,6 +88,7 @@ describe("tools given to agents", () => {
 		tool("team", { deferred: true, scope: "subagent" }),
 		tool("staff", { deferred: true, scope: "hr" }),
 		tool("delegate", { deferred: true, scope: "manager" }),
+		tool("remember", { deferred: true, scope: "subagent" }),
 	];
 	const access = new Map(registered.map((each) => [each.name, each]));
 	const pick = (...names: string[]) => registered.filter((each) => names.includes(each.name));
@@ -95,7 +96,7 @@ describe("tools given to agents", () => {
 	// rest.
 	const caller = {
 		tools: pick("read", "bash", "codemode", "subagent", "rename_session"),
-		deferred: pick("powershell", "team", "staff", "delegate"),
+		deferred: pick("powershell", "team", "staff", "delegate", "remember"),
 		callable: pick(
 			"read",
 			"bash",
@@ -107,6 +108,7 @@ describe("tools given to agents", () => {
 			"team",
 			"staff",
 			"delegate",
+			"remember",
 		),
 	};
 	const names = (tools: readonly ToolRegistration[]) => tools.map((each) => each.name);
@@ -123,9 +125,10 @@ describe("tools given to agents", () => {
 			"agent",
 			"mcp__files__echo",
 			"team",
+			"remember",
 		]);
-		// Deferred tools stay deferred; `team` is offered from the start.
-		assert.deepEqual(names(choice.loaded), ["team"]);
+		// Deferred tools stay deferred; `team` and `remember` are offered from the start.
+		assert.deepEqual(names(choice.loaded), ["team", "remember"]);
 	});
 
 	it("narrows to the named tools in their order; named deferred ones are offered from the start", () => {
@@ -143,17 +146,20 @@ describe("tools given to agents", () => {
 			assert(typeof choice !== "string");
 			return { tools: names(choice.tools), loaded: names(choice.loaded) };
 		};
-		assert.deepEqual(own("hr"), { tools: ["team", "staff"], loaded: ["team", "staff"] });
-		assert.deepEqual(own("manager"), { tools: ["team", "delegate"], loaded: ["team", "delegate"] });
-		assert.deepEqual(own("executor"), { tools: ["team"], loaded: ["team"] });
+		assert.deepEqual(own("hr"), { tools: ["team", "staff", "remember"], loaded: ["team", "staff", "remember"] });
+		assert.deepEqual(own("manager"), {
+			tools: ["team", "delegate", "remember"],
+			loaded: ["team", "delegate", "remember"],
+		});
+		assert.deepEqual(own("executor"), { tools: ["team", "remember"], loaded: ["team", "remember"] });
 		// Code mode never brings a role's tools along with the script-only ones.
 		const coder = resolveTools(caller, access, ["codemode"], [], "executor");
 		assert(typeof coder !== "string");
-		assert.deepEqual(names(coder.tools), ["codemode", "agent", "mcp__files__echo", "team"]);
+		assert.deepEqual(names(coder.tools), ["codemode", "agent", "mcp__files__echo", "team", "remember"]);
 	});
 
 	it("refuses session-level, member-only, script-only and unknown tools", () => {
-		for (const name of ["subagent", "rename_session", "team", "staff", "delegate", "agent", "bogus"]) {
+		for (const name of ["subagent", "rename_session", "team", "staff", "delegate", "remember", "agent", "bogus"]) {
 			const refused = resolveTools(caller, access, ["read", name], [], "executor");
 			assert.equal(typeof refused, "string", name);
 			assert.match(

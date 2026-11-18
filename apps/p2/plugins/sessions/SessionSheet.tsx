@@ -10,8 +10,6 @@ export function SessionSheet({
 	session,
 	onClose,
 	onRename,
-	onPin,
-	onArchive,
 	onCwd,
 	reindex,
 	onReindex,
@@ -19,8 +17,6 @@ export function SessionSheet({
 	session: Session;
 	onClose: () => void;
 	onRename: (title: string) => void;
-	onPin: () => void;
-	onArchive: () => void;
 	onCwd: () => void;
 	reindex: Reindex;
 	/** Re-indexes the session's history for search (long work: the row shows it running); absent without search. */
@@ -57,9 +53,6 @@ export function SessionSheet({
 					<small className="row-value mono">{locationLabel(session.env, session.cwd)}</small>
 					<ChevronIcon />
 				</button>
-				<button type="button" className="row-button" onClick={onPin}>
-					<span>{session.pinned ? t("unpin") : t("pinToTop")}</span>
-				</button>
 				{onReindex && (
 					<button type="button" className="row-button" disabled={reindex?.phase === "running"} onClick={onReindex}>
 						<span>{reindex?.phase === "running" ? t("rebuildingIndex") : t("rebuildIndex")}</span>
@@ -68,9 +61,6 @@ export function SessionSheet({
 				)}
 				{/* Plugins' rows for the session (`session-rows:<name>`): they read it from the route. */}
 				<SlotList prefix="session-rows" />
-				<button type="button" className="row-button danger" onClick={onArchive}>
-					<span>{t("archive")}</span>
-				</button>
 			</div>
 		</Sheet>
 	);

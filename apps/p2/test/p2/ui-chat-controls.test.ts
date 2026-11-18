@@ -75,34 +75,13 @@ describe("chat control parity", { skip: !browserTests }, () => {
 		);
 		assert.ok(times.every(({ sent }) => sent >= 0 && sent < 60_000));
 	});
-	it("keeps unsent draft/attachments while navigating and relocates through both cwd entries without losing history", async () => {
+	it("keeps the unsent draft and attachments through both cwd entries, without losing history", async () => {
 		await browser.metrics(1280, 900);
 		await browser.evaluate(input(".composer textarea", "Unsent draft"));
 		await browser.evaluate(
 			`(()=>{const d=new DataTransfer();d.items.add(new File(['kept'],'kept.txt',{type:'text/plain'}));const m=document.querySelector('main');m.dispatchEvent(new DragEvent('dragenter',{bubbles:true,dataTransfer:d}));m.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:d}));})()`,
 		);
 		await browser.wait(`document.querySelector('.attachment-name')?.textContent==='kept.txt'`);
-		await browser.click(".new-session");
-		await browser.wait(
-			`location.pathname==='/' && document.querySelector('.new-session-view .composer textarea') && document.querySelector('.attachment-name')`,
-		);
-		assert.equal(
-			await browser.evaluate<string>(`document.querySelector('.composer textarea').value`),
-			"Unsent draft",
-		);
-		assert.equal(
-			await browser.evaluate<string>(`document.querySelector('.attachment-name').textContent`),
-			"kept.txt",
-		);
-		await browser.evaluate(
-			`[...document.querySelectorAll('.session-main')].find(e=>e.querySelector('.session-title').textContent==='Control parity').classList.add('test-return')`,
-		);
-		await browser.click(".test-return");
-		await browser.wait(
-			`location.pathname==='/s/${id}' && document.querySelector('.chat .composer textarea') && document.querySelector('button[aria-label="Remove kept.txt"]')`,
-		);
-		await browser.click('button[aria-label="Remove kept.txt"]');
-		await browser.evaluate(input(".composer textarea", ""));
 		for (const [directory, viaOptions] of [
 			[join(fixture.workspace, "moved"), false],
 			[fixture.workspace, true],
@@ -131,6 +110,17 @@ describe("chat control parity", { skip: !browserTests }, () => {
 				`document.querySelector('.messages .assistant')?.textContent.includes('Echo: hello controls')`,
 			);
 		}
+		// The move kept the composer's unsent draft and its attachment.
+		assert.equal(
+			await browser.evaluate<string>(`document.querySelector('.composer textarea').value`),
+			"Unsent draft",
+		);
+		assert.equal(
+			await browser.evaluate<string>(`document.querySelector('.attachment-name').textContent`),
+			"kept.txt",
+		);
+		await browser.click('button[aria-label="Remove kept.txt"]');
+		await browser.evaluate(input(".composer textarea", ""));
 		const session = await holdIn(fixture.browser(), Sessions, {}, "owner");
 		await until(session.sessions, (list) => list?.find((row) => row.id === id)?.cwd === fixture.workspace);
 		const chat = await holdIn(fixture.browser(), Chat, { session: id, conversation: 1 }, "participant");

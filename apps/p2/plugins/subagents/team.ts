@@ -125,42 +125,53 @@ export function roleText(agent: Pick<Subagent, "role" | "manager">): string {
 	return agent.manager === undefined ? "direct executor" : `executor of ${agent.manager}`;
 }
 
+/** How many notes a member keeps, and how long one may be: they live in its instructions. */
+export const NOTES_KEPT = 20;
+export const NOTE_LENGTH = 500;
+
 /** What a member is told about its place in the team: its agent's instructions. */
 export function instructionsFor(
 	role: Role,
 	name: string,
 	duty: string | undefined,
 	manager: string | undefined,
+	notes?: readonly string[],
 ): string {
 	const what = duty ? `, responsible for: ${duty}.` : ".";
-	if (role === "hr")
-		return [
-			`You are "${name}", the team's HR manager, working for the main agent.`,
-			"You only staff the team, with the staff tool: hire managers and executors, configure them, move executors between managers, archive and restore them.",
-			"Never do the work yourself, and never give anyone work: the main agent and the managers do that.",
-			"For each hire choose a short name, its role, a one-line duty, and the model, thinking level, tools and location that fit the duty (staff models lists the models).",
-			"Answer concisely with whom you hired or changed and what each is for; your answer is reported back to the main agent.",
-			"If a request is unclear, ask the main agent with the team tool.",
-		].join(" ");
-	if (role === "manager")
-		return [
-			`You are the manager "${name}", working for the main agent${what}`,
-			"Split the work you get into pieces and give them to your executors with the delegate tool (delegate status lists them); their answers come back to you as messages.",
-			"Do small parts yourself when that is quicker.",
-			"Your answer is reported to the main agent only once your team is done: when every piece you gave out has ended, answer with the combined result.",
-			"If you need more executors, tell the main agent with the team tool; you can also message the other managers with it.",
-		].join(" ");
-	if (manager !== undefined)
-		return [
-			`You are the executor "${name}" in the team of the manager "${manager}"${what}`,
-			`Do the work you are given and answer concisely; your final answer is reported back to ${manager}.`,
-			`With the team tool you can ask ${manager} a question or tell it something while you keep working, and message the other executors of your team.`,
-		].join(" ");
-	return [
-		`You are the executor "${name}", working directly for the main agent${what}`,
-		"Do the requested work and answer concisely; your final answer is reported back to it.",
-		"With the team tool you can ask the main agent a question or tell it something while you keep working, and message the other direct executors.",
-	].join(" ");
+	const learned = notes?.length
+		? `\n\nWhat you have learned so far (your own notes, written with remember):\n${notes.map((note) => `- ${note}`).join("\n")}`
+		: "";
+	const instructions = (
+		role === "hr"
+			? [
+					`You are "${name}", the team's HR manager, working for the main agent.`,
+					"You only staff the team, with the staff tool: hire managers and executors, configure them, move executors between managers, archive and restore them.",
+					"Never do the work yourself, and never give anyone work: the main agent and the managers do that.",
+					"For each hire choose a short name, its role, a one-line duty, and the model, thinking level, tools and location that fit the duty (staff models lists the models).",
+					"Answer concisely with whom you hired or changed and what each is for; your answer is reported back to the main agent.",
+					"If a request is unclear, ask the main agent with the team tool.",
+				]
+			: role === "manager"
+				? [
+						`You are the manager "${name}", working for the main agent${what}`,
+						"Split the work you get into pieces and give them to your executors with the delegate tool (delegate status lists them); their answers come back to you as messages.",
+						"Do small parts yourself when that is quicker.",
+						"Your answer is reported to the main agent only once your team is done: when every piece you gave out has ended, answer with the combined result.",
+						"If you need more executors, tell the main agent with the team tool; you can also message the other managers with it.",
+					]
+				: manager !== undefined
+					? [
+							`You are the executor "${name}" in the team of the manager "${manager}"${what}`,
+							`Do the work you are given and answer concisely; your final answer is reported back to ${manager}.`,
+							`With the team tool you can ask ${manager} a question or tell it something while you keep working, and message the other executors of your team.`,
+						]
+					: [
+							`You are the executor "${name}", working directly for the main agent${what}`,
+							"Do the requested work and answer concisely; your final answer is reported back to it.",
+							"With the team tool you can ask the main agent a question or tell it something while you keep working, and message the other direct executors.",
+						]
+	).join(" ");
+	return `${instructions}${learned}`;
 }
 
 /**

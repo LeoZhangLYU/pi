@@ -13,7 +13,7 @@ export type SessionSummary = Session & {
 
 import { useMessages } from "../runtime/web.tsx";
 import { requestReveal } from "./Chat.tsx";
-import { BranchIcon, ChevronIcon, FolderIcon, LockIcon, PencilIcon, PinIcon, PlusIcon, SearchIcon } from "./icons.tsx";
+import { BranchIcon, ChevronIcon, FolderIcon, LockIcon, PencilIcon, SearchIcon } from "./icons.tsx";
 import { webMessages } from "./messages.ts";
 import { PiLogo } from "./PiLogo.tsx";
 import { getTheme, setTheme, subscribeTheme, type ThemePreference } from "./theme.ts";
@@ -136,7 +136,6 @@ function SessionRow({
 	onBranch,
 	onRenameBranch,
 	active = false,
-	archived = false,
 	children,
 }: {
 	session: SessionSummary;
@@ -148,13 +147,12 @@ function SessionRow({
 	onRenameBranch?: (id: string, conversationId: number) => void;
 	/** The session is the one shown. */
 	active?: boolean;
-	archived?: boolean;
 	children: ReactNode;
 }) {
 	const { t } = useMessages(webMessages);
 	// The team's members are not conversation entries: the main agent is the team's only entry, and its Team panel shows
 	// them. Only `/tree` branches get rows under a session here.
-	const branches = onBranch !== undefined && !archived && session.branches.length >= 2;
+	const branches = onBranch !== undefined && session.branches.length >= 2;
 	const [expanded, setExpanded] = useState(false);
 	const nestedWhat = branches ? t("branchesOnly") : undefined;
 	const nested = nestedWhat !== undefined;
@@ -214,7 +212,6 @@ function SessionRow({
 /** Memoized: the composer re-renders App on every keypress, and the session list need not follow. */
 export const Drawer = memo(function Drawer({
 	onSearch,
-	onRestore,
 	head,
 	footer,
 	sessions,
@@ -224,8 +221,6 @@ export const Drawer = memo(function Drawer({
 	onOpen,
 	onBranch,
 	onRenameBranch,
-	onNew,
-	onNewIn,
 	onCollapse,
 	onProviders,
 	onEnvs,
@@ -233,8 +228,6 @@ export const Drawer = memo(function Drawer({
 	sandboxes,
 }: {
 	onSearch?: (query: string, archived: boolean) => Promise<SearchResults>;
-	/** Restores an archived session and opens it (at `conversationId`, a message hit's). */
-	onRestore: (id: string, conversationId?: number) => void;
 	/** Entries above the folders (plugins' `drawer-head` slots), shown while the list is neither searched nor archived. */
 	head?: ReactNode;
 	footer?: ReactNode;
@@ -247,9 +240,6 @@ export const Drawer = memo(function Drawer({
 	onBranch?: (id: string, conversationId: number) => void;
 	/** Asks for a new label of one of a session's `/tree` branches (the owner's). */
 	onRenameBranch?: (id: string, conversationId: number) => void;
-	onNew: () => void;
-	/** Starts a new session in a sidebar folder's location; absent: folders have no "+". */
-	onNewIn?: (env: string | null, cwd: string) => void;
 	onCollapse: () => void;
 	onProviders: () => void;
 	onEnvs: () => void;
@@ -259,7 +249,6 @@ export const Drawer = memo(function Drawer({
 }) {
 	const { t } = useMessages(webMessages);
 	const [query, setQuery] = useState("");
-	const [archived, setArchived] = useState(false);
 	const [results, setResults] = useState<SearchResults>();
 	useEffect(() => {
 		if (!onSearch || !connected || !query.trim()) {
@@ -268,7 +257,7 @@ export const Drawer = memo(function Drawer({
 		}
 		let current = true;
 		const timer = setTimeout(() => {
-			void onSearch(query, archived)
+			void onSearch(query, false)
 				.then((value) => current && setResults(value))
 				.catch(() => {});
 		}, 200);
@@ -276,11 +265,9 @@ export const Drawer = memo(function Drawer({
 			current = false;
 			clearTimeout(timer);
 		};
-	}, [onSearch, query, archived, connected]);
+	}, [onSearch, query, connected]);
 	const ids = results ? new Set(results.sessions) : undefined;
-	const visible = sessions.filter(
-		(session) => Boolean(session.archivedAt) === archived && (!ids || ids.has(session.id)),
-	);
+	const visible = sessions.filter((session) => !session.archivedAt && (!ids || ids.has(session.id)));
 	// Group by full locations, not shortened labels: two home directories may both read as ~/project.
 	const groups = new Map<string, SessionSummary[]>();
 	const latest = new Map<string, number>();
@@ -302,10 +289,6 @@ export const Drawer = memo(function Drawer({
 					<PiLogo compact />
 				</div>
 				<div className="drawer-actions">
-					<button type="button" className="new-session" onClick={onNew} disabled={!connected}>
-						<PlusIcon size={16} />
-						<span>{t("newSession")}</span>
-					</button>
 					<button
 						type="button"
 						className="collapse-sidebar"
@@ -322,12 +305,12 @@ export const Drawer = memo(function Drawer({
 					type="search"
 					value={query}
 					onChange={(event) => setQuery(event.target.value)}
-					placeholder={archived ? t("searchArchive") : t("searchSessions")}
+					placeholder={t("searchSessions")}
 					aria-label={t("searchSessionsAndMessages")}
 				/>
 			</label>
 			<div className="session-scroll">
-				{!archived && !query && head}
+				{!query && head}
 				{ordered.map(([key, list]) => {
 					// A group holds at least one session; its first names the folder's location.
 					const first = list[0]!;
@@ -342,24 +325,11 @@ export const Drawer = memo(function Drawer({
 									</span>
 								)}
 								<span className="group-label">{location}</span>
-								{onNewIn && !archived && (
-									<button
-										type="button"
-										className="group-new"
-										aria-label={t("newSessionIn", location)}
-										title={t("newSessionIn", location)}
-										disabled={!connected}
-										onClick={() => onNewIn(first.env ?? null, first.cwd)}
-									>
-										<PlusIcon size={14} />
-									</button>
-								)}
 							</h3>
 							{list.map((session) => (
 								<SessionRow
 									key={session.id}
 									session={session}
-									archived={archived}
 									conversationId={session.id === activeId ? conversationId : session.main}
 									onOpen={onOpen}
 									onBranch={onBranch}
@@ -369,12 +339,9 @@ export const Drawer = memo(function Drawer({
 									<button
 										type="button"
 										className={`session-main ${session.id === activeId && conversationId === session.main ? "active" : ""}`}
-										onClick={() => (archived ? onRestore(session.id) : onOpen(session.id))}
+										onClick={() => onOpen(session.id)}
 									>
-										<span className="session-title">
-											{session.pinned && <PinIcon size={12} />}
-											{session.title}
-										</span>
+										<span className="session-title">{session.title}</span>
 										<span className="session-meta">
 											{session.worker.error && (
 												<span className="error session-worker-error" title={session.worker.error}>
@@ -382,7 +349,7 @@ export const Drawer = memo(function Drawer({
 												</span>
 											)}
 											<SessionDot worker={session.worker} />
-											{archived ? t("tapToRestore") : ago(session.updatedAt)}
+											{ago(session.updatedAt)}
 										</span>
 									</button>
 								</SessionRow>
@@ -401,8 +368,7 @@ export const Drawer = memo(function Drawer({
 								// p2 indexes subagent messages too: a hit opens the conversation it was found in, at the message.
 								onClick={() => {
 									requestReveal(hit.session, hit.conversationId, hit.entryId);
-									if (archived) onRestore(hit.session, hit.conversationId);
-									else onOpen(hit.session, hit.conversationId);
+									onOpen(hit.session, hit.conversationId);
 								}}
 							>
 								<strong>{hit.title}</strong>
@@ -412,20 +378,10 @@ export const Drawer = memo(function Drawer({
 					</section>
 				)}
 				{!visible.length && !results?.messages.length && (
-					<p className="empty-note">
-						{query ? t("nothingFound") : archived ? t("noArchivedSessions") : t("noSessionsYet")}
-					</p>
+					<p className="empty-note">{query ? t("nothingFound") : t("noSessionsYet")}</p>
 				)}
 			</div>
 			<div className="drawer-foot">
-				<button
-					type="button"
-					className={`foot-button ${archived ? "on" : ""}`}
-					aria-pressed={archived}
-					onClick={() => setArchived(!archived)}
-				>
-					{t("archived")}
-				</button>
 				{footer ?? (
 					<>
 						<button type="button" className="foot-button" onClick={onProviders}>

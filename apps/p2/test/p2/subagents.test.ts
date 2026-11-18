@@ -141,8 +141,8 @@ describe("subagents (fake provider)", () => {
 		const view = await until(sub.view, (value) => texts(value).includes("Echo: hello helper"));
 		// The sidebar lists the chosen tools; the agent also has `team` (`scope: "subagent"`), offered from the start.
 		const agent = view?.docs["pi.agent"] as { tools: string[]; modelTools: { add: string[] } };
-		assert.deepEqual(agent.tools, ["bash", "artifact", "team"]);
-		assert.deepEqual(agent.modelTools.add, ["team"]);
+		assert.deepEqual(agent.tools, ["bash", "artifact", "remember", "team"]);
+		assert.deepEqual(agent.modelTools.add, ["remember", "team"]);
 		// The main agent is the team's only entry: a member takes no message or configuration from the browser.
 		await assert.rejects(
 			sub.configure({ model: { provider: "faux", modelId: "faux-1" }, thinkingLevel: "off" }, BACKGROUND_CONTEXT),

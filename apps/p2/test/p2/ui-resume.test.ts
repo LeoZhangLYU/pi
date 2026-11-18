@@ -1,6 +1,5 @@
-// The installed app launching at `/` reopens the conversation that was open when it was last used, if that was
-// recently; after a long break, or after going home, it starts at home (src/web/navigation.ts). A browser tab opening
-// `/` starts at home.
+// This build keeps one session: `/` opens it, from a fresh tab and after a long break alike (the chat's Main redirects
+// once the catalog is known). The new-session screen is only for a server with no session at all.
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
@@ -9,66 +8,44 @@ import { Sessions } from "../../plugins/sessions/contract.ts";
 import { Browser, browserTests } from "./browser.ts";
 import { type Fixture, holdIn, startFixture } from "./helpers.ts";
 
-describe("reopening the last conversation", { skip: !browserTests }, () => {
+describe("entering the one session", { skip: !browserTests }, () => {
 	let fixture: Fixture;
 	let browser: Browser;
 	before(async () => {
 		fixture = await startFixture({ web: true });
 		browser = await Browser.start();
 		await browser.signIn(fixture.owner);
-		// Every page of this browser runs as the installed app (iOS reports it as navigator.standalone).
-		await browser.call("Page.addScriptToEvaluateOnNewDocument", {
-			source: `if (!sessionStorage.getItem("tab")) Object.defineProperty(navigator, "standalone", { value: true });`,
-		});
 	});
 	after(async () => {
 		await browser?.close();
 		await fixture?.close();
 	});
 
-	it("reopens it within two hours of the last use, and starts at home after that or after going home", async () => {
+	it("opens the session from / in a fresh tab and after a long break", async () => {
 		const session = await (await holdIn(fixture.browser(), Sessions, {}, "owner")).create(
-			{
-				cwd: fixture.workspace,
-				title: "Where I was",
-			},
+			{ cwd: fixture.workspace, title: "Where I was" },
 			BACKGROUND_CONTEXT,
 		);
 		const url = (path: string) => `http://127.0.0.1:${fixture.server.port}${path}`;
 		await browser.open(url(`/s/${session.id}`));
 		await browser.wait(`document.querySelector('.composer textarea')`);
 
-		// A launch at home shortly after: the conversation again.
+		// A launch at / enters it.
 		await browser.open(url("/"));
 		await browser.wait(`location.pathname === '/s/${session.id}'`);
 
-		// Last used three hours ago: home. (Written outside the app: the app records its last use as it closes.)
+		// A fresh tab (not the installed app) enters it too.
+		await browser.evaluate(`sessionStorage.setItem("tab", "1")`);
+		await browser.open(url("/"));
+		await browser.wait(`location.pathname === '/s/${session.id}'`);
+
+		// The remembered "last conversation" no longer matters: one session is the entry.
 		await browser.open(url("/health"));
 		await browser.evaluate(
 			`localStorage.setItem("p2-last-conversation", JSON.stringify({ session: ${JSON.stringify(session.id)}, conversation: 1, at: Date.now() - 3 * 3600 * 1000 }))`,
 		);
 		await browser.open(url("/"));
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		assert.equal(await browser.evaluate<string>("location.pathname"), "/");
-
-		// Going home forgets it: the next launch stays home.
-		await browser.open(url(`/s/${session.id}`));
-		await browser.wait(`document.querySelector('.composer textarea')`);
-		await browser.open(url("/"));
 		await browser.wait(`location.pathname === '/s/${session.id}'`);
-		await browser.metrics(1280, 900);
-		await browser.click("button.new-session");
-		await browser.wait(`location.pathname === '/'`);
-		await browser.open(url("/"));
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		assert.equal(await browser.evaluate<string>("location.pathname"), "/");
-
-		// A browser tab opening `/` starts at home, however recent the conversation.
-		await browser.open(url(`/s/${session.id}`));
-		await browser.wait(`document.querySelector('.composer textarea')`);
-		await browser.evaluate(`sessionStorage.setItem("tab", "1")`);
-		await browser.open(url("/"));
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		assert.equal(await browser.evaluate<string>("location.pathname"), "/");
+		assert.equal(await browser.evaluate<string>("location.pathname"), `/s/${session.id}`);
 	});
 });

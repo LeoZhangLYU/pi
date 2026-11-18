@@ -41,6 +41,8 @@ import {
 	MAIN,
 	MEMBER_NAME,
 	memberOf,
+	NOTE_LENGTH,
+	NOTES_KEPT,
 	openDelegation,
 	openDelegations,
 	RESERVED_NAMES,
@@ -594,7 +596,7 @@ function staffTool(deps: TeamDeps): P2Tool {
 						if (next) target.parent = next.conversationId;
 					}
 					await configure(tx, target.conversationId, {
-						instructions: instructionsFor("executor", name, target.duty, manager),
+						instructions: instructionsFor("executor", name, target.duty, manager, target.notes),
 					});
 				}, context);
 				return reply(
@@ -727,11 +729,53 @@ function staffTool(deps: TeamDeps): P2Tool {
 	});
 }
 
+/**
+ * A member's own notes: lasting lessons it writes down for its future self. They become part of its instructions, so
+ * they survive compaction and restarts; the newest `NOTES_KEPT` are kept.
+ */
+function rememberTool(): P2Tool {
+	return defineP2Tool({
+		name: "remember",
+		description: [
+			"Keep a note for yourself: a lasting lesson (a convention, a gotcha, how this project works) you should carry",
+			"into later work. It becomes part of your instructions, so write it for your future self, in one or two",
+			"sentences; do not use it for transient state. The newest few notes are kept.",
+		].join("\n"),
+		parameters: obj({ text: str({ minLength: 1, maxLength: NOTE_LENGTH }) }),
+		// A crash-interrupted call would append twice on retry.
+		replay: "unsafe",
+		deferred: true,
+		scope: "subagent",
+		execute: async (args, api, context) => {
+			const text = args.text.replace(/\s+/g, " ").trim();
+			const reply = (message: string, isError = false) => ({
+				output: [{ type: "text" as const, text: message }],
+				isError,
+			});
+			if (!text) return reply("remember needs a note.", true);
+			const before = await api.snapshot(Subagents, ROOT_CONVERSATION_ID, context);
+			const self = before ? memberOf(before, api.conversationId) : undefined;
+			if (!self) return reply("Only team members can keep notes.", true);
+			await api.commit(async (tx) => {
+				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+				const found = memberOf(state, api.conversationId);
+				if (!found) return;
+				const [name, agent] = found;
+				agent.notes = [...(agent.notes ?? []), text].slice(-NOTES_KEPT);
+				await configure(tx, agent.conversationId, {
+					instructions: instructionsFor(roleOf(agent), name, agent.duty, agent.manager, agent.notes),
+				});
+			}, context);
+			return reply("Noted.");
+		},
+	});
+}
+
 /** The team's tools, with the tasks behind them: installed in every conversation, each given by its scope. */
 export function createTeamExtension(deps: TeamDeps): Extension<P2Tool> {
 	return defineExtension<P2Tool>({
 		name: SUBAGENT_EXTENSION,
 		tasks: [Anchor, Reporter, Settle, Stop],
-		tools: [subagentTool(deps), staffTool(deps), delegateTool(deps)],
+		tools: [subagentTool(deps), staffTool(deps), delegateTool(deps), rememberTool()],
 	});
 }

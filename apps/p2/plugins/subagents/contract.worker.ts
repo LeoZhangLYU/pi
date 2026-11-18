@@ -142,6 +142,11 @@ export type Subagent = {
 	settling?: TaskId;
 	/** Why its last work was stopped: told with the next work it gets, then cleared. */
 	stopNote?: string;
+	/**
+	 * What the member wrote down with `remember`: lasting lessons it carries into its instructions, also after the
+	 * conversation compacts. The newest `NOTES_KEPT` notes are kept.
+	 */
+	notes?: string[];
 };
 /** A code mode script's one-shot agent (plugins/agent), listed for inspection from the script's tool card. */
 export type OneShot = {

@@ -168,7 +168,7 @@ describe("incoming messages", { skip: !browserTests }, () => {
 		assert.deepEqual(await browser.evaluate("window.opened"), ["conversation:2", "session:session-b"]);
 	});
 
-	it("opens a subagent's conversation and another session from a message's header; Back returns", async () => {
+	it("opens another session from a message's header; a member's message has no entry", async () => {
 		const owner = fixture.browser();
 		await owner
 			.hold(Models, {}, BACKGROUND_CONTEXT)
@@ -180,11 +180,7 @@ describe("incoming messages", { skip: !browserTests }, () => {
 		const b = await holdIn(owner, Chat, { session: beta, conversation: 1 }, "participant");
 		const list = await holdIn(owner, Subagents, {}, "reader");
 		await a.send({ text: "subagent", requestId: "spawn" }, BACKGROUND_CONTEXT);
-		const children = await until(
-			list.children,
-			(value) => value?.[alpha]?.some((each) => each.name === "helper") === true,
-		);
-		const helper = children![alpha]!.find((each) => each.name === "helper")!;
+		await until(list.children, (value) => value?.[alpha]?.some((each) => each.name === "helper") === true);
 		// The HR manager's report comes first: wait for the helper's.
 		await until(
 			a.view,
@@ -204,7 +200,8 @@ describe("incoming messages", { skip: !browserTests }, () => {
 		a.release();
 		b.release();
 
-		// The subagent's answer in the main conversation.
+		// The subagent's answer in the main conversation: a member's messages have no conversation entry any more, so its
+		// header does not navigate.
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${alpha}`);
 		// The HR manager's report is an agent message too: mark the helper's.
 		const mark = `(() => {
@@ -222,9 +219,8 @@ describe("incoming messages", { skip: !browserTests }, () => {
 		// The turns after it may have scrolled it under the header.
 		await browser.evaluate(`document.querySelector('[data-test-helper]').scrollIntoView({ block: "center" })`);
 		await browser.click("[data-test-helper] button.incoming-from");
-		await browser.wait(`location.pathname==='/s/${alpha}/c/${helper.conversationId}'`);
-		await browser.evaluate("history.back()");
-		await browser.wait(`location.pathname==='/s/${alpha}' && document.querySelector('[data-from=agent]')`);
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		assert.equal(await browser.evaluate<string>(`location.pathname`), `/s/${alpha}`);
 
 		// Another session's message opens that session.
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${beta}`);
