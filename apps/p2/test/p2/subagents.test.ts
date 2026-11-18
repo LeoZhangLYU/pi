@@ -78,7 +78,7 @@ describe("subagents (fake provider)", () => {
 
 	it("rejects invalid models without creating a member", async () => {
 		await chat.send({ text: "subagent-bad", requestId: "bad" }, BACKGROUND_CONTEXT);
-		// The first hire creates the HR manager; its `staff hire` fails on the model, in its own conversation.
+		// The resident HR manager's `staff hire` fails on the model, in its own conversation.
 		const listed = await until(
 			children.children,
 			(value) => value?.[session]?.some((each) => each.role === "hr") === true,

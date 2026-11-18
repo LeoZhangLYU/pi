@@ -90,6 +90,33 @@ describe("the team (fake provider)", () => {
 		await fixture?.close();
 	});
 
+	it("has the HR manager from the session's start, before anyone hires", async () => {
+		// Resident: the session's worker made it at its start, with its own AGENTS.md, and the roster lists it.
+		const listed = await until(
+			children.children,
+			(value) => value?.[session]?.some((each) => each.role === "hr") === true,
+		);
+		assert.deepEqual(
+			listed![session]!.map((each) => [each.name, each.role]),
+			[["hr", "hr"]],
+		);
+		await poll(() => existsSync(join(fixture.dataDir, "sessions", session, "team", "hr", "AGENTS.md")), 5_000, "hr");
+		assert.match(await status(), /^hr: HR manager · idle/);
+		// Nobody archives it: not the HR manager itself, not the browser.
+		await chat.send(
+			{
+				text: `subagent ${JSON.stringify({ action: "hire", message: `staff ${JSON.stringify({ action: "archive", name: "hr" })}` })}`,
+				requestId: `team-${++serial}`,
+			},
+			BACKGROUND_CONTEXT,
+		);
+		const hr = await holdIn(owner, Chat, { session, conversation: member("hr").conversationId }, "participant");
+		await until(hr.view, (view) => results(view, "staff").some((each) => refused(each)?.role === "hr"), 30_000);
+		await until(chat.view, (value) => !(value?.docs["pi.live"] as { run?: unknown } | undefined)?.run);
+		assert.equal(member("hr").archived, undefined);
+		hr.release();
+	});
+
 	it("hires a manager and two executors through the HR manager", async () => {
 		const lead = await hire(chat, children, session, { name: "lead", role: "manager", duty: "splits the work" });
 		const first = await hire(chat, children, session, { name: "exec-1", manager: "lead", tools: ["bash"] });

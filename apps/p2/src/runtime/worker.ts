@@ -150,6 +150,15 @@ export const ReadOnlyConversations =
 export const ConversationStops =
 	keyedRegistry<(conversation: number, ctx: Ctx) => Promise<boolean>>("p2.conversation-stops");
 
+/**
+ * Plugins keep something in the session that must be there from its start. Each handler runs at every start of the
+ * session's worker, once every plugin is loaded and the Harness is live, before its work resumes (an archived session
+ * started only to rebuild its search index runs none). A handler that throws is logged and the start goes on.
+ * Example: the subagents plugin's HR manager, a resident member made at the session's first start.
+ */
+export type WorkerStart = (ctx: Ctx) => Promise<void>;
+export const WorkerStarts = keyedRegistry<WorkerStart>("p2.worker-starts");
+
 /** Model access and run settings for the Harness (the models plugin contributes key "default"). */
 export type HarnessConfigEntry = { readonly models: () => Models; readonly settings: () => HarnessSettings };
 export const HarnessConfig = keyedRegistry<HarnessConfigEntry>("p2.harness-config");
@@ -395,6 +404,7 @@ export function serveWorkerRegistries(host: FacetHost): void {
 		ConversationConfigured,
 		ConversationStops,
 		ReadOnlyConversations,
+		WorkerStarts,
 		HarnessConfig,
 		HarnessEnvironments,
 		RelocationChecks,

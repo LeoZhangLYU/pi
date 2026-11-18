@@ -22,6 +22,7 @@ import {
 	SessionLocation,
 	spawnLocation,
 	type WorkerInit,
+	WorkerStarts,
 	workerCore,
 } from "../runtime/worker.ts";
 import { WORKER_PACKAGES } from "./host-packages.ts";
@@ -97,10 +98,24 @@ workerMain(
 		} finally {
 			harnessHost.release();
 		}
-		// Every plugin is loaded (its extensions contributed): scheduling may start. An archived session started only to
-		// rebuild its search index is scanned without resuming its work.
+		// Every plugin is loaded (its extensions contributed): what plugins keep in the session from its start is made,
+		// then scheduling may start. An archived session started only to rebuild its search index is scanned without
+		// either: nothing is made in it and its work does not resume.
 		const harness = (await host.registry(HarnessNative, context)).value;
-		if (harness !== undefined && init.values.session.resume !== false) harness.durable.resume();
+		if (harness !== undefined && init.values.session.resume !== false) {
+			const starts = (await host.registry(WorkerStarts, context)).value;
+			await host.root(async (ctx) => {
+				for (const [name, workerStart] of starts) {
+					try {
+						await workerStart(ctx);
+					} catch (error) {
+						// A plugin that cannot make its part now makes it when it is next needed.
+						console.error(`p2 worker: start of ${name} failed:`, error);
+					}
+				}
+			}, context);
+			harness.durable.resume();
+		}
 		return { busy: liveness };
 	},
 	{

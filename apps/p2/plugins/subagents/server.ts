@@ -81,7 +81,14 @@ export default defineFacet((host) => {
 			children: deriveTyped(self, [children], ([value]) => value),
 			report: async ({ session, generation, children: reported }) => {
 				const worker = hosts.workers.value[session];
-				if (!worker?.running || worker.generation !== generation) return null;
+				// A worker that is still starting reports too: it makes the resident HR manager before it is ready. Only a
+				// worker that is gone is not heard (an exited or failed one has no pid; an older one, another generation).
+				if (
+					worker === undefined ||
+					worker.generation !== generation ||
+					(!worker.running && worker.pid === undefined)
+				)
+					return null;
 				save(session, reported);
 				children.set({ ...children.value, [session]: reported });
 				return null;

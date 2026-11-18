@@ -10,6 +10,7 @@ import {
 	configure,
 	defineExtension,
 	type Extension,
+	type Harness,
 	LiveDoc,
 	type ModelRef,
 	ROOT_CONVERSATION_ID,
@@ -187,6 +188,49 @@ async function answerText(api: ToolExecutionApi, name: string, agent: Subagent, 
 const HR_TOOLS = ["location_envs", "location_dirs"];
 
 /**
+ * How the HR manager starts: the main agent's model and thinking level, with only the tools to look around. Text when
+ * the main agent's own choices cannot give it that (an unknown model).
+ */
+async function hrStart(deps: TeamDeps, context: Context): Promise<NewMember | string> {
+	const own = await deps.main(context);
+	const given = choosableTools(own, deps.access())
+		.map((tool) => tool.name)
+		.filter((each) => HR_TOOLS.includes(each));
+	const choice = await resolveChoice(
+		deps.models,
+		{ agent: deps.main },
+		deps.access(),
+		{ tools: given },
+		undefined,
+		"hr",
+		context,
+	);
+	if (typeof choice === "string") return choice;
+	const { model, thinkingLevel, ...tools } = choice;
+	return { role: "hr", model, thinkingLevel, tools };
+}
+
+/**
+ * Makes the HR manager if the session's team has none: it is resident, there from the session's start (`WorkerStarts`),
+ * so the team always has the member that staffs it. Nothing to do when it exists. The HR manager the first `subagent
+ * hire` finds missing (this could not make it) is made the same way.
+ */
+export async function ensureHrManager(deps: TeamDeps, durable: Harness, context: Context): Promise<void> {
+	const registry = await durable.snapshot(Subagents, ROOT_CONVERSATION_ID, context);
+	if (registry && hrOf(registry)) return;
+	const start = await hrStart(deps, context);
+	if (typeof start === "string") throw new Error(`The HR manager cannot start: ${start}`);
+	const name = await durable.commit(async (tx) => {
+		const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
+		if (hrOf(state)) return undefined;
+		const hr = hrName(state);
+		await createMember(tx, state, hr, start);
+		return hr;
+	}, context);
+	if (name !== undefined) await deps.files.ensure(name);
+}
+
+/**
  * The work message a member gets: its stop note first (why its last work was stopped), once. Clears the note in the
  * commit that sends it.
  */
@@ -199,8 +243,7 @@ function withStopNote(agent: Subagent, message: string): string {
 
 /** The main agent's subagent tool: the team's only entry. */
 function subagentTool(deps: TeamDeps): P2Tool {
-	const { models, access } = deps;
-	const giver: Giver = { agent: deps.main };
+	const { access } = deps;
 	return defineP2Tool({
 		name: SUBAGENT_TOOL,
 		description: [
@@ -210,7 +253,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 			"Actions:",
 			"- hire (message; optional followUp): ask the HR manager to hire or change members, e.g. 'a parser team: one",
 			"  manager and two executors, one for the lexer and one for the grammar'. Its answer, naming whom it hired, is",
-			"  reported to you as a message. The first hire creates the HR manager.",
+			"  reported to you as a message. The HR manager is always there; the other members are the ones it hired.",
 			"- send (name, message; followUp: true queues after the current answer instead of steering): give work to a",
 			"  manager or a direct executor. A manager's answer is reported once its whole team is done.",
 			"- stop (name): stop its current work; stopping a manager also stops its team's work. They stay usable.",
@@ -251,17 +294,12 @@ function subagentTool(deps: TeamDeps): P2Tool {
 				const hr = hrOf(registry);
 				if (hr?.[1].stopping !== undefined)
 					return reply(`${hr[0]} is being stopped; send again once it is.`, { refused: { stopping: true } }, true);
-				// The HR manager starts from the main agent's model and thinking level, with only the tools to look around.
+				// It is there from the session's start; one the start could not make is made now.
 				let created: NewMember | undefined;
 				if (!hr) {
-					const own = await deps.main(context);
-					const given = choosableTools(own, access())
-						.map((tool) => tool.name)
-						.filter((each) => HR_TOOLS.includes(each));
-					const choice = await resolveChoice(models, giver, access(), { tools: given }, undefined, "hr", context);
-					if (typeof choice === "string") return reply(choice, {}, true);
-					const { model, thinkingLevel, ...tools } = choice;
-					created = { role: "hr", model, thinkingLevel, tools };
+					const start = await hrStart(deps, context);
+					if (typeof start === "string") return reply(start, {}, true);
+					created = start;
 				}
 				const origin = await originOf(api, context);
 				const result = await api.commit(async (tx) => {
@@ -824,7 +862,7 @@ export const TEAM_LEAD_PROMPT = [
 	"the user talks to you, and members report to you, never to the user.",
 	"- For anything about the team, look first with `subagent status` (the members in order, who is working, the open",
 	"  work), and do not answer from memory. A team member is not a session: the conversations tool does not reach it.",
-	"- Staffing goes through the HR manager, the first hire too: ask it with `subagent hire` to hire managers and",
+	"- The HR manager is always there. Staffing goes through it: ask it with `subagent hire` to hire managers and",
 	"  executors, change them, move executors between managers, archive or restore them, or write a member's own",
 	"  AGENTS.md.",
 	"- Give work with `subagent send` to a manager (it splits the work among its own executors, and its answer reaches",

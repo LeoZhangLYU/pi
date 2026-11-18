@@ -29,12 +29,13 @@ import {
 	ReadOnlyConversations,
 	resolveDirectory,
 	toolsByName,
+	WorkerStarts,
 	workerOf,
 } from "@p2/app/v1/worker";
 import { type Child, SubagentControl, Subagents, TeamWork } from "./contract.ts";
 import { calledByModel, DelegationStopped, Subagents as Registry, roleOf } from "./contract.worker.ts";
 import { teamFiles } from "./files.ts";
-import { createTeamExtension, teamPromptExtension } from "./member-tools.ts";
+import { createTeamExtension, ensureHrManager, type TeamDeps, teamPromptExtension } from "./member-tools.ts";
 import { memberOf, stoppedNotices } from "./team.ts";
 import {
 	bindStoppedHandlers,
@@ -137,7 +138,7 @@ export default defineFacet((host, self) => {
 		const extensions = self.registry(Extensions);
 		const access = () => toolsByName(extensions.value);
 		// A hired member's own location is on the session's machine: where the session works now.
-		const extension = createTeamExtension({
+		const team: TeamDeps = {
 			models,
 			locator: {
 				locate: (conversationId, read, context) => locateConversation(harnessValue, conversationId, context, read),
@@ -153,7 +154,10 @@ export default defineFacet((host, self) => {
 				if (!main) throw new Error("The main conversation is gone");
 				return main.agent(context);
 			},
-		});
+		};
+		const extension = createTeamExtension(team);
+		// The HR manager is resident: made at the session's first start, so the team always has the member that staffs it.
+		self.contribute(WorkerStarts, { subagents: (ctx) => ensureHrManager(team, harness().durable, ctx) });
 		const prompts = teamPromptExtension(files);
 		self.contribute(Extensions, {
 			[extension.name]: extension,

@@ -1296,7 +1296,10 @@ translated phone drawer and intercept chat taps.
   opening a window at its own location.
   **The team** (three layers): the main agent is the only entry; the HR manager
   (`staff`: hire, configure, agents, assign, archive, restore, roster, models) hires managers and executors and never
-  works; a manager (`delegate`) splits work among its executors; executors work for a manager or directly for the main
+  works and is resident: the worker makes it at its first start (`WorkerStarts`, run in `src/hosts/worker.ts` once
+  every plugin is loaded and before work resumes; `ensureHrManager`, idempotent), and nobody archives it. A worker
+  still starting is heard by the child index (its report carries a pid), since it makes the HR manager before it is
+  ready. A manager (`delegate`) splits work among its executors; executors work for a manager or directly for the main
   agent. Delegations (working, waiting, stopping, done, failed, stopped) live in the registry, each with the answer
   that ends it; a manager's answer is reported once its team's work ended (the `p2.team-settle` task), and a stop
   (`p2.team-stop`) marks the member, aborts its run, verifies it ended and tells whoever gave the stopped work

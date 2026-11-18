@@ -102,8 +102,19 @@ describe("code mode agent (fake provider)", () => {
 
 	it("lists each one-shot agent by its nested call ID and keeps it read-only", async () => {
 		const list = await holdIn(owner, Subagents, {}, "reader");
-		const children = await until(list.children, (value) => value?.[session]?.length === 3);
-		const agents = children![session]!;
+		const children = await until(
+			list.children,
+			(value) => value?.[session]?.filter((child) => child.kind === "agent").length === 3,
+		);
+		// The session lists its resident HR manager beside the script's agents.
+		assert.equal(
+			children!
+				[session]!.filter((child) => child.kind !== "agent")
+				.map((child) => child.role)
+				.join(),
+			"hr",
+		);
+		const agents = children![session]!.filter((child) => child.kind === "agent");
 		assert.deepEqual(
 			agents.map((agent) => [agent.kind, agent.name, agent.callId?.startsWith(`${callId}/c`)]).sort(),
 			[

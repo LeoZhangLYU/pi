@@ -208,7 +208,7 @@ The main agent works with a team of agents that run in the background, in three 
 | Role | Created by | Gets work from | Messages with `team` | Own tool |
 | --- | --- | --- | --- | --- |
 | Main agent | | you | | `subagent`: hire, send, stop, answer, status |
-| HR manager (`hr`) | p2, at the first `subagent hire` | the main agent only | the main agent | `staff`: hire, configure, assign, archive, restore, roster, models |
+| HR manager (`hr`) | p2, when the session's worker first starts (resident: it cannot be archived) | the main agent only | the main agent | `staff`: hire, configure, assign, archive, restore, roster, models |
 | Manager | the HR manager | the main agent | the main agent, other managers | `delegate`: send, stop, answer, status (its own executors only) |
 | Executor in a team | the HR manager, with a manager | its manager | its manager, its teammates | |
 | Direct executor | the HR manager, without a manager | the main agent | the main agent, other direct executors | |
