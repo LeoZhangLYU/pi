@@ -9,6 +9,7 @@ import type { Watchable, WatchCall, WatchHandle } from "@earendil-works/chord/wa
 import type { Api, AssistantMessage, Message, Model } from "@earendil-works/pi-ai";
 import type { Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai/models";
 import {
+	AgentDoc,
 	type ConversationId,
 	configure,
 	type DocumentReader,
@@ -774,6 +775,19 @@ function openHarness(self: Self, init: WorkerInit, location: SessionLocation, st
 				await harness.close(ctx).catch(() => {});
 				throw new Error("Unknown model");
 			}
+			// The main agent follows the registry. A fixed `tools` array is a removed plugin's (the Familiar's): kept, it
+			// would hide tools added since — the team's `subagent` — from the main agent, and from the members that
+			// start from its tools. Without one the agent follows the registry already, and tool search's loaded
+			// deferred tools (`modelTools`) stay.
+			const top = await topLevelConversations(harness, ctx);
+			await harness.commit(async (tx) => {
+				for (const id of top) {
+					const main = await tx.doc(AgentDoc, id);
+					if (!Array.isArray(main.tools)) continue;
+					delete main.tools;
+					if (Array.isArray(main.modelTools)) delete main.modelTools;
+				}
+			}, ctx);
 			return harness;
 		},
 		async (harness) => {

@@ -412,7 +412,12 @@ describe("Pi Mobile UI regressions", { skip: !browserTests }, () => {
 		const { token } = JSON.parse((await fixture.http("/owner-token")).body) as { token: string };
 		const origin = `http://127.0.0.1:${fixture.server.port}`;
 		await browser.open(`${origin}/owner#${token}`);
-		assert(await browser.evaluate<boolean>('location.pathname === "/" && location.hash === ""'));
+		// Home opens the single session when there is one; the token is gone either way.
+		assert(
+			await browser.evaluate<boolean>(
+				'(location.pathname === "/" || location.pathname.startsWith("/s/")) && location.hash === ""',
+			),
+		);
 		const cookies = (await browser.call("Network.getCookies", { urls: [origin] })) as {
 			cookies: { name: string; httpOnly: boolean; sameSite: string }[];
 		};

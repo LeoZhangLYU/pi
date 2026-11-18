@@ -13,6 +13,7 @@ import {
 	LiveDoc,
 	type ModelRef,
 	ROOT_CONVERSATION_ID,
+	section,
 	type ToolExecutionApi,
 	type Tx,
 } from "@earendil-works/pi-durable";
@@ -28,12 +29,14 @@ import {
 	resolveTools,
 	roleOf,
 	STAFF_TOOL,
+	SUBAGENT_TOOL,
 	type Subagent,
 	type SubagentState,
 	Subagents,
 	stillGiven,
 	type ToolChoice,
 } from "./contract.worker.ts";
+import type { TeamFiles } from "./files.ts";
 import {
 	hrName,
 	hrOf,
@@ -71,6 +74,9 @@ import {
 } from "./tools.ts";
 
 /** What the team tools need from the worker. */
+/** How much of a member's AGENTS.md reaches its prompt (characters). */
+export const AGENTS_LENGTH = 16_000;
+
 export type TeamDeps = {
 	readonly models: Models;
 	readonly locator: SubagentLocator;
@@ -78,6 +84,8 @@ export type TeamDeps = {
 	readonly access: () => ReadonlyMap<string, P2Tool>;
 	/** The main agent, whose model, thinking level and tools members start from (the HR manager has none to give). */
 	readonly main: (context: Context) => Promise<Agent>;
+	/** Each member's AGENTS.md, kept by the HR manager (`staff agents`) and added to that member's prompt. */
+	readonly files: TeamFiles;
 };
 
 /** A member about to be created, as the subagent and staff tools resolved it. */
@@ -194,7 +202,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 	const { models, access } = deps;
 	const giver: Giver = { agent: deps.main };
 	return defineP2Tool({
-		name: "subagent",
+		name: SUBAGENT_TOOL,
 		description: [
 			"Work with your team: members that work in the background while you keep talking to the user. You are the team's",
 			"only entry. The HR manager hires and staffs the team; managers split work among their own executors; direct",
@@ -285,6 +293,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 					state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
 					return { name: hrNameNow, delegation, details: memberDetails(agent) };
 				}, context);
+				if (created) await deps.files.ensure(result.name);
 				return reply(
 					`${created ? `Created the HR manager ${result.name} and asked it` : `Asked ${result.name}`} (#${result.delegation}).`,
 					{ ...result.details, name: result.name, delegation: result.delegation },
@@ -481,7 +490,8 @@ function staffTool(deps: TeamDeps): P2Tool {
 	return defineP2Tool({
 		name: STAFF_TOOL,
 		description: [
-			"Staff the team. You are the HR manager: you hire and change members, you never give them work.",
+			"Staff the team. You are the HR manager: you hire and change members, and you keep each member's own",
+			"AGENTS.md. You never give them work.",
 			"Actions:",
 			"- hire (name, role, duty; optional manager, model, thinkingLevel, tools, env, cwd): create a member. role is",
 			'  "manager" (splits work among its own executors) or "executor" (does work). An executor with manager (an',
@@ -493,6 +503,8 @@ function staffTool(deps: TeamDeps): P2Tool {
 			"  environment, to the home on another), env an environment name from location_envs or null for this device.",
 			"- configure (name; optional model, thinkingLevel, tools, env, cwd, followSession): change a member for later work;",
 			"  followSession: true makes it follow the session again. A location changes only while it is idle.",
+			"- agents (name; optional text): read the member's own AGENTS.md, or replace it with text. It is added to that",
+			"  member's instructions, so write lasting guidance there (its way of working, what to keep in mind).",
 			"- assign (name, manager): move an executor into a manager's team, or with manager null back to the main agent.",
 			"- archive (name): stop it and hide it from the sidebar; restore (name) brings it back. A manager with executors",
 			"  cannot be archived: move or archive them first.",
@@ -504,6 +516,7 @@ function staffTool(deps: TeamDeps): P2Tool {
 				action: union([
 					literal("hire"),
 					literal("configure"),
+					literal("agents"),
 					literal("assign"),
 					literal("archive"),
 					literal("restore"),
@@ -520,6 +533,7 @@ function staffTool(deps: TeamDeps): P2Tool {
 				cwd: opt(str()),
 				env: opt(union([str(), nul()])),
 				followSession: opt(bool()),
+				text: opt(str({ maxLength: AGENTS_LENGTH })),
 			},
 			{ open: true },
 		),
@@ -551,8 +565,34 @@ function staffTool(deps: TeamDeps): P2Tool {
 			if (name === undefined) return reply(`${action} needs a name.`, {}, true);
 			const agent = memberNamed(registry, name);
 			if (action !== "hire" && !agent) return reply(`No team member named ${name}.`, {}, true);
-			if (action !== "hire" && agent && roleOf(agent) === "hr")
+			if (action !== "hire" && agent && roleOf(agent) === "hr" && action !== "agents")
 				return reply(`${name} is the HR manager: it stays as it is.`, { refused: { role: "hr" } }, true);
+
+			if (action === "agents" && agent) {
+				if (args.text === undefined) {
+					const content = await deps.files.read(name);
+					return reply(
+						content?.trim()
+							? `${name}'s AGENTS.md:\n\n${content.slice(0, AGENTS_LENGTH)}`
+							: `${name} has no AGENTS.md yet.`,
+						{ name },
+					);
+				}
+				// A subagent from before roles may carry a name the files cannot use (`MEMBER_NAME` is what a hire accepts).
+				if (!MEMBER_NAME.test(name))
+					return reply(
+						`${name} has a name that cannot have an AGENTS.md: use letters, digits, ".", "_" and "-".`,
+						{},
+						true,
+					);
+				await deps.files.write(name, args.text);
+				return reply(
+					args.text.trim()
+						? `Updated ${name}'s AGENTS.md (${args.text.length} characters).`
+						: `Cleared ${name}'s AGENTS.md.`,
+					{ name },
+				);
+			}
 
 			if (action === "restore" && agent) {
 				await setArchived(api, ROOT_CONVERSATION_ID, agent.conversationId, false, context);
@@ -716,6 +756,8 @@ function staffTool(deps: TeamDeps): P2Tool {
 			}, context);
 			if (!result)
 				return reply(action === "hire" ? `${name} already exists.` : `No team member named ${name}.`, {}, true);
+			// Every member has one, even before the HR manager writes it.
+			if (action === "hire") await deps.files.ensure(name);
 			const what =
 				action === "configure"
 					? `Configured ${name}.`
@@ -772,6 +814,47 @@ function rememberTool(): P2Tool {
 }
 
 /** The team's tools, with the tasks behind them: installed in every conversation, each given by its scope. */
+/**
+ * What the main agent is told about its team (section `team-lead`): who it is to the members and what to do first.
+ * Without it the agent knows the team only from the `subagent` tool's description, and reads a question about its
+ * "managers" as one about sessions.
+ */
+export const TEAM_LEAD_PROMPT = [
+	"You lead a team of members that work in the background while you talk to the user. You are the team's only entry:",
+	"the user talks to you, and members report to you, never to the user.",
+	"- For anything about the team, look first with `subagent status` (the members in order, who is working, the open",
+	"  work), and do not answer from memory. A team member is not a session: the conversations tool does not reach it.",
+	"- Staffing goes through the HR manager, the first hire too: ask it with `subagent hire` to hire managers and",
+	"  executors, change them, move executors between managers, archive or restore them, or write a member's own",
+	"  AGENTS.md.",
+	"- Give work with `subagent send` to a manager (it splits the work among its own executors, and its answer reaches",
+	"  you once its whole team is done) or to a direct executor. Answers arrive as messages: do not wait or poll.",
+	"- `subagent stop` stops a member's current work; `subagent answer` returns its latest answer.",
+].join("\n");
+
+/**
+ * The team's prompt sections. `member-agents`: a member's own AGENTS.md, which the HR manager keeps, added to every
+ * generation of its conversation (the main agent and one-shot agents have none). `team-lead`: the main agent's guide
+ * to its team, for an agent that has the `subagent` tool (only top-level conversations do: it is `scope: "main"`).
+ */
+export function teamPromptExtension(files: TeamFiles): Extension<P2Tool> {
+	return defineExtension<P2Tool>({
+		name: "p2-team-prompt",
+		sections: [
+			section("member-agents", async (input, context) => {
+				const registry = await input.read.snapshot(Subagents, ROOT_CONVERSATION_ID, context);
+				const member = registry ? memberOf(registry, input.conversationId) : undefined;
+				if (!member) return undefined;
+				const text = await files.read(member[0]);
+				return text?.trim() ? text.slice(0, AGENTS_LENGTH) : undefined;
+			}),
+			section("team-lead", (input) =>
+				input.agent.tools.some((tool) => tool.name === SUBAGENT_TOOL) ? TEAM_LEAD_PROMPT : undefined,
+			),
+		],
+	});
+}
+
 export function createTeamExtension(deps: TeamDeps): Extension<P2Tool> {
 	return defineExtension<P2Tool>({
 		name: SUBAGENT_EXTENSION,

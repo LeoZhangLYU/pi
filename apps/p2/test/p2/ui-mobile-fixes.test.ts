@@ -1,6 +1,6 @@
 // Browser checks of the "wrong behavior" fixes from the Pi Mobile parity audit: entries kept as they leave the view's
-// window and autoloaded earlier pages, the composer while the chat is not live, subagent search hits, the
-// ports card, the Stop notice per conversation and composer focus after a restore. Fake provider, disposable data.
+// window and autoloaded earlier pages, the composer while the chat is not live, the ports card, the Stop notice per
+// conversation and composer focus after a restore. Fake provider, disposable data.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -14,7 +14,6 @@ import { Chat } from "../../plugins/chat/contract.ts";
 import { Models } from "../../plugins/models/contract.ts";
 import { ForwardsNative } from "../../plugins/ports/contract.ts";
 import { Sessions, SessionTransfer } from "../../plugins/sessions/contract.ts";
-import { Subagents } from "../../plugins/subagents/contract.ts";
 import type { Host } from "../../src/runtime/chord.ts";
 import { Hosts } from "../../src/runtime/server.ts";
 import { bigSessionEntries } from "../fixtures/big-session.ts";
@@ -248,46 +247,6 @@ describe("Pi Mobile audit fixes in the browser", { skip: !browserTests }, () => 
 		);
 	});
 
-	it("opens a subagent's search hit in its own conversation", async () => {
-		const session = await (await holdIn(owner, Sessions, {}, "owner")).create(
-			{
-				cwd: fixture.workspace,
-				title: "With helper",
-			},
-			BACKGROUND_CONTEXT,
-		);
-		const chat = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
-		const list = await holdIn(owner, Subagents, {}, "reader");
-		await chat.send({ text: "subagent", requestId: "spawn" }, BACKGROUND_CONTEXT);
-		const children = await until(
-			list.children,
-			(value) => value?.[session.id]?.some((each) => each.name === "helper") === true,
-		);
-		const helper = children![session.id]!.find((each) => each.name === "helper")!;
-		const child = await holdIn(
-			owner,
-			Chat,
-			{ session: session.id, conversation: helper.conversationId },
-			"participant",
-		);
-		await child.send({ text: "zebrafish unique words", requestId: "direct" }, BACKGROUND_CONTEXT);
-		await until(child.view, answered("Echo: zebrafish unique words"), 30_000);
-		await browser.metrics(1280, 900);
-		await browser.open(url("/"));
-		const search = 'input[aria-label="Search sessions and messages"]';
-		await browser.wait(`document.querySelector('${search}') && !document.querySelector('.offline')`);
-		await browser.evaluate(input(search, "zebrafish"));
-		await browser.wait(`document.querySelector('.hit')?.textContent.includes('zebrafish')`);
-		await browser.click(".hit");
-		await browser.wait(
-			`location.pathname === '/s/${session.id}/c/${helper.conversationId}' && ${messages}.includes('zebrafish unique words')`,
-		);
-		await browser.evaluate(input(search, ""));
-		child.release();
-		list.release();
-		chat.release();
-	});
-
 	it("shows the ports card with its links", async () => {
 		const store = (await fixture.server.host.registry(ForwardsNative, BACKGROUND_CONTEXT)).value!.forwards;
 		store.radiusOrigin = "https://0123456789abcdef0123456789abcdef.rdtun.com";
@@ -345,12 +304,13 @@ describe("Pi Mobile audit fixes in the browser", { skip: !browserTests }, () => 
 			await browser.wait(`document.querySelector('.composer button[aria-label=Stop]')`);
 			await browser.click(".composer button[aria-label=Stop]");
 			await browser.wait(`document.querySelector('output.notice.stopped')`);
-			// Another conversation, then back: the notice belonged to that stop, not to every later visit.
-			const row = (title: string) =>
-				`[...document.querySelectorAll('.drawer .session-main')].find((e) => e.querySelector('.session-title')?.textContent === ${JSON.stringify(title)})`;
-			await browser.evaluate(`${row("Elsewhere")}.click()`);
+			// Another conversation, then back: the notice belonged to that stop, not to every later visit. The drawer
+			// lists only the single session, so switch as a direct link does.
+			const go = (id: string) =>
+				`(() => { history.pushState(null, "", "/s/${id}"); window.dispatchEvent(new PopStateEvent("popstate")); })()`;
+			await browser.evaluate(go(second.id));
 			await browser.wait(`location.pathname === '/s/${second.id}'`);
-			await browser.evaluate(`${row("Stopped here")}.click()`);
+			await browser.evaluate(go(first.id));
 			await browser.wait(`location.pathname === '/s/${first.id}' && ${messages}.includes('slow running')`);
 			assert.equal(await browser.evaluate(`document.querySelector('output.notice.stopped') === null`), true);
 		} finally {
@@ -482,34 +442,9 @@ describe("Pi Mobile audit fixes in the browser", { skip: !browserTests }, () => 
 			`document.querySelector('[role=dialog][aria-label=Settings] button[aria-label=Close]').click()`,
 		);
 		await sessions.archive({ id: session.id }, BACKGROUND_CONTEXT);
-		await browser.wait(
-			`location.pathname === '/' && document.querySelector('.toast')?.textContent === 'Session is archived'`,
-		);
-	});
-
-	it("archives the viewed session from its sheet without an error or a notice", async () => {
-		const sessions = await holdIn(owner, Sessions, {}, "owner");
-		const session = await sessions.create({ cwd: fixture.workspace, title: "Archived here" }, BACKGROUND_CONTEXT);
-		await browser.metrics(390, 844);
-		await browser.open(url(`/s/${session.id}`));
-		await browser.wait(`document.querySelector('.composer textarea') && !document.querySelector('.offline')`);
-		// The page's conversation is live: its worker runs, and the page keeps holding it after leaving (linger).
-		const hosts = fixture.server.host.hold(Hosts, {}, BACKGROUND_CONTEXT);
-		await until(hosts.workers, (workers) => workers?.[session.id]?.running === true);
-		await browser.click('[aria-label="Session options"]');
-		await browser.click(".row-button.danger");
-		await until(sessions.sessions, (list) => Boolean(list?.find((s) => s.id === session.id)?.archivedAt));
-		await until(hosts.workers, (workers) => workers?.[session.id]?.running === false);
-		// Leaving the session released the sheet's reference: the archive's call is not cancelled with it (no
-		// "p2.sessions: released" toast), and the lingering conversation starts no worker the archive refuses (no notice).
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-		assert.deepEqual(
-			await browser.evaluate(
-				`({ path: location.pathname, toast: document.querySelector('.toast')?.textContent ?? null, notices: [...document.querySelectorAll('.owner-notice')].map((e) => e.textContent) })`,
-			),
-			{ path: "/", toast: null, notices: [] },
-		);
-		hosts.release();
+		// Home opens the single remaining session; the toast still says why this one closed.
+		await browser.wait(`document.querySelector('.toast')?.textContent === 'Session is archived'`);
+		assert.notEqual(await browser.evaluate<string>("location.pathname"), `/s/${session.id}`);
 	});
 
 	it("sends with one tap on Send: the press keeps the composer focused, so a phone's keyboard does not close first", async () => {

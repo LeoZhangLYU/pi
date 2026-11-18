@@ -21,6 +21,8 @@ import { type Context, keyedRegistry, type Location } from "@p2/app/v1";
 import type { P2Tool } from "@p2/app/v1/worker";
 
 export const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+/** The main agent's tool: the team's only entry. */
+export const SUBAGENT_TOOL = "subagent";
 export const TEAM_TOOL = "team";
 /** The HR manager's tool: hiring and staffing the team. */
 export const STAFF_TOOL = "staff";

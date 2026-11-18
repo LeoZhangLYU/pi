@@ -29,10 +29,12 @@ import {
 	ReadOnlyConversations,
 	resolveDirectory,
 	toolsByName,
+	workerOf,
 } from "@p2/app/v1/worker";
 import { type Child, SubagentControl, Subagents, TeamWork } from "./contract.ts";
 import { calledByModel, DelegationStopped, Subagents as Registry, roleOf } from "./contract.worker.ts";
-import { createTeamExtension } from "./member-tools.ts";
+import { teamFiles } from "./files.ts";
+import { createTeamExtension, teamPromptExtension } from "./member-tools.ts";
 import { memberOf, stoppedNotices } from "./team.ts";
 import {
 	bindStoppedHandlers,
@@ -117,6 +119,8 @@ export default defineFacet((host, self) => {
 	});
 	contribute(host, "p2.subagent-tools", (self) => {
 		const harness = harnessOf(self);
+		const worker = workerOf(self);
+		const files = teamFiles(worker().init.dataDir, worker().init.values.session.id);
 		const harnessValue = self.registry(HarnessNative);
 		const config = self.registry(HarnessConfig);
 		const feed = self.get(Subagents, {});
@@ -141,6 +145,7 @@ export default defineFacet((host, self) => {
 				sandbox: (location) => harness().environments.sandbox(location.env),
 			},
 			access,
+			files,
 			// Members start from the main agent's model, thinking level and tools, whoever hires or configures them.
 			main: async (context) => {
 				const durable = harness().durable;
@@ -149,7 +154,12 @@ export default defineFacet((host, self) => {
 				return main.agent(context);
 			},
 		});
-		self.contribute(Extensions, { [extension.name]: extension, [teamExtension.name]: teamExtension });
+		const prompts = teamPromptExtension(files);
+		self.contribute(Extensions, {
+			[extension.name]: extension,
+			[teamExtension.name]: teamExtension,
+			[prompts.name]: prompts,
+		});
 		// The tools behind code mode, as the Harness's registry installs them (switched-off extensions left out).
 		const scriptTools = self.derive(
 			[self.registry(Extensions), self.registry(ExtensionSwitches)],

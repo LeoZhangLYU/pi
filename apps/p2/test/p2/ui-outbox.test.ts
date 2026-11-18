@@ -63,6 +63,13 @@ describe("offline in the browser", { skip: !browserTests }, () => {
 		await fixture?.close();
 	});
 
+	/** The new-session screen appears only when no session is unarchived (this build keeps one), so archiving all shows it. */
+	const archiveAll = async () => {
+		const sessions = await holdIn(owner, Sessions, {}, "owner");
+		for (const session of sessions.sessions.value ?? [])
+			if (session.archivedAt === null) await sessions.archive({ id: session.id }, BACKGROUND_CONTEXT);
+	};
+
 	it("keeps the composer, shows the message at once, and delivers it once back online", async () => {
 		const session = await (await holdIn(owner, Sessions, {}, "owner")).create(
 			{
@@ -203,11 +210,15 @@ describe("offline in the browser", { skip: !browserTests }, () => {
 		const chat = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
 		const stop = follow(chat.view, () => {});
 		try {
-			await chat.send({ text: "remember me", requestId: "kept" }, BACKGROUND_CONTEXT);
-			await until(chat.view, (view) => JSON.stringify(view?.entries ?? []).includes("Echo: remember me"), 30_000);
+			await chat.send({ text: "keep this message", requestId: "kept" }, BACKGROUND_CONTEXT);
+			await until(
+				chat.view,
+				(view) => JSON.stringify(view?.entries ?? []).includes("Echo: keep this message"),
+				30_000,
+			);
 			const page = `http://127.0.0.1:${fixture.server.port}/s/${session.id}`;
 			await browser.open(page);
-			await browser.wait(`document.querySelector('.messages')?.textContent.includes('Echo: remember me')`);
+			await browser.wait(`document.querySelector('.messages')?.textContent.includes('Echo: keep this message')`);
 			// Kept a second after it settles.
 			await new Promise((resolve) => setTimeout(resolve, 1_500));
 
@@ -215,9 +226,9 @@ describe("offline in the browser", { skip: !browserTests }, () => {
 			await browser.evaluate(`sessionStorage.setItem("offline", "1")`);
 			await browser.open(page);
 			await browser.wait(`Boolean(document.querySelector('.offline'))`);
-			await browser.wait(`document.querySelector('.messages')?.textContent.includes('Echo: remember me')`);
+			await browser.wait(`document.querySelector('.messages')?.textContent.includes('Echo: keep this message')`);
 			assert.ok(await browser.evaluate<boolean>(`Boolean(document.querySelector('.composer textarea'))`));
-			assert.equal(await browser.evaluate<number>(bubbles("remember me")), 1);
+			assert.equal(await browser.evaluate<number>(bubbles("keep this message")), 1);
 			// The context bar's space is there before its numbers: the composer area keeps its height when they come.
 			assert.ok(await browser.evaluate<boolean>(`Boolean(document.querySelector('.context-usage.pending'))`));
 			const dock = await browser.evaluate<number>(`document.querySelector('.dock').getBoundingClientRect().height`);
@@ -230,8 +241,8 @@ describe("offline in the browser", { skip: !browserTests }, () => {
 				await browser.evaluate<number>(`document.querySelector('.dock').getBoundingClientRect().height`),
 				dock,
 			);
-			await browser.wait(`document.querySelector('.messages')?.textContent.includes('Echo: remember me')`);
-			assert.equal(await browser.evaluate<number>(bubbles("remember me")), 1);
+			await browser.wait(`document.querySelector('.messages')?.textContent.includes('Echo: keep this message')`);
+			assert.equal(await browser.evaluate<number>(bubbles("keep this message")), 1);
 		} finally {
 			stop();
 			chat.release();
@@ -239,6 +250,7 @@ describe("offline in the browser", { skip: !browserTests }, () => {
 	});
 
 	it("keeps the one composer, focused, when a new session's first message opens the session", async () => {
+		await archiveAll();
 		await browser.metrics(390, 844);
 		await browser.open(`http://127.0.0.1:${fixture.server.port}/`);
 		await browser.wait(
@@ -262,6 +274,7 @@ describe("offline in the browser", { skip: !browserTests }, () => {
 	});
 
 	it("shows a new session's first message at once and creates the session once back online", async () => {
+		await archiveAll();
 		const catalog = await holdIn(owner, Sessions, {}, "owner");
 		const before = new Set(catalog.sessions.value.map((session) => session.id));
 		await browser.metrics(390, 844);

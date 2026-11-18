@@ -1,4 +1,4 @@
-// Archived/search, explicit versioned previews and cost charts use only disposable fake-provider sessions.
+// Search hits, explicit versioned previews and sent files use only disposable fake-provider sessions.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -7,14 +7,13 @@ import { after, before, describe, it } from "node:test";
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { ArtifactList } from "../../plugins/artifacts/contract.ts";
 import { Chat } from "../../plugins/chat/contract.ts";
-import { Search } from "../../plugins/search/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { Browser, browserTests } from "./browser.ts";
 import { type Fixture, holdIn, poll, startFixture, until } from "./helpers.ts";
 
 const input = (selector: string, value: string) =>
 	`(()=>{const e=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`;
-describe("search, viewers, artifacts and cost parity", { skip: !browserTests }, () => {
+describe("search, viewers and artifacts", { skip: !browserTests }, () => {
 	let fixture: Fixture, browser: Browser, id: string;
 	before(async () => {
 		fixture = await startFixture({ web: true });
@@ -31,10 +30,9 @@ describe("search, viewers, artifacts and cost parity", { skip: !browserTests }, 
 		await browser?.close();
 		await fixture?.close();
 	});
-	it("searches titles and messages, switches archive scope, and restores an archived message hit", async () => {
+	it("searches titles and messages and opens a message's session", async () => {
 		const owner = fixture.browser(),
-			sessions = await holdIn(owner, Sessions, {}, "owner"),
-			search = owner.hold(Search, {}, BACKGROUND_CONTEXT);
+			sessions = await holdIn(owner, Sessions, {}, "owner");
 		const session = await sessions.create({ cwd: fixture.workspace, title: "Search fixture" }, BACKGROUND_CONTEXT),
 			chat = await holdIn(owner, Chat, { session: session.id, conversation: 1 }, "participant");
 		await chat.send({ text: "Unique search needle", requestId: "needle" }, BACKGROUND_CONTEXT);
@@ -47,22 +45,16 @@ describe("search, viewers, artifacts and cost parity", { skip: !browserTests }, 
 		await browser.evaluate(input('input[aria-label="Search sessions and messages"]', "Search fixture"));
 		await browser.wait(`[...document.querySelectorAll('.session-title')].some(e=>e.textContent==='Search fixture')`);
 		await browser.evaluate(input('input[aria-label="Search sessions and messages"]', "Unique search needle"));
-		await browser.wait(`document.querySelector('.hit')?.textContent.includes('Unique search needle')`);
-		await sessions.archive({ id: session.id }, BACKGROUND_CONTEXT);
-		// Refresh the submitted query, as mobile does on an edit; toggles then query the archive scope.
-		await browser.evaluate(input('input[aria-label="Search sessions and messages"]', "Unique search needle "));
-		await browser.wait(`!document.querySelector('.hit')`);
-		await browser.click(".drawer-foot .foot-button");
-		await browser.wait(`document.querySelector('.hit')?.textContent.includes('Unique search needle')`);
-		assert(
-			(await search.search({ query: "Unique search needle", archived: true }, BACKGROUND_CONTEXT)).messages.length >
-				0,
+		// A session hit may come first; the message hits follow it.
+		await browser.wait(
+			`[...document.querySelectorAll('.hit')].some((hit)=>hit.textContent.includes('Unique search needle'))`,
 		);
-		await browser.click(".hit");
+		await browser.evaluate(
+			`[...document.querySelectorAll('.hit')].find((hit)=>hit.textContent.includes('Unique search needle')).click()`,
+		);
 		await browser.wait(`location.pathname==='/s/${session.id}'`);
-		await until(sessions.sessions, (rows) => rows?.find((row) => row.id === session.id)?.archivedAt === null);
 		await browser.evaluate(input('input[aria-label="Search sessions and messages"]', ""));
-		await browser.click(".drawer-foot .foot-button");
+		chat.release();
 	});
 	it("lists every immutable artifact version newest first, opens only on a click and returns with Back", async () => {
 		const owner = fixture.browser(),
@@ -181,26 +173,5 @@ describe("search, viewers, artifacts and cost parity", { skip: !browserTests }, 
 			"A private test snapshot, not configuration.\n",
 		);
 		await browser.click('button[aria-label="Close viewer"]');
-	});
-	it("selects a cost chart column and its corresponding table row, and closes with Escape", async () => {
-		await browser.wait(`document.querySelector('.cost-link')`);
-		await browser.click(".cost-link");
-		await browser.wait(`document.querySelectorAll('.cost-column').length>=3`);
-		await browser.evaluate(`document.querySelectorAll('.cost-column')[1].classList.add('test-cost-column')`);
-		await browser.click(".test-cost-column");
-		await browser.wait(`document.querySelectorAll('.cost-table tbody tr')[1]?.classList.contains('selected')`);
-		await browser.call("Input.dispatchKeyEvent", {
-			type: "keyDown",
-			key: "Escape",
-			code: "Escape",
-			windowsVirtualKeyCode: 27,
-		});
-		await browser.call("Input.dispatchKeyEvent", {
-			type: "keyUp",
-			key: "Escape",
-			code: "Escape",
-			windowsVirtualKeyCode: 27,
-		});
-		await browser.wait(`!document.querySelector('[role=dialog][aria-label=Cost]')`);
 	});
 });

@@ -93,13 +93,27 @@ describe("chat mode in the browser", { skip: !browserTests }, () => {
 		// Phone: a long press on Pi's answer starts a reply to it. Only once the answer stopped streaming: a row still
 		// growing under the finger shifts, and the press cancels on any move.
 		await browser.metrics(390, 844);
-		await browser.wait(`!document.querySelector('.assistant .streaming')`);
-		await browser.call("Emulation.setTouchEmulationEnabled", { enabled: true });
-		const answer = await browser.evaluate<{ x: number; y: number }>(
-			`(()=>{const e=[...document.querySelectorAll('.assistant[data-entry]')].at(-1);e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+Math.min(r.height/2,20)}})()`,
+		await browser.wait(
+			`!document.querySelector('.assistant .streaming') && !document.querySelector('.rows .arriving')`,
 		);
-		await browser.call("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [answer] });
-		await new Promise((resolve) => setTimeout(resolve, 1000)); // the long press needs 500 ms; leave room under load
+		await browser.call("Emulation.setTouchEmulationEnabled", { enabled: true });
+		const answer = await browser.evaluate<{ x: number; y: number; ok: boolean; hit: string | undefined }>(
+			`(async () => {
+				const e = [...document.querySelectorAll('.assistant[data-entry]')].at(-1);
+				e.scrollIntoView({block: 'center'});
+				await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+				const r = e.getBoundingClientRect();
+				const x = r.left + r.width / 2, y = r.top + Math.min(r.height / 2, 20);
+				const hit = document.elementFromPoint(x, y);
+				return {x, y, ok: e.contains(hit), hit: hit?.className};
+			})()`,
+		);
+		assert.ok(answer.ok, `the press lands on Pi's answer, not ${answer.hit}`);
+		await browser.call("Input.dispatchTouchEvent", {
+			type: "touchStart",
+			touchPoints: [{ x: answer.x, y: answer.y }],
+		});
+		await new Promise((resolve) => setTimeout(resolve, 1500)); // the long press needs 500 ms; leave room under load
 		await browser.call("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 		await browser.wait(`document.querySelector('.composer .replying')?.textContent==='Replying to Pi'`);
 		await browser.evaluate(input(".composer textarea", "Agreed"));

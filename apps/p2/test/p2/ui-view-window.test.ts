@@ -63,13 +63,14 @@ describe("long conversation in the browser", { skip: !browserTests }, () => {
 			scroller.dispatchEvent(new Event('scroll'));
 			return document.querySelector('.messages').textContent.includes('module 1 and fix') && !document.querySelector('.earlier');
 		})()`);
-		// Another session and back: the held view and its pages are still there, nothing is sent again.
+		// Another session and back: the held view and its pages are still there, nothing is sent again. The drawer
+		// lists only the single session, so the switch is the in-app navigation a direct link makes.
 		const before = await browser.evaluate<number>("window.__received");
-		const row = (title: string) =>
-			`[...document.querySelectorAll('.session-row button')].find((button) => button.textContent.includes(${JSON.stringify(title)}))?.click() ?? true`;
-		await browser.evaluate(row("Other one"));
+		const go = (id: string) =>
+			`(() => { history.pushState(null, "", "/s/${id}"); window.dispatchEvent(new PopStateEvent("popstate")); })()`;
+		await browser.evaluate(go(other));
 		await browser.wait(`document.querySelector('.topbar h1')?.textContent === 'Other one'`);
-		await browser.evaluate(row("Long one"));
+		await browser.evaluate(go(long));
 		await browser.wait(`document.querySelector('.topbar h1')?.textContent === 'Long one'`);
 		// It opens at the bottom (only the rows near the viewport are rendered); its start is a scroll away.
 		await browser.wait(`(() => {

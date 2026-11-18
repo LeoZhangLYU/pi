@@ -109,7 +109,7 @@ function SettingsButton() {
 }
 
 const footer = <SettingsButton />;
-/** Entries above the folders, e.g. the Familiar's. */
+/** Entries above the folders (plugins' `drawer-head` slots). */
 const head = <SlotList prefix="drawer-head" />;
 
 /** What a row says about a lifecycle operation (`Sessions.operations`), by kind: running, and failed. */

@@ -86,8 +86,9 @@ describe("unread answers", () => {
 			const sessions = await holdIn(owner, Sessions, {}, "owner");
 			const marks = owner.hold(SessionReads, {}, BACKGROUND_CONTEXT);
 			const keep = [follow(marks.answers, () => {}), follow(marks.reads, () => {})];
-			const target = await sessions.create({ cwd: fixture.workspace, title: "Answers here" }, BACKGROUND_CONTEXT);
+			// The drawer lists the single session, the newest: the viewed one is an older session, opened directly.
 			const elsewhere = await sessions.create({ cwd: fixture.workspace, title: "Looking here" }, BACKGROUND_CONTEXT);
+			const target = await sessions.create({ cwd: fixture.workspace, title: "Answers here" }, BACKGROUND_CONTEXT);
 			const browser = await Browser.start();
 			await browser.signIn(fixture.owner);
 			try {

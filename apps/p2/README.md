@@ -221,6 +221,13 @@ Members evolve in place: their conversations and configuration live as long as t
 notes with the `remember` tool. A note becomes part of that member's instructions, so it survives compaction and
 restarts; the newest 20 are kept. (Scheduled restarts and compaction of long member conversations come later.)
 
+Each member also has its own `AGENTS.md` (`~/.pi/p2/sessions/<session>/team/<member>/AGENTS.md`), kept by the HR
+manager with `staff agents` (read it without `text`, replace it with `text`). It is added to that member's prompt in
+every turn, like a project's `AGENTS.md`: lasting guidance that belongs with the member, not with one task. What
+applies to everyone, you and every member alike, goes in the global `~/.pi/p2/AGENTS.md`, which every session and
+member reads. The main agent also gets a short guide to its team in its prompt (look with `subagent status` first,
+staff through the HR manager, give work to managers), so it knows it leads one.
+
 Every piece of work given to a member is a delegation: working, then done, failed or stopped. A manager's answer is
 reported to whoever gave it the work only once all the work it gave its executors has ended; until then its
 delegation is waiting for its team. Every stop goes through one flow (`subagent stop`, `delegate stop`, the HR manager

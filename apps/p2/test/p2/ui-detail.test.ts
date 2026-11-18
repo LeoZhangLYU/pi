@@ -88,35 +88,38 @@ describe("detail in the browser", { skip: !browserTests }, () => {
 		const settings = join(fixture.dataDir, "settings.json");
 		const base = JSON.parse(readFileSync(settings, "utf8")) as Record<string, unknown>;
 		writeFileSync(settings, JSON.stringify({ ...base, detail: 1 }));
-		const other = (
-			await (
-				await holdIn(fixture.browser(), Sessions, {}, "owner")
-			).create({ cwd: fixture.workspace, title: "Other" }, BACKGROUND_CONTEXT)
-		).id;
-		await browser.metrics(1280, 900);
-		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${session}`);
-		await browser.wait(
-			`Boolean(document.querySelector('.rows')) && !${ROWS}.split(',').some((kind) => kind === 'thought' || kind === 'text')`,
-		);
-		const row = (title: string) =>
-			`[...document.querySelectorAll('.drawer .session-title')].find((e) => e.textContent === ${JSON.stringify(title)})`;
-		// Away to another chat and back: from the moment its rows show, no thought or text row (detail 3's) ever does.
-		await browser.wait(`Boolean(${row("Other")})`);
-		await browser.evaluate(`${row("Other")}.click()`);
-		await browser.wait(`location.pathname === '/s/${other}'`);
-		await browser.evaluate(`(() => {
-			window.__regrouped = false;
-			new MutationObserver(() => {
-				if (document.querySelector('.rows [data-testid=thought]')) window.__regrouped = true;
-			}).observe(document.body, { childList: true, subtree: true });
-		})()`);
-		await browser.wait(`Boolean(${row("Detail")})`);
-		await browser.evaluate(`${row("Detail")}.click()`);
-		await browser.wait("document.querySelector('.rows [data-testid=activity]')");
-		await browser.evaluate("new Promise((resolve) => setTimeout(resolve, 1500))");
-		assert.equal(await browser.evaluate<boolean>("window.__regrouped"), false);
-		writeFileSync(settings, JSON.stringify(base));
-		await browser.metrics(390, 844);
+		try {
+			const other = (
+				await (
+					await holdIn(fixture.browser(), Sessions, {}, "owner")
+				).create({ cwd: fixture.workspace, title: "Other" }, BACKGROUND_CONTEXT)
+			).id;
+			await browser.metrics(1280, 900);
+			await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${session}`);
+			await browser.wait(
+				`Boolean(document.querySelector('.rows')) && !${ROWS}.split(',').some((kind) => kind === 'thought' || kind === 'text')`,
+			);
+			// The drawer lists only the single session: switch as a direct link does, without a page load.
+			const go = (id: string) =>
+				`(() => { history.pushState(null, "", "/s/${id}"); window.dispatchEvent(new PopStateEvent("popstate")); })()`;
+			await browser.evaluate(go(other));
+			await browser.wait(`location.pathname === '/s/${other}'`);
+			await browser.evaluate(`(() => {
+				window.__regrouped = false;
+				new MutationObserver(() => {
+					if (document.querySelector('.rows [data-testid=thought]')) window.__regrouped = true;
+				}).observe(document.body, { childList: true, subtree: true });
+			})()`);
+			await browser.evaluate(go(session));
+			await browser.wait(
+				`location.pathname === '/s/${session}' && document.querySelector('.rows [data-testid=activity]')`,
+			);
+			await browser.evaluate("new Promise((resolve) => setTimeout(resolve, 1500))");
+			assert.equal(await browser.evaluate<boolean>("window.__regrouped"), false);
+		} finally {
+			writeFileSync(settings, JSON.stringify(base));
+			await browser.metrics(390, 844);
+		}
 	});
 
 	it("a tap on the wheel opens the step in front, the running one too; on the summary the list", async () => {
