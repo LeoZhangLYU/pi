@@ -44,12 +44,33 @@ const sectionOf = (view: ConversationView | null | undefined, key: string): stri
 		}
 	return current;
 };
+/** The texts of the messages member `name` sent to the view's conversation after entry `since`, oldest first. */
+const reportTexts = (view: ConversationView | null | undefined, name: string, since: number): string[] =>
+	(view?.entries ?? []).flatMap((entry) =>
+		entry.kind === AGENT_MESSAGE_ENTRY && entry.id > since && (entry.data as AgentMessage).from.name === name
+			? [(entry.data as AgentMessage).text]
+			: [],
+	);
 /** How many messages member `name` sent to the view's conversation after entry `since`. */
 const reportsSince = (view: ConversationView | null | undefined, name: string, since: number): number =>
-	(view?.entries ?? []).filter(
-		(entry) =>
-			entry.kind === AGENT_MESSAGE_ENTRY && entry.id > since && (entry.data as AgentMessage).from.name === name,
-	).length;
+	reportTexts(view, name, since).length;
+/** Whether the conversation of a view has a run going. */
+const working = (view: ConversationView | null | undefined): boolean =>
+	(view?.docs["pi.live"] as { run?: unknown } | undefined)?.run !== undefined;
+/** The results of tool `tool` after entry `since`, oldest first. After a marker, like the counts above. */
+const resultsSince = (view: ConversationView | null | undefined, tool: string, since: number): ToolResultMessage[] =>
+	(view?.entries ?? [])
+		.filter((entry) => entry.id > since)
+		.flatMap((entry) => entry.model ?? [])
+		.filter((message): message is ToolResultMessage => message.role === "toolResult" && message.toolName === tool);
+/** The `subagent send` results to member `name` after entry `since`: how each reached it (`details.delivery`). */
+const sendsSince = (view: ConversationView | null | undefined, name: string, since: number): ToolResultMessage[] =>
+	resultsSince(view, "subagent", since).filter((each) => {
+		const details = each.details as { action?: string; name?: string } | undefined;
+		return details?.action === "send" && details.name === name;
+	});
+const deliveryOf = (message: ToolResultMessage | undefined): string | undefined =>
+	(message?.details as { delivery?: string } | undefined)?.delivery;
 
 describe("the team (fake provider)", () => {
 	let fixture: Fixture;
@@ -68,13 +89,18 @@ describe("the team (fake provider)", () => {
 			},
 			BACKGROUND_CONTEXT,
 		);
-	/** The main agent's `subagent status`, as text. */
+	/**
+	 * The main agent's `subagent status`, as text. Its answer is the status result after the marker taken now: the view
+	 * holds only the newest entries, so counting results in it would lose some as it slides.
+	 */
 	const status = async (): Promise<string> => {
-		const count = (view: ConversationView | null | undefined) =>
-			results(view, "subagent").filter((each) => (each.details as { action?: string }).action === "status");
-		const before = count(chat.view.value).length;
+		const asked = (view: ConversationView | null | undefined) =>
+			resultsSince(view, "subagent", mark).filter(
+				(each) => (each.details as { action?: string }).action === "status",
+			);
+		const mark = newest(chat.view.value);
 		await chat.send({ text: "subagent-status", requestId: `team-${++serial}` }, BACKGROUND_CONTEXT);
-		return text(count(await until(chat.view, (view) => count(view).length > before)).at(-1));
+		return text(asked(await until(chat.view, (view) => asked(view).length > 0)).at(-1));
 	};
 
 	before(async () => {
@@ -256,6 +282,92 @@ describe("the team (fake provider)", () => {
 		exec.release();
 	});
 
+	it("queues work behind a member's current answer by default, and answers each piece in its own turn", async () => {
+		const exec = await holdIn(owner, Chat, { session, conversation: member("exec-3").conversationId }, "participant");
+		await until(chat.view, (value) => !working(value));
+		const mark = newest(chat.view.value);
+		await sendTo("exec-3", "slow-tool");
+		// Its run is going (the tool takes a few seconds): the second piece arrives while it works.
+		await until(exec.view, working);
+		await until(chat.view, (value) => !working(value));
+		await sendTo("exec-3", "second piece");
+		const sent = await until(chat.view, (value) => sendsSince(value, "exec-3", mark).length === 2);
+		const mine = sendsSince(sent, "exec-3", mark);
+		assert.deepEqual(mine.map(deliveryOf), ["start", "queue"]);
+		assert.match(text(mine[1]), /waits until its current answer ends/);
+		// Neither piece replaces the other: the first is answered, then the second gets a turn of its own.
+		await until(chat.view, (value) => reportsSince(value, "exec-3", mark) === 2, 60_000);
+		const [first, second] = reportTexts(chat.view.value, "exec-3", mark);
+		assert.ok(first?.startsWith("Echo: slow-tool"), first?.slice(0, 40));
+		assert.equal(second, "Echo: second piece");
+		await until(chat.view, (value) => !working(value));
+		assert.ok(!(await status()).includes("Open work:"));
+		exec.release();
+	});
+
+	it("reports each piece a manager was given with the answer it got, though one waited behind the other", async () => {
+		const lead = await holdIn(owner, Chat, { session, conversation: member("lead").conversationId }, "participant");
+		await until(chat.view, (value) => !working(value));
+		const mark = newest(chat.view.value);
+		// A long answer keeps the manager working while the second piece arrives.
+		await sendTo("lead", "slow first piece");
+		await until(lead.view, working);
+		await until(chat.view, (value) => !working(value));
+		await sendTo("lead", "second piece");
+		const sent = await until(chat.view, (value) => sendsSince(value, "lead", mark).length === 2);
+		assert.deepEqual(sendsSince(sent, "lead", mark).map(deliveryOf), ["start", "queue"]);
+		// Its team has nothing open: each answer is reported on its own, oldest first (not only the newest, which would
+		// leave the first piece without its answer).
+		await until(chat.view, (value) => reportsSince(value, "lead", mark) === 2, 60_000);
+		const [first, second] = reportTexts(chat.view.value, "lead", mark);
+		assert.ok(first?.startsWith("Echo: slow first piece"), first?.slice(0, 40));
+		assert.equal(second, "Echo: second piece");
+		await until(chat.view, (value) => !working(value));
+		assert.ok(!(await status()).includes("Open work:"));
+		lead.release();
+	});
+
+	it("places work at a working member's next step only when asked to steer", async () => {
+		const exec = await holdIn(owner, Chat, { session, conversation: member("exec-3").conversationId }, "participant");
+		await until(chat.view, (value) => !working(value));
+		const mark = newest(chat.view.value);
+		await sendTo("exec-3", "slow-tool");
+		await until(exec.view, working);
+		await until(chat.view, (value) => !working(value));
+		const steer = { action: "send", name: "exec-3", message: "steered piece", steer: true };
+		await chat.send({ text: `subagent ${JSON.stringify(steer)}`, requestId: `team-${++serial}` }, BACKGROUND_CONTEXT);
+		const sent = await until(chat.view, (value) => sendsSince(value, "exec-3", mark).length === 2);
+		const mine = sendsSince(sent, "exec-3", mark);
+		assert.deepEqual(mine.map(deliveryOf), ["start", "steer"]);
+		assert.match(text(mine[1]), /placed at its next step/);
+		// One turn answers both: a single answer, reported once, to the piece that joined it.
+		await until(chat.view, (value) => reportsSince(value, "exec-3", mark) >= 1, 60_000);
+		await until(chat.view, (value) => !working(value));
+		assert.ok(!(await status()).includes("Open work:"));
+		assert.deepEqual(reportTexts(chat.view.value, "exec-3", mark), ["Echo: steered piece"]);
+		exec.release();
+	});
+
+	it("tells a member its note to the main agent waits, and delivers it before the member's own answer", async () => {
+		const exec = await holdIn(owner, Chat, { session, conversation: member("exec-3").conversationId }, "participant");
+		await until(chat.view, (value) => !working(value));
+		const mark = newest(chat.view.value);
+		const note = { action: "send", to: "parent", message: "fyi", intent: "note", steer: true };
+		await sendTo("exec-3", `team ${JSON.stringify(note)}`);
+		const told = await until(exec.view, (value) =>
+			results(value, "team").some((each) => (each.details as { steered?: boolean } | undefined)?.steered === false),
+		);
+		assert.match(text(results(told, "team").at(-1)), /never joins its current turn/);
+		// The note arrives, then the member's own answer.
+		await until(chat.view, (value) => reportsSince(value, "exec-3", mark) === 2, 60_000);
+		const [first, second] = reportTexts(chat.view.value, "exec-3", mark);
+		assert.equal(first, "fyi");
+		assert.ok(second?.startsWith("Echo: team"), second?.slice(0, 40));
+		await until(chat.view, (value) => !working(value));
+		assert.ok(!(await status()).includes("Open work:"));
+		exec.release();
+	});
+
 	it("lets a member keep notes that become part of its instructions", async () => {
 		const exec = await holdIn(owner, Chat, { session, conversation: member("exec-1").conversationId }, "participant");
 		// The previous test's report chain starts a turn of the main agent: it ends before this test's messages.
@@ -383,5 +495,39 @@ describe("the team (fake provider)", () => {
 		await until(leadChat.view, (value) => textsOf(value).some((each) => each.includes("and once more")));
 		assert.equal(note(leadChat.view.value).length, noteBefore + 1);
 		leadChat.release();
+	});
+
+	// Last: a stop leaves its note for the member's next work, and the tests above send exec-3 plain tool prompts.
+	it("stops a working member together with the piece queued behind it, and reports neither", async () => {
+		const exec = await holdIn(owner, Chat, { session, conversation: member("exec-3").conversationId }, "participant");
+		await until(chat.view, (value) => !working(value));
+		const mark = newest(chat.view.value);
+		await sendTo("exec-3", "slow-tool");
+		await until(exec.view, working);
+		await until(chat.view, (value) => !working(value));
+		await sendTo("exec-3", "queued piece");
+		const sent = await until(chat.view, (value) => sendsSince(value, "exec-3", mark).length === 2);
+		assert.deepEqual(sendsSince(sent, "exec-3", mark).map(deliveryOf), ["start", "queue"]);
+		await until(chat.view, (value) => !working(value));
+		const stop = { action: "stop", name: "exec-3" };
+		await chat.send({ text: `subagent ${JSON.stringify(stop)}`, requestId: `team-${++serial}` }, BACKGROUND_CONTEXT);
+		const stoppedText = /^Stopped exec-3\./;
+		const view = await until(chat.view, (value) =>
+			resultsSince(value, "subagent", mark).some((each) => stoppedText.test(text(each))),
+		);
+		const result = resultsSince(view, "subagent", mark).find((each) => stoppedText.test(text(each)))!;
+		assert.equal(result.isError, false);
+		// Both pieces were open work: the running one and the one queued behind it.
+		assert.match(text(result), /Stopped work: #\d+, #\d+\./);
+		assert.doesNotMatch(text(result), /Could not confirm/);
+		// Nothing runs or waits in the member, and nothing is reported afterwards: not the first piece, not the second.
+		await until(chat.view, (value) => !working(value));
+		await sleep(2_000);
+		assert.equal(reportsSince(chat.view.value, "exec-3", mark), 0);
+		assert.ok(!(await status()).includes("Open work:"));
+		const inbox = exec.view.value?.docs["pi.inbox"] as { items?: { mode: string }[] } | undefined;
+		assert.deepEqual(inbox?.items?.filter((item) => item.mode !== "write") ?? [], []);
+		assert.equal(working(exec.view.value), false);
+		exec.release();
 	});
 });

@@ -188,6 +188,11 @@ export type ReporterInput = {
 	 */
 	parent?: ConversationId;
 	message: string;
+	/**
+	 * Work waits behind the member's current answer (true: the default of every team tool, so a second piece of work never
+	 * replaces the first) or steers its current turn (false: `steer: true`). A reporter created before the default
+	 * changed keeps the value it was given.
+	 */
 	followUp: boolean;
 	/** The owner started the main agent's turn: the subagent's turn inherits it (`SUBAGENT_TASK_ENTRY`). */
 	origin?: "owner";
@@ -406,8 +411,8 @@ type SettleState = { phase: "check"; round: number; stuck: number } | { phase: "
  * Reports a manager's answer once its team is done. A manager's answer to work it was given waits (`Delegation.status`
  * `waiting`) while the executors it gave work to may still be working: this task, at most one per manager, watches until
  * the manager is idle with nothing queued and none of the work it gave out or was newly given is open, then ends the
- * waiting delegations with its latest answer and reports it, once per conversation that gave it work. It ends when the
- * team is not done yet: the delegations' next change creates it again (`ensureSettle`).
+ * waiting delegations with the answer each got and reports every answer once per conversation that gave work, oldest
+ * first. It ends when the team is not done yet: the delegations' next change creates it again (`ensureSettle`).
  */
 export const Settle = defineTask<{ manager: string }, SettleState, null>({
 	name: "p2.team-settle",
@@ -457,37 +462,65 @@ export const Settle = defineTask<{ manager: string }, SettleState, null>({
 						? replies.last.errorMessage || "its last run failed"
 						: undefined;
 				// The answer each waiting delegation got, not the manager's newest reply: a `team send` question it answered
-				// meanwhile belongs to its sender, not to the work that waits. Delegations from before the answer was
-				// recorded fall back to the conversation's latest answer.
-				const answers = waiting.flatMap((each) => (each.answer === undefined ? [] : [each.answer]));
-				const newest = answers.length ? answers.reduce((a, b) => (a > b ? a : b)) : undefined;
-				const fallback = answers.length === 0 && waiting.some((each) => each.answer === undefined);
-				const answerId = newest ?? (fallback ? replies.answer?.id : undefined);
-				const answerText =
-					newest === undefined
-						? fallback
-							? (replies.answer?.text ?? "")
-							: ""
-						: textOf((await tx.entry(AssistantEntry, newest))?.model?.[0] as AssistantMessage | undefined);
-				const reason = failure ?? (answerText.trim() ? undefined : "it gave no answer");
+				// meanwhile belongs to its sender, not to the work that waits. Work that waited behind another piece got a turn of
+				// its own, so each answer is reported on its own, oldest first (delegations one run answered share it).
+				// Delegations from before the answer was recorded fall back to the conversation's latest answer. A failure ends
+				// every waiting delegation as failed. All reads first: the writes below come after them.
+				type Candidate = { group: Delegation[]; answerId?: EntryId; answerText: string };
+				const candidates: Candidate[] = [];
+				if (failure !== undefined) candidates.push({ group: waiting, answerText: "" });
+				else {
+					const ids = [
+						...new Set(waiting.flatMap((each) => (each.answer === undefined ? [] : [each.answer]))),
+					].sort((a, b) => a - b);
+					for (const id of ids)
+						candidates.push({
+							group: waiting.filter((each) => each.answer === id),
+							answerId: id,
+							answerText: textOf(
+								(await tx.entry(AssistantEntry, id))?.model?.[0] as AssistantMessage | undefined,
+							),
+						});
+					const lacking = waiting.filter((each) => each.answer === undefined);
+					if (lacking.length > 0)
+						candidates.push({
+							group: lacking,
+							...(replies.answer ? { answerId: replies.answer.id } : {}),
+							answerText: replies.answer?.text ?? "",
+						});
+				}
+				type Settled = Candidate & { text: string; failed: boolean; origin?: "owner" };
+				const settled: Settled[] = [];
+				for (const candidate of candidates) {
+					const reason = failure ?? (candidate.answerText.trim() ? undefined : "it gave no answer");
+					const origin =
+						reason === undefined && candidate.answerId !== undefined
+							? await answerOrigin(tx, agent.conversationId, candidate.answerId)
+							: undefined;
+					settled.push({
+						...candidate,
+						text: reason ?? candidate.answerText,
+						failed: reason !== undefined,
+						...(origin ? { origin } : {}),
+					});
+				}
 				const now = runtime.now();
-				const text = reason ?? answerText;
-				const answered =
-					reason === undefined && answerId !== undefined
-						? await answerOrigin(tx, agent.conversationId, answerId)
-						: undefined;
-				if (reason === undefined && answerId !== undefined && !agent.reported.includes(answerId))
-					agent.reported.push(answerId);
 				const reports: SettleReport[] = [];
-				for (const each of waiting) {
-					endDelegation(state, each.id, reason === undefined ? "done" : "failed", now, text);
-					if (!reports.some((report) => report.parent === each.parent))
+				for (const item of settled) {
+					if (!item.failed && item.answerId !== undefined && !agent.reported.includes(item.answerId))
+						agent.reported.push(item.answerId);
+					const parents = new Set<ConversationId>();
+					for (const each of item.group) {
+						endDelegation(state, each.id, item.failed ? "failed" : "done", now, item.text);
+						if (parents.has(each.parent)) continue;
+						parents.add(each.parent);
 						reports.push({
 							parent: each.parent,
-							intent: reason === undefined ? "answered" : "failed",
-							text,
-							...(answered ? { origin: answered } : {}),
+							intent: item.failed ? "failed" : "answered",
+							text: item.text,
+							...(item.origin ? { origin: item.origin } : {}),
 						});
+					}
 				}
 				// Cleared with the claim: work given to the manager from now on settles through a task of its own.
 				if (agent.settling === settle.id) delete agent.settling;
@@ -505,8 +538,11 @@ export const Settle = defineTask<{ manager: string }, SettleState, null>({
 			}
 			// Each report is admitted before the terminal commit, with a stable request ID, so a restart cannot deliver it
 			// twice; a manager's settle task reports once the work it gave out has ended.
+			const sent = new Map<ConversationId, number>();
 			for (const report of reports) {
 				if (!agent) break;
+				const number = sent.get(report.parent) ?? 0;
+				sent.set(report.parent, number + 1);
 				await targets.get(report.parent)?.submit(
 					{
 						type: "input",
@@ -520,7 +556,8 @@ export const Settle = defineTask<{ manager: string }, SettleState, null>({
 							replyFor(agent, manager),
 						),
 						whenBusy: "followUp",
-						requestId: `team-settle:${settle.id}:${report.parent}`,
+						// The first report to a conversation keeps the ID an earlier version gave it (a restart must not repeat it).
+						requestId: `team-settle:${settle.id}:${report.parent}${number > 0 ? `:${number}` : ""}`,
 					},
 					context,
 				);
@@ -760,6 +797,12 @@ export type SubagentDetails = {
 	/** The delegation a hire or send opened. */
 	delegation?: number;
 	/**
+	 * How the message reached a member, working or not: `start` (idle: it starts a turn), `queue` (it waits for the
+	 * member's current answer, then gets a turn) or `steer` (it is placed at the member's next step: after its current
+	 * tool round, or when its answer ends).
+	 */
+	delivery?: "start" | "queue" | "steer";
+	/**
 	 * Why a call was refused, structured, so callers (and tests) never read the sentence: a placement (`sandbox`), a busy
 	 * member (`working`), a member the main agent asks with hire (`use`), a team executor (`manager`: whom to give its
 	 * work), a caller without the role (`role`), a manager that still has a team (`team`).
@@ -973,8 +1016,10 @@ const teamTool: P2Tool = defineP2Tool({
 		"the other managers; an executor of a team its manager and the team's other executors; a direct executor the other",
 		"direct executors; the HR manager nobody (it asks the main agent only).",
 		'- send (to: "parent" or a contact\'s name, message; optional intent "question" (default) or "note", steer):',
-		"  delivers it as a message from you; it starts the receiver's turn if it is idle, else waits for its next step",
-		"  (steer: true interrupts its current step). A question asks for a reply, which arrives as a message to you; a note needs none.",
+		"  delivers it as a message from you; it starts the receiver's turn if it is idle, else waits until its current",
+		"  answer ends (steer: true places it in a member's current turn at its next step instead; the main agent's turn is",
+		"  never steered: a message to it always waits). A question asks for a reply, which arrives as a message to you; a",
+		"  note needs none.",
 		"- answer (name): the latest completed answer of a contact.",
 		"- list: your contacts and whether they are working.",
 		"Only message when it helps the work. Never send acknowledgements or thanks, and do not reply to notes.",
@@ -997,7 +1042,7 @@ const teamTool: P2Tool = defineP2Tool({
 	execute: async (args, api, context) => {
 		const reply = (
 			text: string,
-			extra: { refused?: { contact: true } | { stopping: true } } = {},
+			extra: { refused?: { contact: true } | { stopping: true }; steered?: boolean } = {},
 			isError = false,
 		) => ({
 			output: [{ type: "text" as const, text }],
@@ -1042,6 +1087,9 @@ const teamTool: P2Tool = defineP2Tool({
 			return reply(`${args.to} is being stopped; message it once it is.`, { refused: { stopping: true } }, true);
 		const target = await api.conversation(receiver, context);
 		if (!target) return reply(`${args.to} has no conversation.`, {}, true);
+		// A member's turn may be steered by another member. The main conversation (or a branch of it) is no member: what a
+		// member says to it never joins the turn it is in, so it cannot change what that turn is doing.
+		const steered = args.steer === true && memberOf(registry, receiver) !== undefined;
 		// The receiver's turn may act for the owner if this one may.
 		const origin = await originOf(api, context);
 		await target.submit(
@@ -1056,12 +1104,20 @@ const teamTool: P2Tool = defineP2Tool({
 					},
 					replyToMember(registry, self, receiver),
 				),
-				whenBusy: args.steer ? "steer" : "followUp",
+				whenBusy: steered ? "steer" : "followUp",
 				requestId: `team:${api.taskId}:${api.callId}`,
 			},
 			context,
 		);
-		return reply(`Sent to ${args.to}.`);
+		// `steered`: whether the message was submitted to steer (a member receiver and `steer: true`): a steer to a member
+		// that is working is placed at its next step, one to an idle member starts its turn, and none ever reaches the main
+		// agent's turn.
+		return reply(
+			args.steer === true && !steered
+				? `Sent to ${args.to}. A message to the main agent never joins its current turn: it waits for its answer.`
+				: `Sent to ${args.to}.`,
+			{ steered },
+		);
 	},
 });
 

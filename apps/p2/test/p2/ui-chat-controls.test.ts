@@ -168,7 +168,14 @@ describe("chat control parity", { skip: !browserTests }, () => {
 			readdirSync(join(fixture.dataDir, "uploads", pasted))
 				.map((file) => file.slice(37))
 				.sort();
-		await poll(() => existsSync(join(fixture.dataDir, "uploads", pasted)) && uploaded().length === 2);
-		assert.deepEqual(uploaded(), ["image.png", "pasted-image.png"]);
+		// Until both are final: an upload under way is a `<name>.<n>.partial` file, which counts as a file but is not yet
+		// the attachment.
+		const expected = ["image.png", "pasted-image.png"];
+		await poll(
+			() =>
+				existsSync(join(fixture.dataDir, "uploads", pasted)) &&
+				JSON.stringify(uploaded()) === JSON.stringify(expected),
+		);
+		assert.deepEqual(uploaded(), expected);
 	});
 });

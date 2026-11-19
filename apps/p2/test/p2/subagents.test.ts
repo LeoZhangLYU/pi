@@ -115,6 +115,8 @@ describe("subagents (fake provider)", () => {
 				role: "executor",
 				// The previous test's request to the HR manager was #1, this test's #2, the first work #3.
 				delegation: 3,
+				// It was idle: the work started its turn.
+				delivery: "start",
 			},
 		);
 		const listed = await until(

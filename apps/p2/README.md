@@ -228,6 +228,13 @@ applies to everyone, you and every member alike, goes in the global `~/.pi/p2/AG
 member reads. The main agent also gets a short guide to its team in its prompt (look with `subagent status` first,
 staff through the HR manager, give work to managers), so it knows it leads one.
 
+Work given to a member that is still working waits for its current answer and then gets a turn, so a new piece never
+takes the place of the one in progress (with the default queue mode, one turn and one answer per piece; `followUpMode:
+"all"` in `settings.json` places the queued pieces in one turn). The tool's result says whether the work started,
+queued or, with `steer: true` to change what the member is doing now, was placed at the member's next step. A manager's
+pieces are each reported with the answer they got, oldest first. What a member sends the main agent with `team` always
+waits for the main agent's answer: it never joins its turn.
+
 Every piece of work given to a member is a delegation: working, then done, failed or stopped. A manager's answer is
 reported to whoever gave it the work only once all the work it gave its executors has ended; until then its
 delegation is waiting for its team. Every stop goes through one flow (`subagent stop`, `delegate stop`, the HR manager

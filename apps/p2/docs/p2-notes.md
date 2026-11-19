@@ -1304,9 +1304,17 @@ translated phone drawer and intercept chat taps.
   that ends it; a manager's answer is reported once its team's work ended (the `p2.team-settle` task), and a stop
   (`p2.team-stop`) marks the member, aborts its run, verifies it ended and tells whoever gave the stopped work
   (`DelegationStopped`). Members are read-only as conversations (`ReadOnlyConversations`): only Stop reaches them from
-  the browser. Members stay for the session; `remember` appends to `Subagent.notes` (newest 20, 500 characters each,
+  the browser. Work for a working member queues behind its current answer by default (`subagent send`, `delegate send`,
+  `hire`; `steer: true` places it at the member's next step, after its current tool round or when its answer ends): with
+  the default `followUpMode` each piece gets its own turn, answer and delegation (`"all"` places queued pieces in one
+  turn, which one answer settles), and the result's `details.delivery` says `start`, `queue` or `steer`, read before the
+  commit that opens the work. `ReporterInput.followUp` keeps its name and means "queue" (true unless steering). A
+  manager's waiting delegations are ended by its settle task each with the answer it got, reported oldest first, one
+  message per answer and conversation that gave work. `team send` steers only a member: a message to the main agent (or
+  a branch) always queues, and its result says `steered: false` (`team-tool.test.ts` reads the submission's `whenBusy`).
+  Members stay for the session; `remember` appends to `Subagent.notes` (newest 20, 500 characters each,
   in `instructionsFor`) and `staff agents` reads or replaces a member's own AGENTS.md, which
-  `memberAgentsExtension` adds to its prompt as the `member-agents` section: the files live at
+  `teamPromptExtension` adds to its prompt as the `member-agents` section: the files live at
   `sessions/<id>/team/<name>/AGENTS.md` (`plugins/subagents/files.ts`), created at hire. The main agent's `team-lead`
   section (`TEAM_LEAD_PROMPT`, in the same extension, given to an agent that has the `subagent` tool) says it leads the
   team: look with `status` first, staff through the HR manager, give work to managers. `team.test.ts` covers the

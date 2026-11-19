@@ -187,6 +187,33 @@ async function answerText(api: ToolExecutionApi, name: string, agent: Subagent, 
 /** The tools the HR manager gets from the main agent's: looking at environments and directories, nothing to work with. */
 const HR_TOOLS = ["location_envs", "location_dirs"];
 
+/** How work reaches a member: it starts a turn when the member is idle, else it waits for its answer or steers it. */
+type Delivery = NonNullable<SubagentDetails["delivery"]>;
+
+/**
+ * How work for `member` is delivered now. Work waits behind a working member's current answer and gets a turn after it;
+ * only `steer` places it at the member's next step (after its current tool round, or when its answer ends), where it can
+ * change what the member is doing and may be answered together with it. The member may start or end its turn right
+ * after this read: the answer is what the caller is told.
+ */
+async function deliveryOf(
+	api: ToolExecutionApi,
+	member: Subagent,
+	steer: boolean | undefined,
+	context: Context,
+): Promise<Delivery> {
+	const busy = (await api.snapshot(LiveDoc, member.conversationId, context))?.run !== undefined;
+	return !busy ? "start" : steer === true ? "steer" : "queue";
+}
+
+/** What a send tells its caller about where the work went, after "Sent to X (#n)." */
+const deliveryText = (delivery: Delivery): string =>
+	delivery === "queue"
+		? " It is working: this waits until its current answer ends, then gets a turn."
+		: delivery === "steer"
+			? " It is working: this is placed at its next step."
+			: "";
+
 /**
  * How the HR manager starts: the main agent's model and thinking level, with only the tools to look around. Text when
  * the main agent's own choices cannot give it that (an unknown model).
@@ -251,11 +278,13 @@ function subagentTool(deps: TeamDeps): P2Tool {
 			"only entry. The HR manager hires and staffs the team; managers split work among their own executors; direct",
 			"executors work for you.",
 			"Actions:",
-			"- hire (message; optional followUp): ask the HR manager to hire or change members, e.g. 'a parser team: one",
+			"- hire (message; optional steer): ask the HR manager to hire or change members, e.g. 'a parser team: one",
 			"  manager and two executors, one for the lexer and one for the grammar'. Its answer, naming whom it hired, is",
 			"  reported to you as a message. The HR manager is always there; the other members are the ones it hired.",
-			"- send (name, message; followUp: true queues after the current answer instead of steering): give work to a",
-			"  manager or a direct executor. A manager's answer is reported once its whole team is done.",
+			"- send (name, message; optional steer): give work to a manager or a direct executor. A member that is working",
+			"  finishes its current answer first: the new work waits for it and does not replace it. steer: true places it at",
+			"  the member's next step instead (after its current tool round), to change what it is doing now. A manager's",
+			"  answer is reported once its whole team is done.",
 			"- stop (name): stop its current work; stopping a manager also stops its team's work. They stay usable.",
 			"- answer (name): return a member's latest completed answer, e.g. when a report did not reach you.",
 			"- status (optional name): the team in order (HR manager, each manager with its executors, direct executors), who is",
@@ -269,7 +298,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 				action: union([literal("hire"), literal("send"), literal("stop"), literal("answer"), literal("status")]),
 				name: opt(str()),
 				message: opt(str()),
-				followUp: opt(bool()),
+				steer: opt(bool()),
 			},
 			{ open: true },
 		),
@@ -277,7 +306,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 		replay: "unsafe",
 		scope: "main",
 		execute: async (args, api, context) => {
-			const { action, message, followUp } = args;
+			const { action, message, steer } = args;
 			const name = args.name?.trim() || undefined;
 			const reply = (text: string, extra: Partial<SubagentDetails> = {}, isError = false) => ({
 				output: [{ type: "text" as const, text }],
@@ -302,6 +331,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 					created = start;
 				}
 				const origin = await originOf(api, context);
+				const delivery: Delivery = hr ? await deliveryOf(api, hr[1], steer, context) : "start";
 				const result = await api.commit(async (tx) => {
 					const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
 					let found = hrOf(state);
@@ -324,7 +354,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 						parent: api.conversationId,
 						// A stopped hire is told once, with the next request (its stop note).
 						message: withStopNote(agent, message),
-						followUp: followUp === true,
+						followUp: steer !== true,
 						...(origin === "owner" ? { origin } : {}),
 						delegation,
 					};
@@ -333,8 +363,8 @@ function subagentTool(deps: TeamDeps): P2Tool {
 				}, context);
 				if (created) await deps.files.ensure(result.name);
 				return reply(
-					`${created ? `Created the HR manager ${result.name} and asked it` : `Asked ${result.name}`} (#${result.delegation}).`,
-					{ ...result.details, name: result.name, delegation: result.delegation },
+					`${created ? `Created the HR manager ${result.name} and asked it` : `Asked ${result.name}`} (#${result.delegation}).${deliveryText(delivery)}`,
+					{ ...result.details, name: result.name, delegation: result.delegation, delivery },
 				);
 			}
 			if (name === undefined) return reply(`${action} needs a name.`, {}, true);
@@ -366,6 +396,8 @@ function subagentTool(deps: TeamDeps): P2Tool {
 					? resolveTools(own, access(), kept, [], roleOf(agent))
 					: undefined;
 			const origin = await originOf(api, context);
+			// Before the commit: the work it opens may start the member's turn, and that is no reason to call it busy.
+			const delivery = await deliveryOf(api, agent, steer, context);
 			const result = await api.commit(async (tx) => {
 				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
 				const target = memberNamed(state, name);
@@ -390,7 +422,7 @@ function subagentTool(deps: TeamDeps): P2Tool {
 					conversationId: target.conversationId,
 					parent: api.conversationId,
 					message: withStopNote(target, message),
-					followUp: followUp === true,
+					followUp: steer !== true,
 					...(origin === "owner" ? { origin } : {}),
 					delegation,
 				};
@@ -400,7 +432,11 @@ function subagentTool(deps: TeamDeps): P2Tool {
 			if (!result) return reply(`No team member named ${name}.`, {}, true);
 			if ("refused" in result)
 				return reply(`${name} is being stopped; send again once it is.`, { refused: { stopping: true } }, true);
-			return reply(`Sent to ${name} (#${result.delegation}).`, { ...result.details, delegation: result.delegation });
+			return reply(`Sent to ${name} (#${result.delegation}).${deliveryText(delivery)}`, {
+				...result.details,
+				delegation: result.delegation,
+				delivery,
+			});
 		},
 	});
 }
@@ -414,8 +450,10 @@ function delegateTool(deps: TeamDeps): P2Tool {
 			"Give work to your own executors. You are a manager: you split the work you were given, hand the pieces to your",
 			"executors, and answer once they are done.",
 			"Actions:",
-			"- send (name, message; followUp: true queues after its current answer instead of steering): give work to one of",
-			"  your executors. Its answer comes back to you as a message when it arrives; do not wait or poll for it.",
+			"- send (name, message; optional steer): give work to one of your executors. An executor that is working finishes",
+			"  its current answer first: the new work waits for it and does not replace it. steer: true places it at the",
+			"  executor's next step instead (after its current tool round), to change what it is doing now. Its answer comes",
+			"  back to you as a message when it arrives; do not wait or poll for it.",
 			"- stop (name): stop its current work (it stays usable).",
 			"- answer (name): return an executor's latest completed answer.",
 			"- status (optional name): your executors, who is working, and the work you gave out.",
@@ -426,7 +464,7 @@ function delegateTool(deps: TeamDeps): P2Tool {
 				action: union([literal("send"), literal("stop"), literal("answer"), literal("status")]),
 				name: opt(str()),
 				message: opt(str()),
-				followUp: opt(bool()),
+				steer: opt(bool()),
 			},
 			{ open: true },
 		),
@@ -435,7 +473,7 @@ function delegateTool(deps: TeamDeps): P2Tool {
 		deferred: true,
 		scope: "manager",
 		execute: async (args, api, context) => {
-			const { action, message, followUp } = args;
+			const { action, message, steer } = args;
 			const name = args.name?.trim() || undefined;
 			const reply = (text: string, extra: Partial<SubagentDetails> = {}, isError = false) => ({
 				output: [{ type: "text" as const, text }],
@@ -482,6 +520,8 @@ function delegateTool(deps: TeamDeps): P2Tool {
 			const narrowed =
 				kept && kept.length !== agent.tools.length ? resolveTools(main, access(), kept, [], "executor") : undefined;
 			const origin = await originOf(api, context);
+			// Before the commit: the work it opens may start the member's turn, and that is no reason to call it busy.
+			const delivery = await deliveryOf(api, agent, steer, context);
 			const result = await api.commit(async (tx) => {
 				const state = await tx.doc(Subagents, ROOT_CONVERSATION_ID);
 				const target = memberNamed(state, name);
@@ -504,7 +544,7 @@ function delegateTool(deps: TeamDeps): P2Tool {
 					conversationId: target.conversationId,
 					parent: api.conversationId,
 					message: withStopNote(target, message),
-					followUp: followUp === true,
+					followUp: steer !== true,
 					...(origin === "owner" ? { origin } : {}),
 					delegation,
 				};
@@ -516,7 +556,11 @@ function delegateTool(deps: TeamDeps): P2Tool {
 				return result.refused === "stopping"
 					? reply(`${name} is being stopped; send again once it is.`, { refused: { stopping: true } }, true)
 					: reply(`${name} is archived: ask the main agent to have it restored.`, {}, true);
-			return reply(`Sent to ${name} (#${result.delegation}).`, { ...result.details, delegation: result.delegation });
+			return reply(`Sent to ${name} (#${result.delegation}).${deliveryText(delivery)}`, {
+				...result.details,
+				delegation: result.delegation,
+				delivery,
+			});
 		},
 	});
 }

@@ -1,5 +1,5 @@
 // The AGENTS.md files the HR manager keeps for each member. They live beside the session's store
-// (`sessions/<id>/team/<member>/AGENTS.md`), are read into that member's prompt (`memberAgentsExtension`), and are
+// (`sessions/<id>/team/<member>/AGENTS.md`), are read into that member's prompt (`teamPromptExtension`), and are
 // written only through the staff tool (`agents`).
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
