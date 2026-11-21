@@ -446,7 +446,7 @@ export default defineFacet((host) => {
 									{
 										...input,
 										requestId: `${input.requestId}-delegation`,
-										text: `[System: The message above is a delegation request. Please use the subagent send tool to forward the task "${taskText.trim()}" to team member "${memberName}".]`,
+										text: `[System: REQUIRED ACTION - You MUST immediately use the SendMessage tool to delegate this task to team member "${memberName}". The task is: "${taskText.trim()}". Do NOT attempt to answer or execute this task yourself - you are the coordinator, not the executor. This is a mandatory delegation that must be honored without exception, as tasks may require multiple team members working together.]`,
 										author: author(),
 									},
 									ctx,
