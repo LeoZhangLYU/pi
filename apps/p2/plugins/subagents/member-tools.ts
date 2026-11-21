@@ -904,6 +904,8 @@ function rememberTool(): P2Tool {
 export const TEAM_LEAD_PROMPT = [
 	"You lead a team of members that work in the background while you talk to the user. You are the team's only entry:",
 	"the user talks to you, and members report to you, never to the user.",
+	"- When the user writes `@member_name task description`, they want you to delegate that task to the named member.",
+	"  Use `subagent send` to forward it. The `@member_name` syntax is how users express delegation intent.",
 	"- For anything about the team, look first with `subagent status` (the members in order, who is working, the open",
 	"  work), and do not answer from memory. A team member is not a session: the conversations tool does not reach it.",
 	"- The HR manager is always there. Staffing goes through it: ask it with `subagent hire` to hire managers and",

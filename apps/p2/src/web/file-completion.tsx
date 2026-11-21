@@ -46,8 +46,8 @@ export function useFileCompletion(
 	textarea: RefObject<HTMLTextAreaElement | null>,
 	setDraft: (text: string) => void,
 	scope: { session: string; conversation: number } | undefined,
-	/** `mention`: the agent's name while chat mode is on, offered first as `@name`. */
-	options: { mention: string | undefined },
+	/** `mention`: the agent's name while chat mode is on, offered first as `@name`. `members`: team members with status for `@` completion instead of files. */
+	options: { mention: string | undefined; members?: readonly { name: string; status: string }[] },
 ): FileCompletion {
 	const { t } = useMessages(webMessages);
 	const [focused, setFocused] = useState(false);
@@ -90,6 +90,18 @@ export function useFileCompletion(
 				return false;
 			}
 			const mention: CompletionItem[] = mentionItems(rawPrefix, options.mention);
+			// Main conversation with team members: `@` completes member names instead of files.
+			if (options.members && options.members.length > 0) {
+				const memberItems: CompletionItem[] = options.members
+					.filter((member) => member.name.toLowerCase().startsWith(rawPrefix.toLowerCase()))
+					.map((member) => ({
+						label: `@${member.name}`,
+						value: `@${member.name} `,
+						description: member.status,
+					}));
+				setPopover(memberItems.length > 0 ? { items: memberItems, prefix: at, selected: 0 } : undefined);
+				return true;
+			}
 			if (outOfScope(rawPrefix)) {
 				setPopover({ items: mention, prefix: at, selected: 0, hint: t("completionCoversSession") });
 				return true;

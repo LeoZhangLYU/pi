@@ -423,6 +423,39 @@ export default defineFacet((host) => {
 						// As Pi Mobile: a message has text or attachments.
 						if (!input.text.trim() && !attachments?.length) throw new Error("Invalid content");
 						await writable(ctx);
+
+						// Main conversation (conversationId === 1): parse `@member_name task` syntax.
+						if (conversation === 1) {
+							const match = input.text.match(/^@([a-zA-Z0-9_-]+)\s+(.+)$/s);
+							if (match) {
+								const [, memberName, taskText] = match;
+								const files = attachments?.length
+									? await (await ctx.get(Attachments, {})).resolve({ ids: attachments, conversation }, ctx)
+									: undefined;
+								// Submit the original user message without modification - user sees "@member_name task".
+								const originalInput = {
+									...input,
+									author: author(),
+									...(files ? { files } : {}),
+								};
+								const submission = await chat.submit(originalInput, ctx);
+
+								// After submission, inject a system message to inform the assistant about the delegation intent.
+								// This message is visible to the assistant but marked as a system instruction.
+								await chat.submit(
+									{
+										...input,
+										requestId: `${input.requestId}-delegation`,
+										text: `[System: The message above is a delegation request. Please use the subagent send tool to forward the task "${taskText.trim()}" to team member "${memberName}".]`,
+										author: author(),
+									},
+									ctx,
+								);
+
+								return submission;
+							}
+						}
+
 						for (const route of routers.value.values()) {
 							const routed = await route(
 								{ ...input, conversation, author: author(), attachments: attachments ?? [] },
