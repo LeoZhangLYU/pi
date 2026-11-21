@@ -67,10 +67,6 @@ export type VoiceRoom = { session: string; conversation: number };
  */
 export type VoiceChat = {
 	readonly view: Watchable<ConversationView | null>;
-	/** Chat mode is on: people talk with each other, Pi answers when addressed (`voiceMessage`). */
-	readonly chatMode: boolean;
-	/** What people call the agent ("Pi" unless the owner renamed it): "Claude, …" addresses it by voice. */
-	readonly agentName: string;
 	send(text: string, requestId: string): Promise<unknown>;
 	/** Aborts the run (as the Stop button); the caller's queued inputs come back as text. */
 	stop(): Promise<{ readonly restored: readonly string[] }>;
@@ -195,12 +191,9 @@ export class VoiceEngine {
 	readonly #resampler = new Pcm16kResampler();
 	readonly #interruption = new Interruption({
 		state: () => {
-			const chat = this.#chat();
 			return {
 				busy: this.#busy,
 				speaking: this.#speaking(),
-				chatMode: chat?.chatMode ?? false,
-				agentName: chat?.agentName,
 				said: () => this.#recentAnswers(),
 			};
 		},
@@ -770,10 +763,8 @@ export class VoiceEngine {
 				.catch((error: unknown) => this.#report(`Stop failed: ${messageOf(error)}`));
 			return;
 		}
-		const chat = this.#chat();
-		const message = voiceMessage(text, chat?.chatMode ?? false, chat?.agentName);
-		// What Pi was saying is superseded by a message for Pi (in chat mode, people talking with each other leave Pi
-		// be).
+		const message = voiceMessage(text);
+		// What Pi was saying is superseded by a message for Pi.
 		if (message.interrupts) this.#muteCurrent("new message");
 		// Talking to Pi interrupts, as in a conversation: a busy run is stopped before the first such message (unless
 		// its words stopped it already), so it is answered now. Work handed to a doer subagent keeps going.

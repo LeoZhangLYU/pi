@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 import { test } from "node:test";
 import { chatMessages } from "../../plugins/chat/messages.ts";
-import { chatModeMessages } from "../../plugins/chat-mode/messages.ts";
 import { devicesMessages } from "../../plugins/devices/messages.ts";
 import { envsMessages } from "../../plugins/envs/messages.ts";
 import { historyMessages } from "../../plugins/history/messages.ts";
@@ -52,7 +51,6 @@ test("every catalog has the same keys and value types in English and Chinese", (
 		["p2.web", webMessages],
 		["p2.mcp", mcpMessages],
 		["p2.chat", chatMessages],
-		["p2.chat-mode", chatModeMessages],
 		["p2.sessions", sessionsMessages],
 		["p2.envs", envsMessages],
 		["p2.workspace", workspaceMessages],

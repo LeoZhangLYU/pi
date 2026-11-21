@@ -884,7 +884,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		replyTo,
 		setReplyTo,
 		canReply,
-		mentionName,
 	} = composer;
 	// `/tree` from a message (docs/tree.md): the owner, in the main conversation. A reference of its own, as the switch
 	// reaches the session row (whose `main` moves this view) before its result; a user message's text fills the composer.
@@ -940,7 +939,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		composerRef,
 		setDraft,
 		canWrite ? { session: sessionId, conversation: conversationId } : undefined,
-		{ mention: undefined, members: teamMemberNames },
+		{ members: teamMemberNames },
 	);
 	const metrics = useObject(SessionMetrics, { session: sessionId, viewer });
 	const clients = useReadable(metrics?.clients) ?? 0;

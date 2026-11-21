@@ -27,8 +27,6 @@ export type InterruptionState = {
 	busy: boolean;
 	/** The agent's speech is asked for or plays. */
 	speaking: boolean;
-	chatMode: boolean;
-	agentName: string | undefined;
 	/** What the agent said lately (its latest answers' text), to tell an echo from the speaker's words. */
 	said: () => readonly string[];
 };
@@ -181,7 +179,7 @@ export class Interruption {
 	#consider(text: string, utterance: Utterance): void {
 		if (!meaningful(text) || (!utterance.cut && !utterance.stopped && this.#echo(text, utterance))) return;
 		const state = this.#deps.state();
-		const addressed = voiceMessage(text, state.chatMode, state.agentName).interrupts || isStopCommand(text);
+		const addressed = voiceMessage(text).interrupts || isStopCommand(text);
 		const cut = state.speaking && !utterance.cut;
 		const stop = state.busy && addressed && !utterance.stopped && !this.#heldStopped;
 		if (!cut && !stop) return;

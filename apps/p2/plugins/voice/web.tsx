@@ -33,7 +33,6 @@ import {
 } from "@p2/app/v1/web";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Chat } from "../chat/contract.ts";
-import { ChatMode, DEFAULT_AGENT_NAME } from "../chat-mode/contract.ts";
 import { engineLabel, languagesOf, resolved, resolveVoice } from "./choice.ts";
 import { VoiceMode, VoiceService } from "./contract.ts";
 import { VoiceEngine, type VoicePhase, type VoiceSettings } from "./engine.ts";
@@ -215,7 +214,6 @@ function VoiceChip() {
 	const ownerRef = useRef(owner);
 	ownerRef.current = owner;
 	const chatRef = useRef<HeldIn<typeof Chat, "participant">>(undefined);
-	const chatModeRef = useRef({ enabled: false, name: DEFAULT_AGENT_NAME });
 	const orb = useRef<HTMLSpanElement>(null);
 	const settingsRef = useRef<VoiceSettings>(stored.value);
 
@@ -230,8 +228,6 @@ function VoiceChip() {
 				return (
 					chat && {
 						view: chat.view,
-						chatMode: chatModeRef.current.enabled,
-						agentName: chatModeRef.current.name,
 						send: (text, requestId) => chat.send({ text, requestId }, BACKGROUND_CONTEXT),
 						stop: () => chat.stop(BACKGROUND_CONTEXT),
 					}
@@ -259,11 +255,6 @@ function VoiceChip() {
 	}, [engine, key]);
 	const chat = useObject(Chat, input, { variant: "participant" });
 	const { voice: shared, set: setMode } = useVoiceMode(input);
-	const chatMode = useObject(ChatMode, input);
-	chatModeRef.current = {
-		enabled: useReadable(chatMode?.enabled) ?? false,
-		name: useReadable(chatMode?.name) ?? DEFAULT_AGENT_NAME,
-	};
 	chatRef.current = chat;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the engine reads the new reference through chatRef.
 	useEffect(() => engine?.rebind(), [engine, chat]);

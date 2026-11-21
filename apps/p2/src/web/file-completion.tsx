@@ -2,8 +2,7 @@
 // none). The same rules as `src/runtime/completion.ts`: `@` after a token boundary opens a popover of the
 // session's FileIndex matches; a Tab on a path-like token lists that directory. While the popover is open, Enter/Tab
 // apply, arrows move and Escape closes, ahead of send and stop. Keys during IME composition are ignored and the popover
-// never opens mid-composition. `@pi` (chat mode's agent mention) is never completed as a file; in chat mode a
-// synthetic "@pi — mention Pi" item comes first.
+// never opens mid-composition.
 import { BACKGROUND_CONTEXT } from "@p2/app/v1";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import {
@@ -12,8 +11,6 @@ import {
 	type CompletionItem,
 	extractAtPrefix,
 	extractPathPrefix,
-	isMentionToken,
-	mentionItems,
 	outOfScope,
 	parsePathPrefix,
 	pathCompletion,
@@ -46,8 +43,8 @@ export function useFileCompletion(
 	textarea: RefObject<HTMLTextAreaElement | null>,
 	setDraft: (text: string) => void,
 	scope: { session: string; conversation: number } | undefined,
-	/** `mention`: the agent's name while chat mode is on, offered first as `@name`. `members`: team members with status for `@` completion instead of files. */
-	options: { mention: string | undefined; members?: readonly { name: string; status: string }[] },
+	/** `members`: team members with status for `@` completion instead of files in main conversation. */
+	options: { members?: readonly { name: string; status: string }[] },
 ): FileCompletion {
 	const { t } = useMessages(webMessages);
 	const [focused, setFocused] = useState(false);
@@ -85,11 +82,6 @@ export function useFileCompletion(
 		clearTimeout(timer.current);
 		if (at !== null) {
 			const { rawPrefix, isQuotedPrefix } = parsePathPrefix(at);
-			if (isMentionToken(at, options.mention)) {
-				setPopover(undefined);
-				return false;
-			}
-			const mention: CompletionItem[] = mentionItems(rawPrefix, options.mention);
 			// Main conversation with team members: `@` completes member names instead of files.
 			if (options.members && options.members.length > 0) {
 				const memberItems: CompletionItem[] = options.members
@@ -103,19 +95,19 @@ export function useFileCompletion(
 				return true;
 			}
 			if (outOfScope(rawPrefix)) {
-				setPopover({ items: mention, prefix: at, selected: 0, hint: t("completionCoversSession") });
+				setPopover({ items: [], prefix: at, selected: 0, hint: t("completionCoversSession") });
 				return true;
 			}
 			timer.current = setTimeout(() => {
 				if (!live) {
-					setPopover(mention.length ? { items: mention, prefix: at, selected: 0 } : undefined);
+					setPopover(undefined);
 					return;
 				}
 				void live
 					.complete({ query: rawPrefix, limit: 20 }, BACKGROUND_CONTEXT)
 					.then((result) => {
 						if (id !== request.current) return;
-						const items = [...mention, ...atItems(result.items, { isQuotedPrefix })];
+						const items = atItems(result.items, { isQuotedPrefix });
 						setPopover(
 							items.length || result.truncated
 								? {

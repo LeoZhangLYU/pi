@@ -13,7 +13,6 @@ import type { ConversationView } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT, follow } from "@p2/app/v1";
 import { WebSocket } from "ws";
 import { Chat } from "../../plugins/chat/contract.ts";
-import { ChatMode, spokenMention } from "../../plugins/chat-mode/contract.ts";
 import { Sessions } from "../../plugins/sessions/contract.ts";
 import { BargeInDetector, type BargeInPhase, Pcm16kResampler } from "../../plugins/voice/barge-in.ts";
 import { languagesOf, resolved } from "../../plugins/voice/choice.ts";
@@ -29,9 +28,8 @@ import {
 import { bargeInPhase } from "../../plugins/voice/policy.ts";
 import { parseRoomFrame, roomName } from "../../plugins/voice/protocol.ts";
 import { isStopCommand, SpeechChunker, speakable } from "../../plugins/voice/speech-text.ts";
-import { PendingTranscripts, type TranscriptTarget, voiceMessage } from "../../plugins/voice/transcripts.ts";
-import voiceWorker, { VOICE_PROMPT, voicePrompt } from "../../plugins/voice/worker.ts";
-import { chatModeHost } from "./chat-mode-host.ts";
+import { PendingTranscripts, type TranscriptTarget } from "../../plugins/voice/transcripts.ts";
+import { VOICE_PROMPT, voicePrompt } from "../../plugins/voice/worker.ts";
 import { ChordError, type Fixture, holdIn, http, poll, startFixture, until } from "./helpers.ts";
 import { fakeSpeechService, VOICES } from "./voice-service.ts";
 
@@ -529,31 +527,6 @@ describe("voice interruption by words", () => {
 		assert.deepEqual(interruption.final(""), { text: "Check the build.", stopped: true });
 	});
 
-	it("in chat mode cuts the speech for anyone's words, and stops the run only when they are for the agent", () => {
-		const chat = setup({ chatMode: true });
-		chat.interruption.speechStart();
-		chat.interruption.interim("lunch at noon?");
-		assert.deepEqual(chat.did, ["cut speech"]);
-		const addressed = setup({ chatMode: true, speaking: false });
-		addressed.interruption.speechStart();
-		addressed.interruption.interim("lunch at noon?");
-		assert.deepEqual(addressed.did, []);
-		assert.deepEqual(addressed.interruption.final("lunch at noon?"), { text: "lunch at noon?", stopped: false });
-		addressed.interruption.speechStart();
-		addressed.interruption.interim("Pi, stop that");
-		assert.deepEqual(addressed.did, ["stop run"]);
-		// People talking over the agent cut its speech; the agent's name later in the same utterance stops its run.
-		const later = setup({ chatMode: true });
-		later.interruption.speechStart();
-		later.interruption.interim("lunch at noon?");
-		later.interruption.interim("lunch at noon? Pi, stop that");
-		assert.deepEqual(later.did, ["cut speech", "stop run"]);
-		const stop = setup({ chatMode: true, speaking: false });
-		stop.interruption.speechStart();
-		stop.interruption.interim("Stop.");
-		assert.deepEqual(stop.did, ["stop run"]);
-	});
-
 	it("forgets the utterances in progress when the room's connection ends, returning what was held", () => {
 		const { interruption, did, advance } = setup();
 		interruption.trigger();
@@ -626,86 +599,6 @@ describe("voice room frames", () => {
 	});
 });
 
-describe("voice in chat mode", () => {
-	it("turns the agent's name spoken anywhere into a mention in front, keeping what was said", () => {
-		for (const [spoken, written] of [
-			["Pi, what time is it?", "@pi Pi, what time is it?"],
-			["Hey Pi, are you there?", "@pi Hey Pi, are you there?"],
-			["can Pi summarize this", "@pi can Pi summarize this"],
-			["what do you think, Pi?", "@pi what do you think, Pi?"],
-			["  PI.", "@pi PI."],
-			["Ask @pi later", "Ask @pi later"],
-		])
-			assert.equal(spokenMention(spoken), written, spoken);
-		// Whole words only; a possessive or contraction ("Pi's") talks about the agent, not to it.
-		for (const text of ["Pie is great.", "Piano lessons today", "pip install it", "Pi's answer was odd", "pi-hole"])
-			assert.equal(spokenMention(text), text, text);
-		// A renamed agent: its name counts, Pi's does not.
-		assert.equal(spokenMention("hey Claude, run it", "Claude"), "@claude hey Claude, run it");
-		assert.equal(spokenMention("Pi, do it", "Claude"), "Pi, do it");
-		assert.equal(spokenMention("Claudette called", "Claude"), "Claudette called");
-		assert.deepEqual(voiceMessage("Pi, go", false), { text: "Pi, go", interrupts: true });
-		assert.deepEqual(voiceMessage("Pi, go", true), { text: "@pi Pi, go", interrupts: true });
-		assert.deepEqual(voiceMessage("lunch?", true), { text: "lunch?", interrupts: false });
-		assert.deepEqual(voiceMessage("thanks Claude", true, "Claude"), {
-			text: "@claude thanks Claude",
-			interrupts: true,
-		});
-	});
-
-	it("does not stop a busy run for a message that is not for Pi", async () => {
-		const calls: string[] = [];
-		const queue = new PendingTranscripts({
-			target: () => ({
-				send: async (text) => calls.push(`send ${text}`),
-				stop: async () => {
-					calls.push("stop");
-					return { restored: [] };
-				},
-			}),
-			busy: () => true,
-			log: () => {},
-			onError: () => {},
-			onChange: () => {},
-		});
-		queue.push("lunch?", false);
-		await queue.flush();
-		queue.push("@pi which place?", true);
-		await queue.flush();
-		assert.deepEqual(calls, ["send lunch?", "stop", "send @pi which place?"]);
-	});
-
-	it("places spoken chat as the owner's chat entry, and a spoken address as a mention that Pi answers", async (t) => {
-		const fixture = await chatModeHost();
-		t.after(() => fixture.close());
-		const OWNER = { kind: "owner", access: "local" } as const;
-		const where = { session: "s1", conversation: 1 };
-		const owner = await holdIn(fixture.client(OWNER), Chat, where, "participant");
-		const mode = await holdIn(fixture.client(OWNER), ChatMode, where, "owner");
-		await mode.set({ enabled: true }, BACKGROUND_CONTEXT);
-		await until(mode.enabled, (value) => value === true);
-		const answered = (view: ConversationView | null | undefined) =>
-			view?.entries.some((entry) => entry.model?.[0]?.role === "assistant") ?? false;
-		// What the voice engine sends: the transcript as `voiceMessage` makes it.
-		await owner.send({ text: voiceMessage("lunch first?", true).text, requestId: "1" }, BACKGROUND_CONTEXT);
-		const chatted = await until(owner.view, (view) =>
-			Boolean(view?.entries.some((entry) => entry.kind === "chat.message")),
-		);
-		assert.deepEqual(
-			chatted?.entries.filter((entry) => entry.kind === "chat.message").map((entry) => entry.data),
-			[{ author: { kind: "owner", id: "owner", name: "Owner" }, text: "lunch first?", attachments: [] }],
-		);
-		assert(!answered(chatted), "no run for chat");
-		await owner.send({ text: voiceMessage("Hey Pi, which place?", true).text, requestId: "2" }, BACKGROUND_CONTEXT);
-		const view = await until(owner.view, answered);
-		assert.deepEqual(view?.entries.find((entry) => entry.kind === "chat.mention")?.data, {
-			author: { kind: "owner", id: "owner", name: "Owner" },
-			text: "@pi Hey Pi, which place?",
-			attachments: [],
-			included: chatted?.entries.filter((entry) => entry.kind === "chat.message").map((entry) => entry.id),
-		});
-	});
-});
 describe("voice choice against the service", () => {
 	it("keeps a language the engine speaks, else falls back to its default; lists English and Deutsch first", () => {
 		const supertonic = VOICES.engines[0];
@@ -743,10 +636,10 @@ describe("voice prompt language", () => {
 
 describe("voice mode's switch and voice", () => {
 	it("keeps the owner's switch and voice", async (t) => {
-		const fixture = await chatModeHost({ facet: voiceWorker });
+		const fixture = await startFixture();
 		t.after(() => fixture.close());
 		const where = { session: "s1", conversation: 1 };
-		const owner = await holdIn(fixture.client({ kind: "owner", access: "local" }), VoiceMode, where, "owner");
+		const owner = await holdIn(fixture.browser(), VoiceMode, where, "owner");
 		await owner.set({ enabled: true }, BACKGROUND_CONTEXT);
 		// The answer follows its state: the owner's switch and voice are on the page when each call resolves.
 		assert.equal(owner.enabled.value, true);

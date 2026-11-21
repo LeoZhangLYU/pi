@@ -3,7 +3,6 @@
 // ping timeout) is kept and tried again, through whatever reference the conversation has by then. Each transcript keeps
 // its request ID across attempts, so one the server already admitted is not placed twice.
 import { isChordError } from "@p2/app/v1";
-import { DEFAULT_AGENT_NAME, mentionsAgent, spokenMention } from "../chat-mode/contract.ts";
 
 /** Where transcripts go: the conversation's current reference. */
 export type TranscriptTarget = {
@@ -36,18 +35,10 @@ type Pending = { text: string; requestId: string; attempted: boolean; interrupts
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
- * What a transcript becomes as a message. With chat mode on, people talk with each other and Pi answers only when
- * addressed: "Pi, …" becomes an `@pi` mention, and only a mention interrupts Pi (its speech and its run). Without chat
- * mode every message is for Pi.
+ * What a transcript becomes as a message. All voice messages are sent directly to the agent.
  */
-export function voiceMessage(
-	text: string,
-	chatMode: boolean,
-	name = DEFAULT_AGENT_NAME,
-): { text: string; interrupts: boolean } {
-	if (!chatMode) return { text, interrupts: true };
-	const message = spokenMention(text, name);
-	return { text: message, interrupts: mentionsAgent(message, name) };
+export function voiceMessage(text: string): { text: string; interrupts: boolean } {
+	return { text, interrupts: true };
 }
 
 /** A failure of the link rather than of the message: worth another attempt. */
