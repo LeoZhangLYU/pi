@@ -12,8 +12,6 @@ import {
 } from "react";
 import { errorText, useRoute } from "../runtime/web.tsx";
 export type PickedFile = { key: string; file: File; preview?: string; uploaded?: string; session?: string };
-/** The message the next send answers: an entry of the current conversation, and whose it is (for display only). */
-export type ReplyTarget = { entryId: number; name: string };
 type State = {
 	draft: string;
 	setDraft: Dispatch<SetStateAction<string>>;
@@ -29,14 +27,6 @@ type State = {
 	setStopped: Dispatch<SetStateAction<{ sessionId: string; conversationId: number } | undefined>>;
 	viewer: string;
 	addFiles: (files: File[]) => void;
-	replyTo: ReplyTarget | undefined;
-	setReplyTo: Dispatch<SetStateAction<ReplyTarget | undefined>>;
-	/** Whether this conversation accepts replies now; a plugin turns it on (chat-mode, while chat mode is on). */
-	canReply: boolean;
-	setCanReply: Dispatch<SetStateAction<boolean>>;
-	/** The agent's name to mention here (chat-mode's setting, "Pi" by default), offered as `@name` with replies. */
-	mentionName: string;
-	setMentionName: Dispatch<SetStateAction<string>>;
 };
 const Context = createContext<State | undefined>(undefined);
 export function ComposerState({ children }: { children: ReactNode }) {
@@ -48,13 +38,7 @@ export function ComposerState({ children }: { children: ReactNode }) {
 	const fail = useCallback((failure: unknown) => setError(errorText(failure)), []);
 	const [stopped, setStopped] = useState<State["stopped"]>();
 	const viewer = useRef(crypto.randomUUID());
-	const [replyTo, setReplyTo] = useState<ReplyTarget>();
-	const [canReply, setCanReply] = useState(false);
-	const [mentionName, setMentionName] = useState("Pi");
 	const key = route.session ? `${route.session}:${route.conversation}` : "new";
-	// A reply target is an entry of one conversation: switching conversations drops it.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: runs when the conversation changes.
-	useEffect(() => setReplyTo(undefined), [key]);
 	// The Stop notice belongs to the conversation it was given in, as in Pi Mobile: another conversation clears it.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: runs when the conversation changes.
 	useEffect(() => setStopped(undefined), [key]);
@@ -104,12 +88,6 @@ export function ComposerState({ children }: { children: ReactNode }) {
 				setStopped,
 				viewer: viewer.current,
 				addFiles,
-				replyTo,
-				setReplyTo,
-				canReply,
-				setCanReply,
-				mentionName,
-				setMentionName,
 			}}
 		>
 			{children}

@@ -312,7 +312,6 @@ function Composer({
 	onSend,
 	onStop,
 	attaching,
-	replying,
 	completion,
 	textareaRef,
 	children,
@@ -324,8 +323,6 @@ function Composer({
 	onSend: () => void;
 	onStop?: () => void;
 	attaching?: Attaching;
-	/** The message being answered, shown above the text with a way to drop the reply. */
-	replying?: { name: string; onCancel: () => void };
 	/** `@` and Tab file completion (p2 addition, src/web/file-completion.tsx); only where a session exists. */
 	completion?: FileCompletion;
 	textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
@@ -359,16 +356,6 @@ function Composer({
 				if (event.target === event.currentTarget) onSend();
 			}}
 		>
-			{replying && (
-				<div className="replying">
-					<span>
-						{t("replyingTo")} <strong>{replying.name}</strong>
-					</span>
-					<button type="button" aria-label={t("cancelReply")} onClick={replying.onCancel}>
-						<CloseIcon />
-					</button>
-				</div>
-			)}
 			{files.length > 0 && (
 				<div className="attachments">
 					{files.map((file) => (
@@ -862,29 +849,13 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	}, [owner, listed]);
 	// The window as the server or this device has it (its newest entries); the transcript holds more (`pages`).
 	const view = liveView ?? kept?.view;
-	const participant = status === "live" && chat?.variant === "participant";
 	// The members only a participant has (send, stop, queue edits, configure).
 	const writer = liveIn(chat, "participant");
 	// Who may write decides what shows (as Pi Mobile's `canWrite`), not whether the chat object is live yet: during a
 	// load, a cold start or a reconnect the composer stays and only Send waits.
 	const canWrite = owner;
 	const composer = useComposerState();
-	const {
-		draft,
-		setDraft,
-		steer,
-		setSteer,
-		error,
-		setError,
-		files,
-		setFiles,
-		viewer,
-		stopped,
-		setStopped,
-		replyTo,
-		setReplyTo,
-		canReply,
-	} = composer;
+	const { draft, setDraft, steer, setSteer, error, setError, files, setFiles, viewer, stopped, setStopped } = composer;
 	// `/tree` from a message (docs/tree.md): the owner, in the main conversation. A reference of its own, as the switch
 	// reaches the session row (whose `main` moves this view) before its result; a user message's text fills the composer.
 	const branchFrom = useCallback(
@@ -906,16 +877,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		[host, nav, sessionId, setDraft, setError],
 	);
 	const canBranch = owner && conversationId === session?.main;
-	// Replies exist while a plugin allows them here (chat-mode, in chat mode); the reply action fills the composer.
-	const startReply = useCallback(
-		(target: { entryId: number; name: string }) => {
-			setReplyTo(target);
-			document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
-		},
-		[setReplyTo],
-	);
-	// Kept while reconnecting, as the composer is (`canWrite`).
-	const replying = canWrite && canReply ? replyTo : undefined;
 	// `@`/Tab file completion for participants.
 	// Main conversation (conversationId === 1) gets team member names for `@` completion instead of files.
 	const { composer: composerRef } = useFrame();
@@ -1077,12 +1038,10 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 			text,
 			files: [...files],
 			whenBusy: steer ? "steer" : "followUp",
-			...(replying ? { replyTo: replying } : {}),
 			item: outgoingItem(id, text, files, author ?? (owner ? OWNER_AUTHOR : undefined)),
 		});
 		setDraft("");
 		setFiles([]);
-		setReplyTo(undefined);
 		setSteer(true);
 	};
 	// The outbox sends while this conversation's chat object is live; the latest values, for its sender.
@@ -1123,7 +1082,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 						requestId: message.id,
 						whenBusy: message.whenBusy,
 						...(attachments.length ? { attachments } : {}),
-						...(message.replyTo ? { replyTo: message.replyTo.entryId } : {}),
 					},
 					BACKGROUND_CONTEXT,
 				);
@@ -1133,12 +1091,11 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 			restore: (message, error) => {
 				restore([message.text]);
 				setFiles((current) => [...message.files, ...current]);
-				if (message.replyTo) setReplyTo((current) => current ?? message.replyTo);
 				setError(errorText(error));
 			},
 		});
 		return () => outbox.connect(undefined);
-	}, [live, outbox, started, restore, setFiles, setReplyTo, setError, t]);
+	}, [live, outbox, started, restore, setFiles, setError, t]);
 	// Leaving the page loses what the outbox has not delivered: the browser asks first.
 	useEffect(() => {
 		if (outgoing.every((message) => message.sent)) return;
@@ -1369,9 +1326,6 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 										onStop: stop,
 										attaching,
 										completion: fileCompletion,
-										...(replying
-											? { replying: { name: replying.name, onCancel: () => setReplyTo(undefined) } }
-											: {}),
 										children: <SlotList prefix="composer" />,
 									},
 									footer,
@@ -1447,7 +1401,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 											<OneShotAgents.Provider value={oneShots}>
 												<OpenWorkspaceFile.Provider value={canWrite ? openWorkspaceFile : undefined}>
 													<OpenTerminal.Provider value={owner ? openTerminal : undefined}>
-														<ReplyTo.Provider value={participant && canReply ? startReply : undefined}>
+														<ReplyTo.Provider value={undefined}>
 															<BranchFrom.Provider value={canBranch ? branchFrom : undefined}>
 																<RevealEntry.Provider value={reveal}>
 																	<FillGap.Provider value={fillGap}>

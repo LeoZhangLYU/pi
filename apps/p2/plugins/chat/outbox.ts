@@ -8,7 +8,7 @@
  * One outbox per conversation, kept for the page's lifetime: switching conversations keeps unsent messages, and they
  * go out once their conversation is open again.
  */
-import type { Item, PickedFile, ReplyTarget } from "@p2/app/v1/web";
+import type { Item, PickedFile } from "@p2/app/v1/web";
 
 export type Outgoing = {
 	/** The request ID: a retry of this message is admitted once. */
@@ -16,7 +16,6 @@ export type Outgoing = {
 	readonly text: string;
 	readonly files: readonly PickedFile[];
 	readonly whenBusy: "steer" | "followUp";
-	readonly replyTo?: ReplyTarget;
 	/** The message as the transcript will show it (a person's message), shown until it does. */
 	readonly item: Extract<Item, { type: "user" }>;
 	/** Accepted: its submission (a queued input's ID), and the conversation's newest entry before it. */
