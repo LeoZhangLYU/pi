@@ -917,7 +917,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 	);
 	// Kept while reconnecting, as the composer is (`canWrite`).
 	const replying = canWrite && canReply ? replyTo : undefined;
-	// `@`/Tab file completion for participants; in chat mode (`canReply`) the agent's mention (`@pi`) is offered first.
+	// `@`/Tab file completion for participants.
 	// Main conversation (conversationId === 1) gets team member names for `@` completion instead of files.
 	const { composer: composerRef } = useFrame();
 	const isMainConversation = conversationId === 1;
@@ -940,7 +940,7 @@ function SessionChat({ sessionId, conversationId }: { sessionId: string; convers
 		composerRef,
 		setDraft,
 		canWrite ? { session: sessionId, conversation: conversationId } : undefined,
-		{ mention: canReply ? mentionName : undefined, members: teamMemberNames },
+		{ mention: undefined, members: teamMemberNames },
 	);
 	const metrics = useObject(SessionMetrics, { session: sessionId, viewer });
 	const clients = useReadable(metrics?.clients) ?? 0;
