@@ -215,6 +215,43 @@ export function killTrackedDetachedChildren(): void {
 }
 
 /**
+ * Check if a process exists by trying to send signal 0
+ */
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Kill a process and all its children, then wait for termination (cross-platform)
+ * @param pid Process ID to kill
+ * @param timeoutMs Maximum time to wait for termination (default 5000ms)
+ * @returns Promise that resolves to true if process terminated, false if timeout
+ */
+export async function killProcessTreeAndWait(pid: number, timeoutMs = 5000): Promise<boolean> {
+	// First, kill the process tree
+	killProcessTree(pid);
+
+	// Then wait for the process to actually terminate
+	const startTime = Date.now();
+	const pollInterval = 100; // Check every 100ms
+
+	while (Date.now() - startTime < timeoutMs) {
+		if (!isProcessAlive(pid)) {
+			return true; // Process terminated successfully
+		}
+		await new Promise((resolve) => setTimeout(resolve, pollInterval));
+	}
+
+	// Timeout reached, process still alive
+	return false;
+}
+
+/**
  * Kill a process and all its children (cross-platform)
  */
 export function killProcessTree(pid: number): void {
