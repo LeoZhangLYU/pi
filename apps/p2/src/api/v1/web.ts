@@ -27,6 +27,7 @@ export * from "../../web/reconnect.ts";
 export * from "../../web/SessionStats.tsx";
 export * from "../../web/SidePanel.tsx";
 export * from "../../web/sidebar.ts";
+export * from "../../web/sidebars.ts";
 export * from "../../web/transcript.ts";
 export * from "../../web/use-chat-scroll.ts";
 export * from "../../web/Viewer.tsx";

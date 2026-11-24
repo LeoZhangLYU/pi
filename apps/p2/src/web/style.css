@@ -3039,9 +3039,30 @@ button.diff-number:hover {
 	border-left: 1px solid var(--line);
 }
 .side-panel-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s2);
 	flex: none;
+	padding: var(--s3) var(--x);
+	border-bottom: 1px solid var(--line);
+	background: var(--bg);
 }
 .side-panel-head h2 {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	margin: 0;
+	font-size: var(--fs-lg);
+	font-weight: 600;
+	line-height: 1.2;
+	letter-spacing: -0.015em;
+	color: var(--fg);
+}
+}
+.side-panel-head .icon-button {
 	flex: none;
 }
 .side-panel-meta {
@@ -3068,6 +3089,87 @@ button.diff-number:hover {
 }
 .sheet-sticky .search {
 	border-bottom: 0;
+}
+/* Team and Task Sidebars: multi-sidebar support */
+/* Mobile: full-screen sheet-like */
+@media (max-width: 699px) {
+	.team-members-panel,
+	.team-tasks-panel {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		max-height: 90vh;
+		border-radius: 12px 12px 0 0;
+		margin-top: auto;
+	}
+}
+/* Medium screens: fixed on right side */
+@media (min-width: 700px) and (max-width: 1279px) {
+	.team-members-panel,
+	.team-tasks-panel {
+		position: fixed;
+		inset: 0 0 0 auto;
+		z-index: 20;
+		width: var(--side-panel-width, min(460px, 60vw));
+		max-width: 85vw;
+	}
+	.team-tasks-panel {
+		z-index: 21; /* Task panel on top */
+	}
+}
+/* Large screens: static layout, side by side */
+@media (min-width: 1280px) {
+	.team-members-panel,
+	.team-tasks-panel {
+		position: static;
+		width: 400px;
+		min-width: 320px;
+		max-width: 600px;
+	}
+}
+/* Show archived button - lightweight text button */
+.show-archived-button {
+	width: 100%;
+	padding: var(--s3) var(--x);
+	margin-top: var(--s3);
+	text-align: left;
+	background: transparent;
+	border: none;
+	border-top: 1px solid var(--line);
+	cursor: pointer;
+	font-size: var(--fs-sm);
+	font-weight: 500;
+	color: var(--muted);
+	transition: color 0.15s ease;
+}
+.show-archived-button:hover {
+	color: var(--fg);
+}
+.show-archived-button:focus-visible {
+	outline: 2px solid var(--link);
+	outline-offset: -2px;
+}
+/* Archived members section */
+.archived-members {
+	margin-top: var(--s2);
+}
+.team-row.archived {
+	opacity: 0.5;
+	position: relative;
+}
+.team-row.archived::after {
+	content: '';
+	position: absolute;
+	left: var(--x);
+	right: var(--x);
+	top: 50%;
+	height: 1px;
+	background: var(--muted);
+	opacity: 0.4;
+	pointer-events: none;
+}
+.team-row.archived strong {
+	font-weight: 400;
 }
 .model-default {
 	margin: var(--s2) 0 0;
@@ -3173,34 +3275,78 @@ button.diff-number:hover {
 .artifact-row > small {
 	flex: none;
 }
-/* The Team panel: member and work rows look like the artifact list's; executors sit under their manager. */
+/* Team action buttons - modern, lightweight design */
+.team-action-button {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 12px;
+	border: none;
+	background: transparent;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: var(--fs-sm);
+	font-weight: 500;
+	color: var(--fg);
+	transition: background 0.15s ease;
+}
+.team-action-button:hover {
+	background: var(--hover);
+}
+.team-action-button.active {
+	background: var(--muted);
+}
+.team-action-button .button-label {
+	font-size: var(--fs-sm);
+	line-height: 1;
+}
+.team-action-button .badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 20px;
+	height: 20px;
+	padding: 0 6px;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	color: white;
+	background: var(--link);
+	border-radius: 10px;
+	margin-left: 2px;
+}
+/* Team panel: clean, status-focused design */
 .team-row,
 .team-work {
 	display: flex;
-	align-items: center;
-	gap: var(--s2);
+	align-items: flex-start;
+	gap: var(--s3);
 	width: calc(100% + 2 * var(--x));
 	min-height: var(--row);
 	margin: 0 calc(-1 * var(--x));
-	padding: var(--s2) var(--x);
+	padding: var(--s3) var(--x);
 	color: var(--text);
 	text-align: start;
+	border-radius: 0;
+	transition: background 0.15s ease;
 }
 .team-row strong,
 .team-work strong {
 	display: block;
 	overflow: hidden;
 	font-size: var(--fs-md);
-	font-weight: var(--fw-medium);
+	font-weight: 500;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	letter-spacing: -0.01em;
 }
 .team-row small,
 .team-work small {
 	display: block;
 	color: var(--muted);
-	font-family: var(--mono);
-	font-size: var(--fs-xs);
+	font-size: var(--fs-sm);
+	line-height: 1.4;
 }
 .team-row > span,
 .team-work > span {
@@ -3211,21 +3357,99 @@ button.diff-number:hover {
 .team-row > small,
 .team-work > small {
 	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+/* Status indicator dot */
+.team-row > small::before {
+	content: '';
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--muted);
+	flex-shrink: 0;
+}
+/* Status colors based on data-status */
+.team-row[data-status="working"] > small::before {
+	background: #10b981;
+}
+.team-row[data-status="idle"] > small::before {
+	background: var(--muted);
+}
+.team-row[data-status="archived"] > small::before {
+	background: transparent;
+	border: 1px solid var(--muted);
+	opacity: 0.4;
+}
+/* Task-specific styles */
+.team-work > span > strong {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.team-work .task-id {
+	color: var(--muted);
+	font-weight: 400;
+	font-size: var(--fs-sm);
+}
+.team-work > small {
+	font-weight: 500;
+	font-size: var(--fs-xs);
+}
+/* Task status indicator - use bar instead of dot */
+.team-work > small::before {
+	content: '';
+	width: 3px;
+	height: 12px;
+	border-radius: 1.5px;
+}
+.team-work[data-status="working"] > small::before {
+	background: #3b82f6;
+}
+.team-work[data-status="waiting"] > small::before {
+	background: #f59e0b;
+}
+.team-work[data-status="stopping"] > small::before {
+	background: #f97316;
+}
+.team-work[data-status="done"] > small::before {
+	background: #10b981;
+}
+.team-work[data-status="failed"] > small::before {
+	background: #ef4444;
+}
+.team-work[data-status="stopped"] > small::before {
+	background: var(--muted);
 }
 .team-work .team-result {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	margin-top: 2px;
+	font-size: var(--fs-xs);
 }
 .team-row.team-executor {
-	padding-inline-start: calc(var(--x) + 14px);
+	padding-inline-start: calc(var(--x) + 20px);
+	position: relative;
+}
+.team-row.team-executor::before {
+	content: '';
+	position: absolute;
+	left: calc(var(--x) + 6px);
+	top: 0;
+	bottom: 0;
+	width: 2px;
+	background: var(--line);
+	opacity: 0.4;
 }
 .team-heading {
 	padding-top: var(--s4);
-	color: var(--muted);
-	font-size: var(--fs-xs);
-	font-weight: var(--fw-strong);
-	text-transform: uppercase;
+	color: var(--fg);
+	font-size: var(--fs-sm);
+	font-weight: 600;
+	letter-spacing: -0.01em;
 }
 @media (hover: hover) {
 	.team-row:hover {

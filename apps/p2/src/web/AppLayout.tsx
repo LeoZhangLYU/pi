@@ -86,8 +86,9 @@ export function AppLayout() {
 				<Slot name="main" fallback={<div className="hero">{t("noChatPlugin")}</div>} />
 			</main>
 			<div id="side-dock" className="side-dock" />
+			<Slot name="team-sidebar" />
+			<Slot name="task-sidebar" />
 			<Slot name="workspace-panel" />
-			<Slot name="team-panel" />
 		</div>
 	);
 }
