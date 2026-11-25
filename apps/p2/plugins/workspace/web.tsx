@@ -3,7 +3,6 @@ import type { Navigation, WorkspaceRoute } from "@p2/app/v1/web";
 import {
 	locationLabel,
 	Slots,
-	useCanWrite,
 	useComposerState,
 	useMessages,
 	useNavigation,
