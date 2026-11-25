@@ -113,40 +113,6 @@ function letter(status: string): string {
 }
 
 /** Changed paths as a directory tree; single-child directory chains merge into one row (`src/web`). */
-export function changeTree(changes: readonly WorkspaceChange[]): ChangeNode[] {
-	const root: ChangeNode = { name: "", path: "", children: [] };
-	for (const change of changes) {
-		let node = root;
-		const segments = change.path.split("/");
-		segments.forEach((segment, index) => {
-			const path = segments.slice(0, index + 1).join("/");
-			let child = node.children.find(
-				(entry) => entry.name === segment && !entry.change === index < segments.length - 1,
-			);
-			if (!child) {
-				child = { name: segment, path, children: [] };
-				node.children.push(child);
-			}
-			if (index === segments.length - 1) child.change = change;
-			node = child;
-		});
-	}
-	const compact = (node: ChangeNode): ChangeNode => {
-		let current = node;
-		while (!current.change && current.children.length === 1 && !current.children[0]?.change) {
-			const only = current.children[0] as ChangeNode;
-			current = { ...only, name: `${current.name}/${only.name}` };
-		}
-		return {
-			...current,
-			children: current.children
-				.map(compact)
-				.sort((a, b) => Number(Boolean(a.change)) - Number(Boolean(b.change)) || a.name.localeCompare(b.name)),
-		};
-	};
-	// The root itself never merges into its only child.
-	return compact({ ...root, change: { path: "", status: "" } }).children;
-}
 
 function initialView(path: string): FileView {
 	const kind = filePreview(path)?.kind;
@@ -487,44 +453,6 @@ export function WorkspacePanel({
 		: place.value?.pending
 			? t("movePending", label ? label(place.value.pending) : place.value.pending.cwd)
 			: undefined;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: version triggers refetches.
-	useEffect(() => {
-		if (tab !== "changes") return;
-		let current = true;
-		query<Extract<WorkspaceResult, { kind: "log" }>>({
-			kind: "log",
-			skip: 0,
-			limit: Math.min(shown.current, 500),
-		}).then(
-			(value) => current && setLog({ commits: value.commits, more: value.more, upstream: value.upstream }),
-			(error: Error) => current && setLog((previous) => ({ ...previous, error: error.message })),
-		);
-		return () => {
-			current = false;
-		};
-	}, [query, tab, version]);
-	const loadMore = () => {
-		const skip = log.commits.length;
-		query<Extract<WorkspaceResult, { kind: "log" }>>({ kind: "log", skip, limit: LOG_PAGE }).then(
-			(value) => {
-				shown.current = skip + value.commits.length;
-				setLog((previous) => ({
-					...previous,
-					commits: [...previous.commits.slice(0, skip), ...value.commits],
-					more: value.more,
-				}));
-			},
-			(error: Error) => setLog((previous) => ({ ...previous, error: error.message })),
-		);
-	};
-	useEffect(() => {
-		if (!openCommit) return;
-		return load(
-			`commit:${openCommit}`,
-			() => query<Extract<WorkspaceResult, { kind: "commit" }>>({ kind: "commit", commit: openCommit }),
-			setCommitDetail,
-		);
-	}, [load, query, openCommit]);
 	const upload = async (picked: File[]) => {
 		setUploadError(undefined);
 		for (const entry of picked) {
@@ -1044,159 +972,6 @@ export function WorkspacePanel({
 				)}
 			</>
 		);
-	} else {
-		const value = status.value;
-		const render = (nodes: ChangeNode[], depth: number, commit?: string): ReactNode[] =>
-			nodes.flatMap((node) => {
-				const indent = { paddingLeft: `calc(var(--x) + ${depth * 14}px)` };
-				if (node.change) {
-					const change = node.change;
-					return [
-						<button
-							type="button"
-							key={node.path}
-							className="workspace-row"
-							style={indent}
-							title={`${describe(change.status)}${change.from ? ` from ${change.from}` : ""}`}
-							aria-current={
-								split && selection?.path === change.path && selection.commit === commit ? "true" : undefined
-							}
-							onClick={() => setSelection({ path: change.path, view: "changes", ...(commit ? { commit } : {}) })}
-						>
-							<span className={`workspace-status status-${letter(change.status)}`}>{letter(change.status)}</span>
-							<span className="workspace-name">{node.name}</span>
-							{(() => {
-								const count = comments.filter(
-									(comment) => comment.path === change.path && comment.commit === commit,
-								).length;
-								return count ? (
-									<small className="comment-count" title={t("hasComments")}>
-										{count} comment{count === 1 ? "" : "s"}
-									</small>
-								) : null;
-							})()}
-						</button>,
-					];
-				}
-				const open = !collapsed.has(node.path);
-				return [
-					<button
-						type="button"
-						key={node.path}
-						className="workspace-row directory"
-						style={indent}
-						aria-expanded={open}
-						onClick={() =>
-							setCollapsed((current) => {
-								const next = new Set(current);
-								if (open) next.add(node.path);
-								else next.delete(node.path);
-								return next;
-							})
-						}
-					>
-						<span className={`chev ${open ? "open" : ""}`}>
-							<ChevronIcon size={12} />
-						</span>
-						<span className="workspace-name">{node.name}</span>
-					</button>,
-					...(open ? render(node.children, depth + 1, commit) : []),
-				];
-			});
-		const detail = commitDetail.key === `commit:${openCommit}` ? commitDetail : undefined;
-		const summary = log.commits.find((entry) => entry.hash === openCommit);
-		body = openCommit ? (
-			<div className="workspace-view">
-				<div className="workspace-bars">
-					<div className="workspace-bar">
-						<button
-							type="button"
-							className="icon-button back"
-							onClick={() => setOpenCommit(undefined)}
-							aria-label={t("back")}
-						>
-							<ChevronIcon size={18} />
-						</button>
-						<span className="workspace-path">{summary?.subject ?? openCommit.slice(0, 8)}</span>
-						<span className="workspace-commit mono">{openCommit.slice(0, 8)}</span>
-					</div>
-				</div>
-				{detail?.error ? (
-					<p className="notice error workspace-note">{detail.error}</p>
-				) : !detail?.value ? (
-					<div className="spinner large" />
-				) : (
-					<>
-						<div className="commit-meta">
-							<span className="muted">
-								{detail.value.author} · {new Date(detail.value.time).toLocaleString()}
-								{summary?.unpushed ? " · not pushed" : ""}
-							</span>
-							{detail.value.message.includes("\n") && (
-								<pre className="commit-message">
-									{detail.value.message.split("\n").slice(1).join("\n").trim()}
-								</pre>
-							)}
-						</div>
-						<div className="workspace-list">
-							{render(changeTree(detail.value.changes), 0, openCommit)}
-							{!detail.value.changes.length && <p className="notice workspace-note">{t("noFileChanges")}</p>}
-							{detail.value.truncated && <p className="notice workspace-note">{t("changeListTruncated")}</p>}
-						</div>
-					</>
-				)}
-			</div>
-		) : status.error ? (
-			<p className="notice error workspace-note">{status.error}</p>
-		) : !value ? (
-			<div className="spinner large" />
-		) : !value.repo ? (
-			<p className="notice workspace-note">{t("notAGitRepository")}</p>
-		) : (
-			<>
-				<p className="workspace-crumbs mono muted">
-					{value.branch ?? "detached"}
-					{log.upstream ? ` → ${log.upstream}` : ""}
-				</p>
-				{value.changes.length > 0 && (
-					<>
-						<h3 className="workspace-section">{t("uncommitted")}</h3>
-						<div className="workspace-list">
-							{render(changeTree(value.changes), 0)}
-							{value.truncated && <p className="notice workspace-note">{t("changeListTruncated")}</p>}
-						</div>
-					</>
-				)}
-				<h3 className="workspace-section">{t("commits")}</h3>
-				<div className="workspace-list">
-					{log.commits.map((entry) => (
-						<button
-							type="button"
-							key={entry.hash}
-							className={`workspace-row commit-row ${entry.unpushed ? "unpushed" : ""}`}
-							title={entry.unpushed ? t("notPushed") : undefined}
-							onClick={() => setOpenCommit(entry.hash)}
-						>
-							<span className="commit-dot" />
-							<span className="workspace-name">
-								{entry.subject}
-								<br />
-								<span className="muted">
-									{entry.short} · {entry.author} · {ago(entry.time)}
-								</span>
-							</span>
-						</button>
-					))}
-					{log.error && <p className="notice error workspace-note">{log.error}</p>}
-					{!log.commits.length && !log.error && <p className="notice workspace-note">{t("noCommits")}</p>}
-					{log.more && (
-						<button type="button" className="text-action workspace-note" onClick={loadMore}>
-							{t("loadMoreCommits")}
-						</button>
-					)}
-				</div>
-			</>
-		);
 	}
 
 	return (
@@ -1227,7 +1002,6 @@ export function WorkspacePanel({
 						{(
 							[
 								["files", t("files"), <FolderIcon key="icon" size={20} />, 0],
-								["changes", t("changes"), <DiffIcon key="icon" />, changes.length],
 								["search", t("search"), <SearchIcon key="icon" size={20} />, 0],
 								["comments", t("comments"), <CommentIcon key="icon" />, comments.length],
 								...(owner ? [["terminal", "Terminal", <TerminalIcon key="icon" size={20} />, 0] as const] : []),
