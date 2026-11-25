@@ -162,10 +162,10 @@ export function WorkspacePanel({
 }) {
 	const { t } = useMessages(workspaceMessages);
 	const { tab, directory, file: selection, commit: openCommit, search: submitted } = route;
-	// Docked with room for a file beside the list (measured below): Files, Changes and Search then show the open file
+	// Docked with room for a file beside the list (measured below): Files and Search then show the open file
 	// to the left of their list instead of in its place. Phones and narrow windows keep one column.
 	const [roomy, setRoomy] = useState(false);
-	const split = roomy && selection !== undefined && (tab === "files" || tab === "changes" || tab === "search");
+	const split = roomy && selection !== undefined && (tab === "files" || tab === "search");
 	// Changes applied to the latest route, not this render's: queued steps may be pending.
 	const update = (change: (current: WorkspaceRoute) => WorkspaceRoute) => (current: typeof nav.route) => ({
 		...current,
@@ -605,7 +605,6 @@ export function WorkspacePanel({
 			(kind === "image" || kind === "audio" || kind === "video" || /\.(md|markdown)$/i.test(name)) &&
 			!(at && kind !== undefined && kind !== "text");
 		const views: FileView[] = [
-			...(selectedChange ? (["changes"] as const) : []),
 			...(deleted ? [] : (["file"] as const)),
 			...(previewable ? (["preview"] as const) : []),
 		];

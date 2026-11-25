@@ -151,7 +151,7 @@ export function WorkspaceFile({
 		if (target === undefined || target < 0) return;
 		body.current?.querySelectorAll(".diff-line")[target]?.scrollIntoView({ block: "center" });
 	}, [target]);
-	const commentable = view === "changes" || view === "file";
+	const commentable = view === "file";
 	const mine = useMemo(
 		() =>
 			comments
