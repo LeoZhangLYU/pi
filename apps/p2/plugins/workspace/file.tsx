@@ -321,7 +321,7 @@ export function WorkspaceFile({
 	} else if (view === "file" && file?.binary) {
 		content = <p className="notice workspace-note">{t("binaryFile", size(file.size))}</p>;
 	} else if (!lines) content = <div className="spinner large" />;
-	else if (!lines.length || (view === "changes" && !diff?.patch))
+	else if (!lines.length)
 		content = <p className="notice workspace-note">{t("noChanges")}</p>;
 	else
 		content = (
@@ -330,10 +330,6 @@ export function WorkspaceFile({
 					lines={lines}
 					language={name}
 					marked={target}
-					onHunk={
-						view === "changes" && contextLines < 1000
-							? () => onContext(contextLines < 10 ? 10 : contextLines < 25 ? 25 : 1000)
-							: undefined
 					}
 					selected={(index) =>
 						open !== undefined && !open.id && numbered(index) === open.line && rowOf(open.line) === index
@@ -341,8 +337,6 @@ export function WorkspaceFile({
 					onLine={commentable ? pick : undefined}
 					after={after}
 				/>
-				{view === "changes" && diff?.truncated && <p className="notice workspace-note">{t("diffTruncated")}</p>}
-				{view === "file" && diff?.truncated && <p className="notice workspace-note">{t("tooLargeForChanges")}</p>}
 				{view === "file" && file?.truncated && (
 					<p className="notice workspace-note">{t("showingFirstMiB", size(file.size))}</p>
 				)}
