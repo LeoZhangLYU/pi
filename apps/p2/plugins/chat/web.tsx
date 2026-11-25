@@ -41,7 +41,6 @@ import {
 	lightTap,
 	loadKept,
 	locationLabel,
-	MenuIcon,
 	Messages,
 	type ModelChoice,
 	ModelPicker,
@@ -63,13 +62,12 @@ import {
 	SendIcon,
 	SessionId,
 	SessionStats,
+	SettingsIcon,
 	Slot,
 	SlotList,
 	Slots,
 	StopIcon,
 	seedSizes,
-	setDrawer,
-	setSidebarCollapsed,
 	ToolActivities,
 	ToolActivityContext,
 	type Transcript,
@@ -586,16 +584,6 @@ function TopBar({
 	);
 	return (
 		<header className="topbar">
-			<button
-				type="button"
-				className="icon-button menu sidebar-open"
-				onClick={() =>
-					window.matchMedia("(min-width: 900px)").matches ? setSidebarCollapsed(false) : setDrawer(true)
-				}
-				aria-label={t("sessions")}
-			>
-				<MenuIcon />
-			</button>
 			<div className="title">
 				{child ? (
 					<>
@@ -607,12 +595,11 @@ function TopBar({
 							className="crumb"
 							onClick={() => session && void nav.backOrPush(conversationRoute(route, session.id, session.main))}
 						>
-							← {session?.title}
+							← {t("back")}
 						</button>
 					</>
 				) : (
 					<>
-						<h1>{session?.title ?? t("newSession")}</h1>
 						{session &&
 							(owner ? (
 								<button

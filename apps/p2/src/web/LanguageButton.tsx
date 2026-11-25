@@ -3,10 +3,11 @@
 
 import { LocaleChoice } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sheet, useMessages, useObject, useReadable } from "../runtime/web.tsx";
 import { rememberLanguage } from "./language.ts";
 import { webMessages } from "./messages.ts";
+import { getTheme, setTheme, subscribeTheme, type ThemePreference } from "./theme.ts";
 
 const LANGUAGES = [
 	{ tag: "en", label: "English" },
@@ -57,5 +58,34 @@ export function LanguageSetting() {
 				</Sheet>
 			)}
 		</>
+	);
+}
+
+/** Settings › Theme: cycles System / Light / Dark. */
+export function ThemeSetting() {
+	const { t } = useMessages(webMessages);
+	const [theme, setThemeState] = useState<ThemePreference>(getTheme());
+
+	useEffect(() => {
+		return subscribeTheme(() => setThemeState(getTheme()));
+	}, []);
+
+	const cycle = () => {
+		const next: ThemePreference = theme === "system" ? "light" : theme === "light" ? "dark" : "system";
+		setTheme(next);
+	};
+
+	const labels: Record<ThemePreference, string> = {
+		system: t("themeSystem"),
+		light: t("themeLight"),
+		dark: t("themeDark"),
+	};
+
+	return (
+		<button type="button" className="foot-button" onClick={cycle}>
+			<span>{t("theme")}</span>
+			<span className="spacer" />
+			<small className="row-value">{labels[theme]}</small>
+		</button>
 	);
 }

@@ -394,23 +394,12 @@ export function navigate(next: Partial<Route>, options: { replace?: boolean } = 
 }
 
 /** Named plugin modal: locators are small serialized values, not component state. */
-export function openLayer(layer: Layer, options: { fromDrawer?: boolean } = {}): void {
-	const nav = getNavigation();
-	if (options.fromDrawer) void nav.closeThenPush((route) => ({ ...route, layers: [layer] }));
-	else void nav.push({ ...nav.route, layers: [...nav.route.layers, layer] });
+export function openLayer(layer: Layer): void {
+	void getNavigation().push({ ...getNavigation().route, layers: [...getNavigation().route.layers, layer] });
 }
 
 export function closeLayers(): void {
 	void getNavigation().close((route) => ({ ...route, layers: [] }));
-}
-
-export function setDrawer(open: boolean): void {
-	if (open) openLayer({ kind: "drawer" });
-	else closeLayers();
-}
-
-export function useDrawer(): boolean {
-	return useRoute().layers.at(-1)?.kind === "drawer";
 }
 
 /** The top layer when it is the sheet (or viewer) `name`, with its locator; undefined otherwise. */

@@ -172,12 +172,10 @@ body,
 
 /* Shared primitives */
 
-/* Bars: top bar, drawer head, sheet head, viewer head, drawer foot. */
+/* Bars: top bar, sheet head, viewer head. */
 .topbar,
-.drawer-top,
 .sheet-head,
-.viewer-head,
-.drawer-foot {
+.viewer-head {
 	display: flex;
 	align-items: center;
 	gap: var(--s1);
@@ -186,14 +184,12 @@ body,
 	background: var(--bg);
 }
 .topbar,
-.drawer-top,
 .sheet-head,
 .viewer-head {
 	border-bottom: 1px solid var(--line);
 }
 /* 40px icon targets with 20px glyphs: 6px bar padding puts glyph edges on the inset. */
-.icon-button,
-.collapse-sidebar {
+.icon-button {
 	display: grid;
 	place-items: center;
 	flex: none;
@@ -201,8 +197,7 @@ body,
 	height: var(--control);
 	color: var(--muted);
 }
-.icon-button:hover,
-.collapse-sidebar:hover {
+.icon-button:hover {
 	color: var(--text);
 }
 
@@ -488,103 +483,6 @@ textarea.input {
 	background: color-mix(in srgb, var(--bg) 90%, transparent);
 	font-size: var(--fs-md);
 	pointer-events: none;
-}
-.drawer {
-	position: fixed;
-	inset-block: 0;
-	inset-inline-start: 0;
-	z-index: 20;
-	width: min(86vw, 320px);
-	padding-top: var(--safe-top);
-	border-inline-end: 1px solid var(--line);
-	background: var(--bg);
-	transform: translateX(-102%);
-	transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.drawer:dir(rtl) {
-	transform: translateX(102%);
-}
-.drawer-scrim {
-	position: fixed;
-	inset: 0;
-	z-index: 15;
-	background: var(--scrim);
-	opacity: 0;
-	pointer-events: none;
-	transition: opacity 0.25s;
-}
-.drawer-open .drawer {
-	transform: none;
-}
-/* drawer-swipe.ts: a mostly horizontal drag is the drawer's even when it cannot cancel the touch (one that interrupts a
-   fling), so the browser must not pan it. Vertical scrollers declare it themselves: a scroll container may reset the
-   inherited value. Horizontal scrollers inside (code blocks, tables) keep their own panning. */
-@media (max-width: 899px) {
-	.app,
-	.scroller,
-	.session-scroll {
-		touch-action: pan-y pinch-zoom;
-	}
-}
-.drawer-open .drawer-scrim {
-	opacity: 1;
-	pointer-events: auto;
-}
-@media (min-width: 900px) {
-	/* Positioned for its resize handle, under main's layers (top bar, toasts) where the handle overhangs. */
-	.drawer,
-	.drawer:dir(rtl) {
-		position: relative;
-		z-index: 1;
-		flex: 0 0 var(--sidebar-width, 300px);
-		width: auto;
-		min-width: 0;
-		transform: none;
-	}
-	/* Drag the inline end to resize the docked sidebar (AppLayout.tsx). touch-action: none, or the browser turns a
-	   finger drag into a pan and stops delivering pointer moves. */
-	.sidebar-resize {
-		position: absolute;
-		inset-block: 0;
-		inset-inline-end: -3px;
-		width: 6px;
-		cursor: col-resize;
-		touch-action: none;
-		user-select: none;
-	}
-	.sidebar-resize:active {
-		background: var(--line);
-	}
-	@media (hover: hover) {
-		.sidebar-resize:hover {
-			background: var(--line);
-		}
-	}
-	/* Fingers get a wider target; the visible line stays thin. */
-	@media (pointer: coarse) {
-		.sidebar-resize {
-			inset-inline-end: -12px;
-			width: 24px;
-		}
-		.sidebar-resize:active {
-			background: linear-gradient(var(--line), var(--line)) center / 2px 100% no-repeat transparent;
-		}
-	}
-	.drawer-scrim,
-	.topbar .menu {
-		display: none;
-	}
-	.sidebar-collapsed .drawer {
-		display: none;
-	}
-	.sidebar-collapsed .topbar .sidebar-open {
-		display: grid;
-	}
-}
-@media (max-width: 899px) {
-	.sidebar-resize {
-		display: none;
-	}
 }
 
 /* Top bar */
@@ -2601,55 +2499,6 @@ button.diff-number:hover {
 	}
 }
 
-/* Drawer */
-.drawer-content {
-	display: flex;
-	flex-direction: column;
-	height: 100%;
-}
-.drawer-top {
-	justify-content: space-between;
-	padding-left: var(--x);
-}
-.brand {
-	display: flex;
-	align-items: center;
-	gap: var(--s2);
-	font-size: var(--fs-md);
-	font-weight: var(--fw-strong);
-}
-.drawer-actions {
-	display: flex;
-	align-items: center;
-}
-.collapse-sidebar svg {
-	transform: rotate(180deg);
-}
-.new-session {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--s1);
-	height: var(--control);
-	padding: 0 var(--s2);
-	color: var(--muted);
-	font-size: var(--fs-sm);
-}
-.new-session:hover {
-	color: var(--text);
-}
-.drawer-content > .search {
-	width: auto;
-	margin: 0 var(--x);
-}
-.drawer-content > .empty-note {
-	padding: var(--s4) var(--x);
-	text-align: left;
-}
-.session-scroll {
-	flex: 1;
-	overflow-y: auto;
-	padding: 0 var(--x) var(--s4);
-}
 /* A folder's heading names its path (mono, as typed); other headings (Messages) are section labels. */
 .group > .group-head {
 	overflow: hidden;
@@ -2879,11 +2728,8 @@ button.diff-number:hover {
 	-webkit-line-clamp: 2;
 	-webkit-box-orient: vertical;
 }
-.drawer-foot {
-	justify-content: flex-start;
-	padding-bottom: var(--safe-bottom);
-	border-top: 1px solid var(--line);
-}
+
+/* Settings sheet button rows */
 .foot-button {
 	display: flex;
 	align-items: center;
@@ -2900,7 +2746,7 @@ button.diff-number:hover {
 .foot-button.on {
 	font-weight: var(--fw-strong);
 }
-/* The footer's Settings sheet: owner entries as list rows. */
+/* The Settings sheet: owner entries as list rows. */
 .settings-list .foot-button {
 	width: 100%;
 	height: var(--row);
@@ -3724,8 +3570,6 @@ button.history-edge:disabled {
 	}
 }
 @media (prefers-reduced-motion: reduce) {
-	.drawer,
-	.drawer-scrim,
 	.sheet,
 	.scrim,
 	.toast,

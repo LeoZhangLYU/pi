@@ -246,3 +246,10 @@ export const HideIcon = () => (
 		<path d="M6 9l6 6 6-6" />
 	</Icon>
 );
+/** A gear icon for settings. */
+export const SettingsIcon = () => (
+	<Icon>
+		<circle cx="12" cy="12" r="3" />
+		<path d="M12 1v6m0 6v6M5.6 5.6l4.2 4.2m4.2 4.2l4.2 4.2M1 12h6m6 0h6M5.6 18.4l4.2-4.2m4.2-4.2l4.2-4.2" />
+	</Icon>
+);
