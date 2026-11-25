@@ -69,7 +69,7 @@ function Surface({ bottom }: { bottom: boolean }) {
 					: { ...nav.route, workspace: undefined, terminal: id ?? "", startTerminal: undefined },
 			);
 		},
-		...(bottom ? { onHide: hide } : {}),
+		onHide: hide,
 	};
 	return bottom ? (
 		<TerminalPanel key={session} {...props} />

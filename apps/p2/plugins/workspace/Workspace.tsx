@@ -659,7 +659,9 @@ export function WorkspacePanel({
 						{(
 							[
 								["files", t("files"), <FolderIcon key="icon" size={20} />, 0],
-								...(owner ? [["terminal", "Terminal", <TerminalIcon key="icon" size={20} />, 0] as const] : []),
+								...(owner
+									? [["terminal", t("terminal"), <TerminalIcon key="icon" size={20} />, 0] as const]
+									: []),
 							] as const
 						).map(([id, label, icon, count]) => (
 							<button
@@ -678,25 +680,37 @@ export function WorkspacePanel({
 					<span className="spacer workspace-location" title={shownWhere}>
 						{shownWhere}
 					</span>
-					{!terminal && (
+					{terminal ? (
 						<button
 							type="button"
 							className="icon-button"
-							onClick={() => setVersion((current) => current + 1)}
-							aria-label={t("refresh")}
-							title={t("refresh")}
+							onClick={() => setTab("files")}
+							aria-label={t("closeTerminalPanel")}
+							title={t("closeTerminalPanel")}
 						>
-							<RefreshIcon />
+							<CloseIcon />
 						</button>
+					) : (
+						<>
+							<button
+								type="button"
+								className="icon-button"
+								onClick={() => setVersion((current) => current + 1)}
+								aria-label={t("refresh")}
+								title={t("refresh")}
+							>
+								<RefreshIcon />
+							</button>
+							<button
+								type="button"
+								className="icon-button"
+								onClick={() => void nav.close((current) => ({ ...current, workspace: undefined }))}
+								aria-label={t("closeWorkspace")}
+							>
+								<CloseIcon />
+							</button>
+						</>
 					)}
-					<button
-						type="button"
-						className="icon-button"
-						onClick={() => void nav.close((current) => ({ ...current, workspace: undefined }))}
-						aria-label={t("closeWorkspace")}
-					>
-						<CloseIcon />
-					</button>
 				</header>
 				<div className={`workspace-body ${terminal ? "terminal-body" : ""}`} ref={scroller}>
 					{moveNote && !terminal && <p className="notice workspace-note">{moveNote}</p>}
