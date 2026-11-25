@@ -44,7 +44,7 @@ describe("workspace and terminal structural parity", { skip: !browserTests }, ()
 		);
 		if (await browser.evaluate<boolean>(`Boolean(document.querySelector('.workspace'))`))
 			await browser.click('button[aria-label="Close workspace"]');
-		await browser.click('button[aria-label="Workspace files and changes"]');
+		await browser.click('button[aria-label="Workspace"]');
 		await browser.wait(`document.querySelector('.workspace-tree .workspace-row.directory')`);
 	}
 	it("uses the canonical phone tree, previews, comment editor and Back; keeps unsent review drafts after reload", async () => {
@@ -86,18 +86,8 @@ describe("workspace and terminal structural parity", { skip: !browserTests }, ()
 		await browser.click('button[aria-label="Close workspace"]');
 		await browser.wait(`document.querySelector('.messages .user')?.textContent.includes('Review comments:')`);
 	});
-	it("shows changes/commits, searches with filters, follows filesystem changes, and measures/resizes the desktop panel", async () => {
+	it("searches with filters, follows filesystem changes, and measures/resizes the desktop panel", async () => {
 		await open(1280, 900);
-		await browser.click(".workspace-tabs button[title=Changes]");
-		await browser.wait(
-			`document.querySelector('.workspace-status.status-M') && document.querySelector('.commit-row')`,
-		);
-		await browser.click(".workspace-row[title=modified]");
-		await browser.wait(`document.querySelector('.workspace-view .diff-line')`);
-		await browser.click(".workspace-view button[aria-label=Back]");
-		await browser.click(".commit-row");
-		await browser.wait(`document.querySelector('.workspace-commit')`);
-		await browser.click(".workspace-view button[aria-label=Back]");
 		await browser.click(".workspace-tabs button[title=Search]");
 		await browser.wait(`document.querySelector('input[aria-label="Search text in files"]')`);
 		await browser.evaluate(input('input[aria-label="Search text in files"]', "answer"));

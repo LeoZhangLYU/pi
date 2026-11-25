@@ -141,7 +141,7 @@ test(
 	},
 );
 
-test("a root inside a repository lists changes and commits relative to itself, and opens them", async () => {
+test("a root inside a repository lists files relative to itself, and opens them", async () => {
 	const directory = await realpath(await mkdtemp(join(tmpdir(), "p2-workspace-subdir-")));
 	const git = (...args: string[]) =>
 		execFileSync(
@@ -160,24 +160,11 @@ test("a root inside a repository lists changes and commits relative to itself, a
 		await writeFile(join(directory, "apps/web/new.txt"), "new\n");
 		await writeFile(join(directory, "outside.txt"), "after\n");
 		const workspace = new Workspace(new NodeExecutionEnv({ cwd: join(directory, "apps/web") }), []);
-		const status = await workspace.query({ kind: "status" }, context);
-		assert(status.kind === "status" && status.repo);
-		assert.deepEqual(status.changes.map((change) => change.path).sort(), ["a.txt", "new.txt"]);
-		const diff = await workspace.query({ kind: "diff", path: "a.txt" }, context);
-		assert(diff.kind === "diff" && diff.patch.includes("+after"));
 		const file = await workspace.query({ kind: "file", path: "a.txt" }, context);
 		assert(file.kind === "file" && file.text === "after\n");
-		const hash = git("rev-parse", "HEAD").trim();
-		const commit = await workspace.query({ kind: "commit", commit: hash }, context);
-		assert(commit.kind === "commit");
-		assert.deepEqual(
-			commit.changes.map((change) => change.path),
-			["a.txt"],
-		);
-		const old = await workspace.query({ kind: "file", path: "a.txt", commit: hash }, context);
-		assert(old.kind === "file" && old.text === "before\n");
-		const commitDiff = await workspace.query({ kind: "diff", path: "a.txt", commit: hash }, context);
-		assert(commitDiff.kind === "diff" && commitDiff.patch.includes("+before"));
+		const files = await workspace.query({ kind: "files" }, context);
+		assert(files.kind === "files" && files.paths.includes("a.txt") && files.paths.includes("new.txt"));
+		assert(files.kind === "files" && !files.paths.includes("../../outside.txt"));
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}

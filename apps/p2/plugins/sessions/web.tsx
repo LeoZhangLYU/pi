@@ -1,55 +1,21 @@
 // The mobile drawer's component tree, with catalog/status/subagent/search handles supplying its data, and the owner's
 // session actions on its rows.
 
-import {
-	BACKGROUND_CONTEXT,
-	contribute,
-	defineFacet,
-	type HeldIn,
-	keptIn,
-	liveIn,
-	Translations,
-	whenLive,
-} from "@p2/app/v1";
+import { contribute, defineFacet, Translations } from "@p2/app/v1";
 import {
 	closeLayers,
 	LanguageSetting,
 	openLayer,
-	type SessionSummary,
 	SettingsIcon,
 	Sheet,
 	Slot,
-	SlotList,
 	Slots,
 	ThemeSetting,
-	useComposerState,
-	useConnected,
-	useHost,
 	useMessages,
-	useObject,
-	useOptimisticCall,
 	useOwner,
-	useReadable,
 	useRoute,
-	useSheet,
 } from "@p2/app/v1/web";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Envs } from "../envs/contract.ts";
-import { directoryPickerLayer } from "../envs/contract.web.tsx";
-import { Search, SessionReads } from "../search/contract.ts";
-import { SessionStatus } from "../status/contract.ts";
-import { SessionTree } from "../tree/contract.ts";
-import { BranchSheet } from "./BranchSheet.tsx";
-import { type Operation, type Session, Sessions } from "./contract.ts";
 import { sessionsMessages } from "./messages.ts";
-import { SessionSheet } from "./SessionSheet.tsx";
-
-const subscribeVisibility = (listener: () => void) => {
-	document.addEventListener("visibilitychange", listener);
-	return () => document.removeEventListener("visibilitychange", listener);
-};
-/** Whether the page is shown (not a background tab or a hidden app). */
-const usePageVisible = () => useSyncExternalStore(subscribeVisibility, () => document.visibilityState === "visible");
 
 /**
  * The footer's Settings button and its sheet: the owner entries in an explicit order. The sheet stays mounted while an

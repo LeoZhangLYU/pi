@@ -2907,7 +2907,6 @@ button.diff-number:hover {
 	letter-spacing: -0.015em;
 	color: var(--fg);
 }
-}
 .side-panel-head .icon-button {
 	flex: none;
 }
@@ -3004,7 +3003,7 @@ button.diff-number:hover {
 	position: relative;
 }
 .team-row.archived::after {
-	content: '';
+	content: "";
 	position: absolute;
 	left: var(--x);
 	right: var(--x);
@@ -3209,7 +3208,7 @@ button.diff-number:hover {
 }
 /* Status indicator dot */
 .team-row > small::before {
-	content: '';
+	content: "";
 	display: inline-block;
 	width: 6px;
 	height: 6px;
@@ -3246,7 +3245,7 @@ button.diff-number:hover {
 }
 /* Task status indicator - use bar instead of dot */
 .team-work > small::before {
-	content: '';
+	content: "";
 	width: 3px;
 	height: 12px;
 	border-radius: 1.5px;
@@ -3281,7 +3280,7 @@ button.diff-number:hover {
 	position: relative;
 }
 .team-row.team-executor::before {
-	content: '';
+	content: "";
 	position: absolute;
 	left: calc(var(--x) + 6px);
 	top: 0;

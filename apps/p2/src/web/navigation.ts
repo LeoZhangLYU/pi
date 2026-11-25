@@ -2,13 +2,12 @@ import { createContext, type RefObject, useContext, useLayoutEffect, useSyncExte
 // Adapted from Pi Mobile: independent browser-only navigation, no app imports.
 // Plugins own named modal locators; the runtime owns the stack and Back behavior.
 export type Layer = { kind: "drawer" } | { kind: "sheet" | "viewer"; name: string; locator?: string };
-export type WorkspaceTab = "files" | "changes" | "search" | "comments" | "terminal";
-export type WorkspaceFileRoute = { path: string; view: "changes" | "file" | "preview"; line?: number; commit?: string };
+export type WorkspaceTab = "files" | "search" | "comments" | "terminal";
+export type WorkspaceFileRoute = { path: string; view: "file" | "preview"; line?: number };
 export type WorkspaceRoute = {
 	tab: WorkspaceTab;
 	directory: string;
 	file?: WorkspaceFileRoute;
-	commit?: string;
 	search?: { text: string; include?: string; exclude?: string };
 	terminal?: string;
 	startTerminal?: boolean;

@@ -7,7 +7,6 @@ import {
 	DownloadIcon,
 	LinesBlock,
 	Markdown,
-	patchLines,
 	textLines,
 	useMessages,
 } from "@p2/app/v1/web";
@@ -15,29 +14,25 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { workspaceMessages } from "./messages.ts";
 import type { WorkspaceResult } from "./protocol.ts";
 
-export type FileView = "changes" | "file" | "preview";
-type Diff = Extract<WorkspaceResult, { kind: "diff" }>;
+export type FileView = "file" | "preview";
 type File = Extract<WorkspaceResult, { kind: "file" }>;
 /** An open comment box: a new comment on a line, or an edit of an existing one. Persisted with the drafts. */
 export type CommentEditor = {
 	path: string;
-	view: "changes" | "file";
+	view: "file";
 	line: number;
 	id?: string;
 	text: string;
-	commit?: string;
 };
 /** A draft review comment: the quoted lines are kept as seen, so later edits can't shift its meaning. */
 export type ReviewComment = {
 	id: string;
 	path: string;
-	view: "changes" | "file";
+	view: "file";
 	start: number;
 	end: number;
 	quote: string;
 	text: string;
-	/** Set when written on a commit's version of the file rather than the working tree. */
-	commit?: string;
 };
 
 function size(bytes: number): string {
@@ -54,7 +49,7 @@ export function reviewMessage(comments: readonly ReviewComment[]): string {
 		"Review comments:",
 		...comments.map((comment) => {
 			const range = comment.start === comment.end ? `${comment.start}` : `${comment.start}-${comment.end}`;
-			const where = `${comment.commit ? ` @${comment.commit.slice(0, 8)}` : ""}${comment.view === "changes" ? " (in the diff)" : ""}`;
+			const where = "";
 			const quote = comment.quote
 				.split("\n")
 				.map((line) => `> ${line}`)
@@ -78,24 +73,20 @@ function quoteOf(line: CodeLine): string {
 	return `${line.kind === "add" ? "+" : line.kind === "del" ? "-" : ""}${line.text}`.slice(0, 4000);
 }
 
-// One workspace file: Changes (changed sections), File (whole file, changes inline)
-// and Preview (rendered Markdown and media). Changes and File take line comments.
+// One workspace file: File (the whole file) and Preview (rendered Markdown and media).
+// File takes line comments.
 export function WorkspaceFile({
 	path,
 	view,
 	views,
-	diff,
 	file,
 	error,
 	url,
-	commit,
 	wrap,
 	comments,
 	editor,
 	onEditor,
 	line,
-	contextLines,
-	onContext,
 	onView,
 	onWrap,
 	onBack,
@@ -106,22 +97,16 @@ export function WorkspaceFile({
 	path: string;
 	view: FileView;
 	views: FileView[];
-	diff?: Diff;
 	file?: File;
 	error?: string;
-	/** Working-tree file URL for previews and download; absent for a commit's version. */
+	/** Working-tree file URL for previews and download. */
 	url?: string;
-	/** Viewing the file as of this commit. */
-	commit?: string;
 	wrap: boolean;
 	comments: ReviewComment[];
 	editor?: CommentEditor;
 	onEditor: (editor: CommentEditor | undefined) => void;
 	/** Scroll to and mark this line (from search results or tool cards). */
 	line?: number;
-	/** Unchanged lines shown around changes in the Changes view. */
-	contextLines: number;
-	onContext: (lines: number) => void;
 	onView: (view: FileView) => void;
 	onWrap: () => void;
 	onBack: () => void;
@@ -136,13 +121,11 @@ export function WorkspaceFile({
 	const name = path.slice(slash + 1);
 	const preview = filePreview(name);
 
-	// File view: the whole-file diff when it changed, otherwise the plain text.
-	const lines = useMemo((): CodeLine[] | undefined => {
-		if (view === "changes") return diff ? patchLines(diff.patch) : undefined;
-		if (view !== "file") return undefined;
-		if (diff?.patch && !diff.truncated) return patchLines(diff.patch, true);
-		return file?.text !== undefined ? textLines(file.text) : undefined;
-	}, [diff, file, view]);
+	// File view: the file's plain text.
+	const lines = useMemo(
+		(): CodeLine[] | undefined => (view === "file" && file?.text !== undefined ? textLines(file.text) : undefined),
+		[file, view],
+	);
 	const numbered = (index: number) => lines?.[index]?.number;
 	// Scroll a requested line into view once its content has rendered.
 	const body = useRef<HTMLDivElement>(null);
@@ -154,13 +137,10 @@ export function WorkspaceFile({
 	const commentable = view === "file";
 	const mine = useMemo(
 		() =>
-			comments
-				.filter((comment) => comment.path === path && comment.view === view && comment.commit === commit)
-				.toSorted((a, b) => a.end - b.end),
-		[comments, path, view, commit],
+			comments.filter((comment) => comment.path === path && comment.view === view).toSorted((a, b) => a.end - b.end),
+		[comments, path, view],
 	);
-	const open =
-		commentable && editor?.path === path && editor.view === view && editor.commit === commit ? editor : undefined;
+	const open = commentable && editor?.path === path && editor.view === view ? editor : undefined;
 	// A comment shows once, below the last row with its line number (a deleted and an
 	// added line can share a number). Indexed once: every row asks, and a file has tens of thousands of rows.
 	const lastRows = useMemo(() => {
@@ -179,11 +159,7 @@ export function WorkspaceFile({
 	const pick = (index: number) => {
 		const number = numbered(index);
 		if (!commentable || number === undefined) return;
-		onEditor(
-			open && !open.id && open.line === number
-				? undefined
-				: { path, view, line: number, text: "", ...(commit ? { commit } : {}) },
-		);
+		onEditor(open && !open.id && open.line === number ? undefined : { path, view, line: number, text: "" });
 	};
 	const save = () => {
 		if (!open || !open.text.trim() || !lines || !commentable) return;
@@ -201,7 +177,6 @@ export function WorkspaceFile({
 					end: open.line,
 					quote: quoteOf(row),
 					text: open.text,
-					...(commit ? { commit } : {}),
 				},
 			]);
 		}
@@ -271,7 +246,6 @@ export function WorkspaceFile({
 										line: comment.end,
 										id: comment.id,
 										text: comment.text,
-										...(commit ? { commit } : {}),
 									})
 								}
 							>
@@ -321,8 +295,7 @@ export function WorkspaceFile({
 	} else if (view === "file" && file?.binary) {
 		content = <p className="notice workspace-note">{t("binaryFile", size(file.size))}</p>;
 	} else if (!lines) content = <div className="spinner large" />;
-	else if (!lines.length)
-		content = <p className="notice workspace-note">{t("noChanges")}</p>;
+	else if (!lines.length) content = <p className="notice workspace-note">{t("emptyFile")}</p>;
 	else
 		content = (
 			<>
@@ -330,7 +303,6 @@ export function WorkspaceFile({
 					lines={lines}
 					language={name}
 					marked={target}
-					}
 					selected={(index) =>
 						open !== undefined && !open.id && numbered(index) === open.line && rowOf(open.line) === index
 					}
@@ -360,7 +332,6 @@ export function WorkspaceFile({
 						{slash >= 0 && <span className="muted">{path.slice(0, slash + 1)}</span>}
 						{name}
 					</span>
-					{commit && <span className="workspace-commit mono">{commit.slice(0, 8)}</span>}
 					{url && (
 						<a className="icon-button" href={url} download={name} aria-label={`Download ${name}`}>
 							<DownloadIcon />
@@ -372,7 +343,7 @@ export function WorkspaceFile({
 						<span className="segments workspace-views">
 							{views.map((entry) => (
 								<button key={entry} type="button" aria-pressed={view === entry} onClick={() => onView(entry)}>
-									{{ changes: t("changes"), file: t("file"), preview: t("preview") }[entry]}
+									{{ file: t("file"), preview: t("preview") }[entry]}
 								</button>
 							))}
 						</span>

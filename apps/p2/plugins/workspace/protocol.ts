@@ -16,31 +16,11 @@ export type WorkspaceEntry = {
 	ignored?: boolean;
 };
 export type WorkspaceMatch = { path: string; line: number; text: string };
-export type WorkspaceCommit = {
-	hash: string;
-	short: string;
-	author: string;
-	/** Commit time in milliseconds. */
-	time: number;
-	subject: string;
-	/** Not on the upstream branch yet; absent when the branch has no upstream. */
-	unpushed?: boolean;
-};
-export type WorkspaceChange = {
-	path: string;
-	/** Porcelain v2 XY status: index then worktree; `??` untracked, `U` letters for conflicts. */
-	status: string;
-	from?: string;
-};
 export type WorkspaceResult =
 	| { kind: "list"; path: string; entries: WorkspaceEntry[]; truncated: boolean }
 	| { kind: "file"; path: string; size: number; binary: boolean; text?: string; truncated: boolean }
-	| { kind: "status"; repo: false; reason?: string }
-	| { kind: "status"; repo: true; branch?: string; head?: string; changes: WorkspaceChange[]; truncated: boolean }
-	| { kind: "diff"; path: string; full: boolean; patch: string; truncated: boolean }
 	| { kind: "search"; text: string; path: string; matches: WorkspaceMatch[]; truncated: boolean }
 	| { kind: "files"; paths: string[]; truncated: boolean }
-	| { kind: "log"; commits: WorkspaceCommit[]; more: boolean; upstream?: string }
 	| {
 			kind: "place";
 			/** Where the workspace is open: the conversation's location as its worker resolved it. */
@@ -49,15 +29,6 @@ export type WorkspaceResult =
 			pending?: Location;
 			/** The session's last move that failed (cleared by the next one). */
 			failed?: { to: Location; error: string };
-	  }
-	| {
-			kind: "commit";
-			commit: string;
-			author: string;
-			time: number;
-			message: string;
-			changes: WorkspaceChange[];
-			truncated: boolean;
 	  };
 /** A bounded byte range of one workspace file, transferred over IPC as base64. */
 export type WorkspaceBytes = { size: number; start: number; data: string };

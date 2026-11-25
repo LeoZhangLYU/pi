@@ -4,7 +4,6 @@ import {
 	ChevronIcon,
 	CloseIcon,
 	CommentIcon,
-	DiffIcon,
 	FileIcon,
 	FolderIcon,
 	type Navigation,
@@ -37,9 +36,8 @@ import type { Workspace } from "./contract.ts";
 import { type CommentEditor, type FileView, type ReviewComment, reviewMessage, WorkspaceFile } from "./file.tsx";
 import { type FuzzyMatch, rankFiles } from "./fuzzy.ts";
 import { workspaceMessages } from "./messages.ts";
-import type { WorkspaceChange, WorkspaceCommit, WorkspaceQuery, WorkspaceResult } from "./protocol.ts";
+import type { WorkspaceQuery, WorkspaceResult } from "./protocol.ts";
 
-const LOG_PAGE = 30;
 /** Name filter results shown, best first. */
 const FILTER_RESULTS = 200;
 /** Narrowest chat and file column for which a file opens beside the list instead of in its place. */
@@ -70,26 +68,16 @@ function Highlight({ text, matches }: { text: string; matches?: FuzzyMatch[] }) 
 }
 
 /**
- * The conversation's answers that a change in its working tree can alter. A commit and a file or diff at a commit
- * (`file:<hash>:path`, `diff:<mode>:<hash>:path`) stay valid.
+ * The conversation's answers that a change in its working tree can alter. A file at a commit
+ * (`file:<hash>:path`) stays valid.
  */
 function invalidate(sessionId: string, conversationId: number): void {
 	const scope = `${sessionId}\0${conversationId}\0`;
-	results.invalidate(
-		(key) => key.startsWith(scope) && !/^(commit:|file:[^:]|diff:[^:]*:[^:])/.test(key.slice(scope.length)),
-	);
+	results.invalidate((key) => key.startsWith(scope) && !/^file:[^:]/.test(key.slice(scope.length)));
 }
 
-function ago(time: number): string {
-	const seconds = Math.max(0, (Date.now() - time) / 1000);
-	if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))}m`;
-	if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-	if (seconds < 30 * 86400) return `${Math.floor(seconds / 86400)}d`;
-	return new Date(time).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
-}
 /** `key` identifies what was requested: a refetch of the same key keeps showing the old value. */
 type Loaded<T> = { key?: string; value?: T; error?: string; loading: boolean };
-type ChangeNode = { name: string; path: string; children: ChangeNode[]; change?: WorkspaceChange };
 
 function size(bytes: number): string {
 	return bytes < 1024
@@ -98,21 +86,6 @@ function size(bytes: number): string {
 			? `${(bytes / 1024).toFixed(1)} KB`
 			: `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
-
-/** What a status letter pair means, for the change list's tooltip. */
-function describe(status: string): string {
-	if (status === "??") return "untracked";
-	if (status.includes("U") || status === "AA" || status === "DD") return "conflict";
-	const letter = status[1] !== "." ? status[1] : status[0];
-	const staged = status[0] !== "." ? "staged " : "";
-	return `${staged}${{ M: "modified", A: "added", D: "deleted", R: "renamed", C: "copied", T: "type changed" }[letter ?? ""] ?? "changed"}`;
-}
-
-function letter(status: string): string {
-	return status === "??" ? "?" : ((status[1] !== "." ? status[1] : status[0]) ?? "?");
-}
-
-/** Changed paths as a directory tree; single-child directory chains merge into one row (`src/web`). */
 
 function initialView(path: string): FileView {
 	const kind = filePreview(path)?.kind;
@@ -124,7 +97,7 @@ function initialView(path: string): FileView {
 // Right-hand panel for the viewed conversation's working directory. All data comes
 // from that conversation's execution environment via the worker; media and downloads
 // use the separately authorized /workspace-file endpoint. Where it is (tab, folder,
-// file, commit, search) is part of the route: folders, files and commits are steps.
+// file, search) is part of the route: folders and files are steps.
 export function WorkspacePanel({
 	workspace,
 	nav,
@@ -161,12 +134,12 @@ export function WorkspacePanel({
 	onSend?: (text: string) => Promise<void>;
 }) {
 	const { t } = useMessages(workspaceMessages);
-	const { tab, directory, file: selection, commit: openCommit, search: submitted } = route;
+	const { tab, directory, file: selection, search: submitted } = route;
 	// Docked with room for a file beside the list (measured below): Files and Search then show the open file
 	// to the left of their list instead of in its place. Phones and narrow windows keep one column.
 	const [roomy, setRoomy] = useState(false);
 	const split = roomy && selection !== undefined && (tab === "files" || tab === "search");
-	// Changes applied to the latest route, not this render's: queued steps may be pending.
+	// Steps applied to the latest route, not this render's: queued steps may be pending.
 	const update = (change: (current: WorkspaceRoute) => WorkspaceRoute) => (current: typeof nav.route) => ({
 		...current,
 		...(current.workspace ? { workspace: change(current.workspace) } : {}),
@@ -194,30 +167,14 @@ export function WorkspacePanel({
 	// Opening a file is a step; leaving it goes up to the list it was opened from.
 	const setSelection = (next: WorkspaceFileRoute | undefined) => {
 		if (next && selection && routeKey(next) === routeKey(selection)) return;
-		if (next?.view === "changes")
-			prefetch(`diff:context-3:${next.commit ?? ""}:${next.path}`, {
-				kind: "diff",
-				path: next.path,
-				context: 3,
-				...(next.commit ? { commit: next.commit } : {}),
-			});
-		else if (next)
-			prefetch(`file:${next.commit ?? ""}:${next.path}`, {
-				kind: "file",
-				path: next.path,
-				...(next.commit ? { commit: next.commit } : {}),
-			});
+		if (next) prefetch(`file::${next.path}`, { kind: "file", path: next.path });
 		if (next) step({ file: next });
 		else void nav.close(update((current) => ({ ...current, file: undefined })));
 	};
-	const setOpenCommit = (hash: string | undefined) =>
-		hash
-			? step({ commit: hash, file: undefined })
-			: void nav.close(update((current) => ({ ...current, commit: undefined, file: undefined })));
 	const setSubmitted = (search: WorkspaceRoute["search"]) =>
 		void nav.replace(update((current) => ({ ...current, search }))(nav.route));
 	// Tabs are lateral: switching returns to where the panel opened, keeping each tab's
-	// folder and search but dropping files and commits visited meanwhile.
+	// folder and search but dropping files visited meanwhile.
 	const setTab = (next: WorkspaceTab) => {
 		const current = nav.route.workspace;
 		if (!current) return;
@@ -233,7 +190,6 @@ export function WorkspacePanel({
 			(landed) => ({ ...landed, workspace: target }),
 		);
 	};
-	const [contextLines, setContextLines] = useState(3);
 	// Inputs start from the submitted search a restored entry carries.
 	const [searchText, setSearchText] = useState(submitted?.text ?? "");
 	const [include, setInclude] = useState(submitted?.include ?? "");
@@ -241,7 +197,7 @@ export function WorkspacePanel({
 	const [filters, setFilters] = useState(Boolean(submitted?.include || submitted?.exclude));
 	const searchKey = `search:${JSON.stringify(submitted)}`;
 	const [search, setSearch] = useState<Loaded<Extract<WorkspaceResult, { kind: "search" }>>>({ loading: false });
-	const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+	const [_collapsed, _setCollapsed] = useState<ReadonlySet<string>>(new Set());
 	const [wrap, setWrap] = useState(() => localStorage.getItem("pi-workspace-wrap") === "1");
 	const [version, setVersion] = useState(0);
 	// The Files tree: every shown folder's listing, by path ("" is the root).
@@ -264,10 +220,8 @@ export function WorkspacePanel({
 	const [fileFilter, setFileFilter] = useState("");
 	const filterText = useDeferredValue(fileFilter.trim() ? fileFilter : "");
 	const [fileIndex, setFileIndex] = useState<Loaded<Extract<WorkspaceResult, { kind: "files" }>>>({ loading: false });
-	const [status, setStatus] = useState<Loaded<Extract<WorkspaceResult, { kind: "status" }>>>({ loading: true });
 	const [place, setPlace] = useState<Loaded<Extract<WorkspaceResult, { kind: "place" }>>>({ loading: true });
 	const [file, setFile] = useState<Loaded<Extract<WorkspaceResult, { kind: "file" }>>>({ loading: true });
-	const [diff, setDiff] = useState<Loaded<Extract<WorkspaceResult, { kind: "diff" }>>>({ loading: true });
 	// Draft review comments survive reloads, per conversation, until sent or discarded.
 	const commentsKey = `pi-review:${sessionId}:${conversationId}`;
 	const [comments, setCommentsState] = useState<ReviewComment[]>([]);
@@ -312,15 +266,6 @@ export function WorkspacePanel({
 			.finally(() => setSending(false));
 	};
 	const [sending, setSending] = useState(false);
-	// Branch history, paged; a live refresh reloads as many commits as are shown.
-	const [log, setLog] = useState<{ commits: WorkspaceCommit[]; more: boolean; upstream?: string; error?: string }>({
-		commits: [],
-		more: false,
-	});
-	const shown = useRef(LOG_PAGE);
-	const [commitDetail, setCommitDetail] = useState<Loaded<Extract<WorkspaceResult, { kind: "commit" }>>>({
-		loading: false,
-	});
 	const [uploading, setUploading] = useState<string>();
 	const [uploadError, setUploadError] = useState<string>();
 	// Until the conversation is attached, queries wait instead of failing; attaching
@@ -335,9 +280,6 @@ export function WorkspacePanel({
 
 	const fileUrl = (path: string) =>
 		`/workspace-file?${new URLSearchParams({ session: sessionId, conversation: String(conversationId), path })}`;
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: another file starts with the default context.
-	useEffect(() => setContextLines(3), [selection?.path]);
 
 	// Native handle lifetime leases the watch; changes invalidate the same mobile cache without a heartbeat request.
 	useEffect(() => {
@@ -438,11 +380,6 @@ export function WorkspacePanel({
 	);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: version triggers refetches.
 	useEffect(
-		() => load("status", () => query<Extract<WorkspaceResult, { kind: "status" }>>({ kind: "status" }), setStatus),
-		[load, query, version],
-	);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: version triggers refetches.
-	useEffect(
 		() => load("place", () => query<Extract<WorkspaceResult, { kind: "place" }>>({ kind: "place" }), setPlace),
 		[load, query, version],
 	);
@@ -480,50 +417,16 @@ export function WorkspacePanel({
 		invalidate(sessionId, conversationId);
 		setVersion((current) => current + 1);
 	};
-	const changes = status.value?.kind === "status" && status.value.repo ? status.value.changes : [];
-	const commitChanges =
-		commitDetail.key === `commit:${openCommit}` && commitDetail.value ? commitDetail.value.changes : [];
-	const selectedChange = selection
-		? (selection.commit ? commitChanges : changes).find((entry) => entry.path === selection.path)
-		: undefined;
-	// File and Preview need the file (unless deleted); Changes and a changed File need a diff.
-	const needsFile = selection !== undefined && selection.view !== "changes" && !selectedChange?.status.includes("D");
-	const diffMode =
-		selection?.view === "changes"
-			? `context-${contextLines}`
-			: selection?.view === "file" && selectedChange
-				? "full"
-				: undefined;
-	const at = selection?.commit;
+	const needsFile = selection !== undefined;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the selected path, not the selection object; version triggers refetches.
 	useEffect(() => {
 		if (!selection || !needsFile) return;
 		return load(
-			`file:${at ?? ""}:${selection.path}`,
-			() =>
-				query<Extract<WorkspaceResult, { kind: "file" }>>({
-					kind: "file",
-					path: selection.path,
-					...(at ? { commit: at } : {}),
-				}),
+			`file::${selection.path}`,
+			() => query<Extract<WorkspaceResult, { kind: "file" }>>({ kind: "file", path: selection.path }),
 			setFile,
 		);
-	}, [load, query, selection?.path, at, needsFile, version]);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the selected path, not the selection object; version triggers refetches.
-	useEffect(() => {
-		if (!selection || !diffMode) return;
-		return load(
-			`diff:${diffMode}:${at ?? ""}:${selection.path}`,
-			() =>
-				query<Extract<WorkspaceResult, { kind: "diff" }>>({
-					kind: "diff",
-					path: selection.path,
-					...(diffMode === "full" ? { full: true } : { context: contextLines }),
-					...(at ? { commit: at } : {}),
-				}),
-			setDiff,
-		);
-	}, [load, query, selection?.path, at, diffMode, contextLines, version]);
+	}, [load, query, selection?.path, needsFile, version]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: version triggers refetches.
 	useEffect(() => {
 		if (!submitted || !showsSearch) return;
@@ -598,38 +501,22 @@ export function WorkspacePanel({
 	if (selection) {
 		const name = selection.path.slice(selection.path.lastIndexOf("/") + 1);
 		const kind = filePreview(name)?.kind;
-		const deleted = selectedChange?.status.includes("D") ?? false;
-		// A commit's version has no working-tree URL, so no media preview or download.
-		const previewable =
-			!deleted &&
-			(kind === "image" || kind === "audio" || kind === "video" || /\.(md|markdown)$/i.test(name)) &&
-			!(at && kind !== undefined && kind !== "text");
-		const views: FileView[] = [
-			...(deleted ? [] : (["file"] as const)),
-			...(previewable ? (["preview"] as const) : []),
-		];
-		const current = (key: string, loaded: Loaded<unknown>) => (loaded.key === key ? loaded : undefined);
-		const fileLoaded = current(`file:${at ?? ""}:${selection.path}`, file) as typeof file | undefined;
-		const diffLoaded = diffMode
-			? (current(`diff:${diffMode}:${at ?? ""}:${selection.path}`, diff) as typeof diff | undefined)
-			: undefined;
+		const previewable = kind === "image" || kind === "audio" || kind === "video" || /\.(md|markdown)$/i.test(name);
+		const views: FileView[] = [...(["file"] as const), ...(previewable ? (["preview"] as const) : [])];
+		const fileLoaded = file.key === `file::${selection.path}` ? file : undefined;
 		fileBody = (
 			<WorkspaceFile
 				path={selection.path}
 				view={selection.view}
 				views={views}
-				file={needsFile ? fileLoaded?.value : undefined}
-				diff={diffMode ? diffLoaded?.value : undefined}
-				error={(needsFile ? fileLoaded?.error : undefined) ?? (diffMode ? diffLoaded?.error : undefined)}
-				url={at ? undefined : fileUrl(selection.path)}
-				commit={at}
+				file={fileLoaded?.value}
+				error={fileLoaded?.error}
+				url={fileUrl(selection.path)}
 				wrap={wrap}
 				comments={comments}
 				editor={editor}
 				onEditor={setEditor}
 				line={selection.line}
-				contextLines={contextLines}
-				onContext={setContextLines}
 				onView={(view) =>
 					void nav.replace(update((current) => ({ ...current, file: { ...selection, view } }))(nav.route))
 				}
@@ -831,23 +718,15 @@ export function WorkspacePanel({
 							type="button"
 							className="workspace-row"
 							onClick={() =>
-								// One step to the file (and its commit); Back returns to this list.
+								// One step to the file; Back returns to this list.
 								step({
-									file: {
-										path: comment.path,
-										view: comment.view,
-										line: comment.end,
-										...(comment.commit ? { commit: comment.commit } : {}),
-									},
-									commit: comment.commit,
+									file: { path: comment.path, view: comment.view, line: comment.end },
 								})
 							}
 						>
 							<span className="workspace-name">
 								<span className="muted">
 									{comment.path}:{comment.end}
-									{comment.commit ? ` @${comment.commit.slice(0, 8)}` : ""}
-									{comment.view === "changes" ? " (diff)" : ""}
 								</span>
 								<br />
 								<span className="comment-quote">{comment.quote}</span>

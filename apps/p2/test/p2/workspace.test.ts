@@ -18,7 +18,6 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 	let _other: Session;
 	let workspace: Held<typeof Workspace>;
 	let origin: string;
-	let hash: string;
 	const url = (path: string, id = session.id) =>
 		`/workspace-file?${new URLSearchParams({ session: id, conversation: "1", path })}`;
 	const upload = (
@@ -60,7 +59,6 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 			"-qm",
 			"Initial",
 		]);
-		hash = git(["rev-parse", "HEAD"]).trim();
 		await writeFile(join(fixture.workspace, "src/hello.ts"), "const hello = 'after';\n");
 		await writeFile(join(fixture.workspace, "new.md"), "# Untracked hello\n");
 		await writeFile(join(fixture.workspace, "ignored.txt"), "hello ignored\n");
@@ -77,7 +75,7 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 		await fixture?.close();
 	});
 
-	it("lists folders, ignored annotations, all filenames, text, changes, search and history", async () => {
+	it("lists folders, ignored annotations, all filenames, text and search", async () => {
 		const list = await workspace.query({ kind: "list", path: "" }, BACKGROUND_CONTEXT);
 		assert.equal(list.kind, "list");
 		if (list.kind !== "list") return;
@@ -87,14 +85,6 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 		assert(files.kind === "files" && files.paths.includes("src/hello.ts") && !files.paths.includes("ignored.txt"));
 		const file = await workspace.query({ kind: "file", path: "src/hello.ts" }, BACKGROUND_CONTEXT);
 		assert(file.kind === "file" && file.text?.includes("after"));
-		const status = await workspace.query({ kind: "status" }, BACKGROUND_CONTEXT);
-		assert(
-			status.kind === "status" && status.repo && status.changes.some((change) => change.path === "src/hello.ts"),
-		);
-		const diff = await workspace.query({ kind: "diff", path: "src/hello.ts", full: true }, BACKGROUND_CONTEXT);
-		assert(diff.kind === "diff" && diff.patch.includes("+const hello = 'after'"));
-		const added = await workspace.query({ kind: "diff", path: "new.md" }, BACKGROUND_CONTEXT);
-		assert(added.kind === "diff" && added.patch.includes("+# Untracked hello"));
 		const search = await workspace.query(
 			{
 				kind: "search",
@@ -106,23 +96,12 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 			BACKGROUND_CONTEXT,
 		);
 		assert(search.kind === "search" && search.matches.length === 1 && search.matches[0]?.path === "src/hello.ts");
-		const log = await workspace.query({ kind: "log", skip: 0, limit: 30 }, BACKGROUND_CONTEXT);
-		assert(log.kind === "log" && log.commits[0]?.hash === hash);
-		const commit = await workspace.query({ kind: "commit", commit: hash }, BACKGROUND_CONTEXT);
-		assert(
-			commit.kind === "commit" &&
-				commit.message === "Initial" &&
-				commit.changes.some((entry) => entry.path === "src/hello.ts"),
-		);
-		const old = await workspace.query({ kind: "file", path: "src/hello.ts", commit: hash }, BACKGROUND_CONTEXT);
-		assert(old.kind === "file" && old.text?.includes("before"));
 		await assert.rejects(
 			workspace.query({ kind: "file", path: "../data/settings.json" }, BACKGROUND_CONTEXT),
 			/Invalid/,
 		);
 		await assert.rejects(workspace.query({ kind: "file", path: ".git/config" }, BACKGROUND_CONTEXT), /Invalid/);
 		await assert.rejects(workspace.query({ kind: "list", path: "private" }, BACKGROUND_CONTEXT), /private|leaves/);
-		await assert.rejects(workspace.query({ kind: "log", skip: -1, limit: 1000 }, BACKGROUND_CONTEXT));
 	});
 
 	it("rejects unknown conversations and sessions rooted in private application data", async () => {
@@ -232,7 +211,7 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 
 	it("sends quoted browser review drafts as an ordinary attributed prompt", async () => {
 		const chat = await holdIn(fixture.browser(), Chat, { session: session.id, conversation: 1 }, "participant");
-		const text = `Review comments:\n\nsrc/hello.ts:1 @${hash.slice(0, 8)}\n> const hello = 'after';\nPlease use a clearer name`;
+		const text = `Review comments:\n\nsrc/hello.ts:1\n> const hello = 'after';\nPlease use a clearer name`;
 		await chat.send({ text, requestId: "review" }, BACKGROUND_CONTEXT);
 		const view = await until(chat.view, (value) =>
 			Boolean(
@@ -242,7 +221,7 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 			),
 		);
 		assert(JSON.stringify(view).includes("Review comments:"));
-		assert(text.includes(`src/hello.ts:1 @${hash.slice(0, 8)}`));
+		assert(text.includes("src/hello.ts:1"));
 		chat.release();
 	});
 });

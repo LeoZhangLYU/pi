@@ -62,7 +62,6 @@ import {
 	SendIcon,
 	SessionId,
 	SessionStats,
-	SettingsIcon,
 	Slot,
 	SlotList,
 	Slots,
@@ -599,28 +598,26 @@ function TopBar({
 						</button>
 					</>
 				) : (
-					<>
-						{session &&
-							(owner ? (
-								<button
-									type="button"
-									className="title-cwd"
-									onClick={() => openLayer(directoryPickerLayer(session.env ?? null, session.cwd))}
-									{...(sandboxed ? { title: t("sandboxTitle", String(session.env)) } : {})}
-								>
-									{moving ? (
-										t("moving")
-									) : (
-										<>
-											{lock}
-											{locationLabel(session.env, session.cwd)}
-										</>
-									)}
-								</button>
+					session &&
+					(owner ? (
+						<button
+							type="button"
+							className="title-cwd"
+							onClick={() => openLayer(directoryPickerLayer(session.env ?? null, session.cwd))}
+							{...(sandboxed ? { title: t("sandboxTitle", String(session.env)) } : {})}
+						>
+							{moving ? (
+								t("moving")
 							) : (
-								<p>{locationLabel(session.env, session.cwd)}</p>
-							))}
-					</>
+								<>
+									{lock}
+									{locationLabel(session.env, session.cwd)}
+								</>
+							)}
+						</button>
+					) : (
+						<p>{locationLabel(session.env, session.cwd)}</p>
+					))
 				)}
 			</div>
 			{!connected && <span className="offline">{t("offline")}</span>}

@@ -3,14 +3,11 @@ import { LocationSchema, literal, local, method, param, remote, sessionHost, uns
 import type { WorkspaceBytes, WorkspaceResult } from "./protocol.ts";
 
 const Path = str({ maxLength: 4096 });
-const Commit = str({ pattern: "^[0-9a-f]{7,64}$" });
 export const QuerySchema = union([
 	obj({ kind: literal("list"), path: Path }),
-	/** `commit`: the file as of that commit instead of the working tree. */
-	obj({ kind: literal("file"), path: Path, commit: opt(Commit) }),
+	obj({ kind: literal("file"), path: Path }),
 	/** Every file path below the root, for filtering by name: tracked and untracked, without ignored ones. */
 	obj({ kind: literal("files") }),
-	obj({ kind: literal("status") }),
 	/**
 	 * Literal text search below `path` ("" = everywhere), skipping ignored files.
 	 * `include`/`exclude`: comma-separated file globs relative to `path`; see `workspaceGlobs`.
@@ -22,22 +19,6 @@ export const QuerySchema = union([
 		include: opt(str({ maxLength: 500 })),
 		exclude: opt(str({ maxLength: 500 })),
 	}),
-	/** `context`: unchanged lines around each change (default 3); `full` makes the patch the whole file. */
-	obj({
-		kind: literal("diff"),
-		path: Path,
-		full: opt(bool()),
-		context: opt(int({ minimum: 0, maximum: 1000 })),
-		commit: opt(Commit),
-	}),
-	/** The current branch's history, newest first. */
-	obj({
-		kind: literal("log"),
-		skip: int({ minimum: 0, maximum: 100000 }),
-		limit: int({ minimum: 1, maximum: 500 }),
-	}),
-	/** One commit's message and changed files. */
-	obj({ kind: literal("commit"), commit: Commit }),
 	/** Where the workspace is open now, and the session's waiting or failed move. */
 	obj({ kind: literal("place") }),
 ]);

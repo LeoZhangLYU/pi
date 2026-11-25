@@ -1,5 +1,5 @@
-import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
-import { closeLayers, Slot, useCanWrite, useMessages, useRoute, useUnshownLayers } from "../runtime/web.tsx";
+import { useRef, useState } from "react";
+import { Slot, useCanWrite, useMessages, useRoute, useUnshownLayers } from "../runtime/web.tsx";
 import { useComposerState } from "./composer-state.tsx";
 import { webMessages } from "./messages.ts";
 import { OwnerNotices } from "./OwnerNotices.tsx";

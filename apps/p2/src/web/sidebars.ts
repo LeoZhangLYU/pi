@@ -31,7 +31,7 @@ function saveState(): void {
 	for (const listener of listeners) listener();
 }
 
-const snapshot = () => state;
+const _snapshot = () => state;
 
 function subscribe(listener: () => void): () => void {
 	listeners.add(listener);
@@ -42,7 +42,11 @@ function subscribe(listener: () => void): () => void {
  * Check if a specific sidebar is open
  */
 export function useMultiSidebarOpen(id: "team" | "task"): boolean {
-	return useSyncExternalStore(subscribe, () => state[id], () => state[id]);
+	return useSyncExternalStore(
+		subscribe,
+		() => state[id],
+		() => state[id],
+	);
 }
 
 /**
@@ -66,7 +70,11 @@ export function setMultiSidebarOpen(id: "team" | "task", open: boolean): void {
  * Check if archived members should be shown in team sidebar
  */
 export function useShowArchived(): boolean {
-	return useSyncExternalStore(subscribe, () => state.showArchived, () => state.showArchived);
+	return useSyncExternalStore(
+		subscribe,
+		() => state.showArchived,
+		() => state.showArchived,
+	);
 }
 
 /**

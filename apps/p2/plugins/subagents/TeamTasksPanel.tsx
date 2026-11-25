@@ -1,6 +1,5 @@
 // Team Tasks Sidebar: displays delegation tasks/work
-import { setMultiSidebarOpen } from "@p2/app/v1/web";
-import { useMessages } from "@p2/app/v1/web";
+import { setMultiSidebarOpen, useMessages } from "@p2/app/v1/web";
 import { CloseIcon } from "../../src/web/icons.tsx";
 import type { DelegationInfo } from "./contract.ts";
 import { teamMessages } from "./messages.ts";

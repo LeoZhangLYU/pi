@@ -1,6 +1,5 @@
 // Team Members Sidebar: displays team members with archived members collapsible
-import { setMultiSidebarOpen, toggleShowArchived, useShowArchived } from "@p2/app/v1/web";
-import { useMessages } from "@p2/app/v1/web";
+import { setMultiSidebarOpen, toggleShowArchived, useMessages, useShowArchived } from "@p2/app/v1/web";
 import { CloseIcon } from "../../src/web/icons.tsx";
 import { type Child, isTeamExecutor, roleOfChild, teamRows } from "./contract.ts";
 import { teamMessages } from "./messages.ts";
@@ -56,7 +55,7 @@ export function TeamMembersPanel({ members, busy }: { members: readonly Child[];
 										{info.length > 0 && (
 											<small>
 												{info.map((item, i) => (
-													<span key={i}>
+													<span key={`${i}:${item}`}>
 														{i > 0 && " / "}
 														{item}
 													</span>
@@ -99,7 +98,7 @@ export function TeamMembersPanel({ members, busy }: { members: readonly Child[];
 										{info.length > 0 && (
 											<small>
 												{info.map((item, i) => (
-													<span key={i}>
+													<span key={`${i}:${item}`}>
 														{i > 0 && " / "}
 														{item}
 													</span>

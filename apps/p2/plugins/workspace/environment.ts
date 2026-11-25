@@ -12,8 +12,6 @@ import {
 	WORKSPACE_READ_CHUNK,
 	WORKSPACE_TEXT_LIMIT,
 	type WorkspaceBytes,
-	type WorkspaceChange,
-	type WorkspaceCommit,
 	type WorkspaceEntry,
 	type WorkspaceMatch,
 	type WorkspaceQuery,
@@ -24,14 +22,10 @@ import {
 } from "./protocol.ts";
 
 const LIST_LIMIT = 2000;
-const STATUS_LIMIT = 5000;
 const STATUS_BYTES = 1024 * 1024;
-const DIFF_BYTES = 512 * 1024;
-const UNTRACKED_BYTES = 256 * 1024;
 const GIT_TIMEOUT = 10_000;
 const SEARCH_BYTES = 256 * 1024;
 const SEARCH_LIMIT = 500;
-const LOG_BYTES = 512 * 1024;
 const FILES_LIMIT = 50_000;
 const FILES_BYTES = 4 * 1024 * 1024;
 const WALK_DIRECTORIES = 5000;
@@ -119,21 +113,11 @@ export class Workspace {
 			case "list":
 				return this.list(query.path, context);
 			case "file":
-				return query.commit ? this.fileAt(query.commit, query.path, context) : this.file(query.path, context);
-			case "log":
-				return this.log(query.skip, query.limit, context);
-			case "commit":
-				return this.commit(query.commit, context);
-			case "status":
-				return this.status(context);
+				return this.file(query.path, context);
 			case "files":
 				return this.files(context);
 			case "search":
 				return this.search(query, context);
-			case "diff":
-				return query.commit
-					? this.commitDiff(query.commit, query.path, query.full === true, context, query.context)
-					: this.diff(query.path, query.full === true, context, query.context);
 		}
 	}
 
@@ -267,74 +251,6 @@ export class Workspace {
 		}
 	}
 
-	/**
-	 * Changes below the root, with paths relative to it: git reports them relative to the repository's top level, which
-	 * is above the root when the root is a folder inside a repository (`~/repo/apps/web`).
-	 */
-	private async status(context: Context): Promise<WorkspaceResult> {
-		const located = await this.git(["rev-parse", "--show-prefix"], 8192, context);
-		const prefix = located.exitCode === 0 ? located.stdout.trim() : "";
-		const below = (path: string) => (prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path);
-		const run = await this.git(
-			[
-				"status",
-				"--porcelain=v2",
-				"-z",
-				"--branch",
-				// List files inside new folders; `normal` reports only the folder, which has no diff.
-				"--untracked-files=all",
-				"--ignore-submodules=dirty",
-				"--no-ahead-behind",
-				"--",
-				".",
-			],
-			STATUS_BYTES,
-			context,
-		);
-		if (run.exitCode !== 0) return { kind: "status", repo: false, reason: firstLine(run.stderr) };
-		const records = run.stdout.split("\0");
-		const changes: WorkspaceChange[] = [];
-		let branch: string | undefined;
-		let head: string | undefined;
-		// Only complete records count: output stopped at the cap may end mid-record.
-		const complete = run.truncated ? records.slice(0, -1) : records;
-		for (let index = 0; index < complete.length; index++) {
-			const record = complete[index] ?? "";
-			if (record.startsWith("# branch.head ")) branch = record.slice(14);
-			else if (record.startsWith("# branch.oid ")) head = record.slice(13);
-			else if (record.startsWith("1 ")) changes.push({ status: record.slice(2, 4), path: below(field(record, 8)) });
-			else if (record.startsWith("2 ")) {
-				changes.push({
-					status: record.slice(2, 4),
-					path: below(field(record, 9)),
-					from: below(complete[index + 1] ?? ""),
-				});
-				index++;
-			} else if (record.startsWith("u "))
-				changes.push({ status: record.slice(2, 4), path: below(field(record, 10)) });
-			else if (record.startsWith("? ")) changes.push({ status: "??", path: below(record.slice(2)) });
-			if (changes.length >= STATUS_LIMIT) break;
-		}
-		return {
-			kind: "status",
-			repo: true,
-			...(branch && branch !== "(detached)" ? { branch } : {}),
-			...(head && head !== "(initial)" ? { head } : {}),
-			changes,
-			truncated: run.truncated || changes.length >= STATUS_LIMIT,
-		};
-	}
-
-	/**
-	 * Every file below the root, for the name filter. In a repository: tracked and untracked files without ignored ones,
-	 * as Quick Open skips them. Elsewhere (or without git): a walk of the directory, skipping `.git` and `node_modules`
-	 * folders and not following symlinks. Private directories inside the root are left out either way.
-	 *
-	 * The walk is breadth first with each directory's entries in name order (UTF-16 code units; byte order for names
-	 * without astral characters, as pi-env's `listDir` and `listFiles`), so a truncated walk keeps the same files on
-	 * every filesystem: shallow directories, and earlier names among siblings. Directory order (`openDirReader`) is
-	 * the filesystem's hash or creation order and would keep an arbitrary subset.
-	 */
 	private async files(context: Context): Promise<WorkspaceResult> {
 		const root = await this.canonicalRoot(context);
 		const base = root === "/" ? "" : root;
@@ -483,146 +399,14 @@ export class Workspace {
 		};
 	}
 
-	/** The current branch's commits, newest first, with unpushed ones marked when there is an upstream. */
-	private async log(skip: number, limit: number, context: Context): Promise<WorkspaceResult> {
-		const run = await this.git(
-			[
-				"log",
-				"-z",
-				"--format=%H%x1f%h%x1f%an%x1f%at%x1f%s",
-				`--skip=${skip}`,
-				"-n",
-				String(limit + 1),
-				"HEAD",
-				"--",
-			],
-			LOG_BYTES,
-			context,
-		);
-		if (run.exitCode !== 0) return { kind: "log", commits: [], more: false };
-		const records = run.stdout.split("\0").filter(Boolean);
-		if (run.truncated) records.pop();
-		const upstream = await this.git(
-			["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
-			4096,
-			context,
-		);
-		let unpushed: Set<string> | undefined;
-		if (upstream.exitCode === 0) {
-			const ahead = await this.git(
-				["rev-list", "-n", "5000", "HEAD", "--not", "@{upstream}", "--"],
-				LOG_BYTES,
-				context,
-			);
-			if (ahead.exitCode === 0) unpushed = new Set(ahead.stdout.split("\n").filter(Boolean));
-		}
-		const commits = records.slice(0, limit).map((record): WorkspaceCommit => {
-			const [hash = "", short = "", author = "", time = "0", subject = ""] = record.split("\x1f");
-			return {
-				hash,
-				short,
-				author,
-				time: Number(time) * 1000,
-				subject,
-				...(unpushed ? { unpushed: unpushed.has(hash) } : {}),
-			};
-		});
-		return {
-			kind: "log",
-			commits,
-			more: records.length > limit,
-			...(upstream.exitCode === 0 ? { upstream: upstream.stdout.trim() } : {}),
-		};
-	}
-
-	/** One commit's message and changed files (first parent for merges, the empty tree for a root commit). */
-	private async commit(commit: string, context: Context): Promise<WorkspaceResult> {
-		const meta = await this.git(["show", "-s", "--format=%H%x1f%an%x1f%at%x1f%B", commit, "--"], 64 * 1024, context);
-		if (meta.exitCode !== 0) throw new Error("Unknown commit");
-		const [hash = commit, author = "", time = "0", ...message] = meta.stdout.split("\x1f");
-		const run = await this.git(
-			// Relative to the root (and only below it), as the file and diff queries read paths.
-			["show", "--format=", "--name-status", "--relative", "-z", "-M", "--diff-merges=first-parent", hash, "--"],
-			STATUS_BYTES,
-			context,
-		);
-		if (run.exitCode !== 0) throw new Error(firstLine(run.stderr) ?? "Cannot read commit");
-		const tokens = run.stdout.split("\0");
-		if (run.truncated) tokens.pop();
-		const changes: WorkspaceChange[] = [];
-		for (let index = 0; index < tokens.length && changes.length < STATUS_LIMIT; ) {
-			const status = tokens[index++] ?? "";
-			if (!status) continue;
-			if (status.startsWith("R") || status.startsWith("C")) {
-				const from = tokens[index++] ?? "";
-				const path = tokens[index++] ?? "";
-				if (path) changes.push({ status: `${status[0]}.`, path, from });
-			} else {
-				const path = tokens[index++] ?? "";
-				if (path) changes.push({ status: `${status[0]}.`, path });
-			}
-		}
-		return {
-			kind: "commit",
-			commit: hash,
-			author,
-			time: Number(time) * 1000,
-			message: message.join("\x1f").trimEnd(),
-			changes,
-			truncated: run.truncated || changes.length >= STATUS_LIMIT,
-		};
-	}
-
-	/** A file's change in one commit. */
-	private async commitDiff(
-		commit: string,
-		path: string,
-		full: boolean,
-		context: Context,
-		lines = 3,
-	): Promise<WorkspaceResult> {
-		const relative = workspacePath(path);
-		if (!relative) throw new Error("Invalid workspace path");
-		const run = await this.git(
-			[
-				"show",
-				"--format=",
-				"--no-color",
-				"--no-ext-diff",
-				"--no-textconv",
-				"--no-relative",
-				"--src-prefix=a/",
-				"--dst-prefix=b/",
-				"--diff-merges=first-parent",
-				"-M",
-				`--unified=${full ? 1_000_000_000 : lines}`,
-				commit,
-				"--",
-				relative,
-			],
-			DIFF_BYTES,
-			context,
-		);
-		if (run.exitCode !== 0 && !run.truncated) throw new Error(firstLine(run.stderr) ?? "Diff failed");
-		return { kind: "diff", path, full, patch: run.stdout, truncated: run.truncated };
-	}
-
-	/** A file as of one commit, read from the repository rather than the working tree. */
-	private async fileAt(commit: string, path: string, context: Context): Promise<WorkspaceResult> {
-		const relative = workspacePath(path);
-		if (!relative) throw new Error("Invalid workspace path");
-		// `./`: relative to the root, not to the repository's top level.
-		const object = `${commit}:./${relative}`;
-		const sized = await this.git(["cat-file", "-s", object], 64, context);
-		if (sized.exitCode !== 0) throw new Error("File not found in that commit");
-		const size = Number(sized.stdout.trim());
-		const run = await this.git(["cat-file", "blob", object], WORKSPACE_TEXT_LIMIT, context);
-		if (run.exitCode !== 0 && !run.truncated) throw new Error("Cannot read file");
-		// Output arrives decoded; NUL bytes survive decoding and mark binary content.
-		if (run.stdout.slice(0, 8192).includes("\0")) return { kind: "file", path, size, binary: true, truncated: false };
-		return { kind: "file", path, size, binary: false, text: run.stdout, truncated: run.truncated };
-	}
-
+	/**
+	 * Git without a shell, against untrusted repository configuration: no optional locks
+	 * (never blocks the agent's git), no network fetches, no prompts, no pager, no system
+	 * config, no fsmonitor, literal pathspecs and every configured clean/smudge filter
+	 * disabled. Stdout and stderr are captured separately; stdout beyond `limit` cancels
+	 * the command and is reported as truncated.
+	 */
+	/** `overrides`: filter overrides this request already fetched. */
 	/**
 	 * One chunk of an upload into a folder: chunks append to a hidden temporary file
 	 * in that folder, renamed into place by the final one. Existing files are never
@@ -664,79 +448,6 @@ export class Workspace {
 		}
 	}
 
-	private async diff(path: string, full: boolean, context: Context, lines = 3): Promise<WorkspaceResult> {
-		const relative = workspacePath(path);
-		// Deleted files have no canonical path: validate lexically and let git scope the pathspec.
-		if (!relative) throw new Error("Invalid workspace path");
-		const head = await this.git(["rev-parse", "--verify", "-q", "HEAD"], 4096, context);
-		let base = head.stdout.trim();
-		if (head.exitCode !== 0) {
-			// Unborn branch: compare with the empty tree of this repository's hash function.
-			const empty = await this.git(["hash-object", "-t", "tree", "--stdin"], 4096, context);
-			if (empty.exitCode !== 0) throw new Error(firstLine(empty.stderr) ?? "Not a git repository");
-			base = empty.stdout.trim();
-		}
-		const run = await this.git(
-			[
-				"diff",
-				"--no-color",
-				"--no-ext-diff",
-				"--no-textconv",
-				"--no-relative",
-				"--src-prefix=a/",
-				"--dst-prefix=b/",
-				"--ignore-submodules=dirty",
-				"-M",
-				`--unified=${full ? 1_000_000_000 : lines}`,
-				base,
-				"--",
-				relative,
-			],
-			DIFF_BYTES,
-			context,
-		);
-		if (run.exitCode !== 0) throw new Error(firstLine(run.stderr) ?? "Diff failed");
-		if (run.stdout || run.truncated) return { kind: "diff", path, full, patch: run.stdout, truncated: run.truncated };
-		// Untracked files have no diff against HEAD: show their content as added.
-		const absolute = await this.resolve(relative, context).catch(() => undefined);
-		const opened = absolute ? await this.env.openBinaryReader(absolute, { noFollow: true }, context) : undefined;
-		if (!opened?.ok) return { kind: "diff", path, full, patch: "", truncated: false };
-		try {
-			const info = await opened.value.info(context);
-			const size = info.ok ? info.value.size : 0;
-			const read = await opened.value.read(0, Math.min(size, UNTRACKED_BYTES), context);
-			const text = read.ok ? decodeText(read.value, size > UNTRACKED_BYTES) : undefined;
-			if (text === undefined)
-				return {
-					kind: "diff",
-					path,
-					full,
-					patch: `diff --git a/${relative} b/${relative}\nnew file\nBinary file b/${relative}\n`,
-					truncated: false,
-				};
-			const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
-			const patch = [
-				`diff --git a/${relative} b/${relative}`,
-				"new file (untracked)",
-				"--- /dev/null",
-				`+++ b/${relative}`,
-				`@@ -0,0 +1,${lines.length} @@`,
-				...lines.map((line) => `+${line}`),
-			].join("\n");
-			return { kind: "diff", path, full, patch: `${patch}\n`, truncated: size > UNTRACKED_BYTES };
-		} finally {
-			await opened.value.close(context);
-		}
-	}
-
-	/**
-	 * Git without a shell, against untrusted repository configuration: no optional locks
-	 * (never blocks the agent's git), no network fetches, no prompts, no pager, no system
-	 * config, no fsmonitor, literal pathspecs and every configured clean/smudge filter
-	 * disabled. Stdout and stderr are captured separately; stdout beyond `limit` cancels
-	 * the command and is reported as truncated.
-	 */
-	/** `overrides`: filter overrides this request already fetched. */
 	private async git(args: string[], limit: number, context: Context, overrides?: Promise<string[]>, cwd?: string) {
 		const filters = await (overrides ?? this.filterOverrides(context));
 		return this.capture(
@@ -936,13 +647,6 @@ export class Workspace {
 		cover(root);
 		return targets;
 	}
-}
-
-function field(record: string, index: number): string {
-	// Space-separated fields before the path; the path itself may contain spaces.
-	let position = 0;
-	for (let count = 0; count < index; count++) position = record.indexOf(" ", position) + 1;
-	return record.slice(position);
 }
 
 function firstLine(text: string): string | undefined {
