@@ -1,8 +1,10 @@
 import { BACKGROUND_CONTEXT, contribute, defineFacet, follow, liveIn, Translations } from "@p2/app/v1";
 import type { Navigation, WorkspaceRoute } from "@p2/app/v1/web";
 import {
+	FolderIcon,
 	locationLabel,
 	Slots,
+	useCanWrite,
 	useComposerState,
 	useMessages,
 	useNavigation,
@@ -19,6 +21,29 @@ import { conversationLocation, Subagents } from "../subagents/contract.ts";
 import { Workspace } from "./contract.ts";
 import { workspaceMessages } from "./messages.ts";
 import { WorkspacePanel as MobileWorkspacePanel } from "./Workspace.tsx";
+
+function WorkspaceButton() {
+	const { t } = useMessages(workspaceMessages);
+	const nav = useNavigation();
+	const route = useRoute();
+	const canWrite = useCanWrite(route.session);
+	if (!route.session || !canWrite) return null;
+	return (
+		<button
+			type="button"
+			className={`icon-button workspace-toggle ${route.workspace ? "on" : ""}`}
+			aria-label={t("workspaceFilesAndChanges")}
+			aria-pressed={!!route.workspace}
+			onClick={() =>
+				route.workspace
+					? void nav.close((current) => ({ ...current, workspace: undefined }))
+					: void nav.push({ ...route, workspace: { tab: "files", directory: "" } })
+			}
+		>
+			<FolderIcon />
+		</button>
+	);
+}
 
 function WorkspacePanel() {
 	const route = useRoute(),
@@ -117,7 +142,7 @@ function NativePanel({
 
 export default defineFacet((host) => {
 	contribute(host, "p2.web-workspace", (self) => {
-		self.contribute(Slots, { "workspace-panel": WorkspacePanel });
+		self.contribute(Slots, { "workspace-actions": WorkspaceButton, "workspace-panel": WorkspacePanel });
 		self.contribute(Translations, workspaceMessages.translations);
 	});
 });
