@@ -1383,19 +1383,6 @@ audio.file-media {
 	color: var(--muted);
 	font-size: var(--fs-xs);
 }
-.workspace-status {
-	flex: none;
-	width: 1.5ch;
-	color: var(--muted);
-	font-weight: var(--fw-strong);
-}
-.workspace-status.status-A,
-.workspace-status.status-\? {
-	color: var(--add-ink);
-}
-.workspace-status.status-D {
-	color: var(--del-ink);
-}
 /* File and diff view: one sticky bar, then content edge to edge. */
 /* Path bar and view switch stay together at the top of the scrolling panel. */
 .workspace-bars {
@@ -1693,11 +1680,6 @@ audio.file-media {
 	height: var(--control-sm);
 	font-size: var(--fs-xs);
 }
-.workspace-hint {
-	padding: var(--s1) var(--x) 0;
-	color: var(--muted);
-	font-size: var(--fs-xs);
-}
 .workspace-markdown {
 	padding: var(--s2) var(--s2);
 }
@@ -1713,213 +1695,13 @@ button.diff-number:hover {
 	box-shadow: inset 2px 0 var(--text);
 	background: var(--hover);
 }
-.line-comment {
-	display: flex;
-	align-items: flex-start;
-	gap: var(--s2);
-	margin: var(--s1) var(--s2) var(--s1) calc(var(--gutter, 3ch) + var(--s2) * 2);
-	padding: var(--s1) var(--s2);
-	border: 1px solid var(--line);
-	border-radius: var(--radius);
-	background: var(--bg);
-	color: var(--text);
-	font-family: var(--sans);
-	font-size: var(--fs-sm);
-	white-space: pre-wrap;
-}
-/* Unwrapped code is as wide as its longest line and scrolls sideways: comments keep to
-   the visible width and stay in view while scrolling. */
-.workspace-view pre.patch {
-	container-type: inline-size;
-}
-.workspace-view .line-comment {
-	position: sticky;
-	left: calc(var(--gutter, 3ch) + var(--s2) * 2);
-	box-sizing: border-box;
-	width: calc(100cqw - var(--gutter, 3ch) - var(--s2) * 3);
-}
-.line-comment-text {
-	flex: 1;
-	min-width: 0;
-	color: inherit;
-	font: inherit;
-	overflow-wrap: anywhere;
-	text-align: left;
-	white-space: pre-wrap;
-}
-.line-comment.current {
-	border-color: var(--muted);
-	background: var(--hover);
-}
-.comment-nav {
-	display: flex;
-	align-items: center;
-	color: var(--muted);
-	font-family: var(--mono);
-	font-size: var(--fs-xs);
-}
-.comment-nav .icon-button {
-	width: var(--control-sm);
-	height: var(--control-sm);
-}
-.comment-nav .icon-button:first-child svg {
-	transform: rotate(180deg);
-}
-.line-comment.outdated {
-	flex-wrap: wrap;
-	border-style: dashed;
-}
-.line-comment-outdated {
-	flex: 1 0 100%;
-	color: var(--muted);
-	font-size: var(--fs-xs);
-	overflow-wrap: anywhere;
-}
-.line-comment-outdated code {
-	font-family: var(--mono);
-}
-.comment-row {
-	display: flex;
-	align-items: flex-start;
-	border-bottom: 1px solid var(--line);
-}
-.comment-row .workspace-row {
-	flex: 1;
-	min-width: 0;
-	align-items: flex-start;
-	padding-top: var(--s2);
-	padding-bottom: var(--s2);
-}
-.comment-row .workspace-name {
-	white-space: normal;
-}
-.comment-quote {
-	color: var(--muted);
-	white-space: pre-wrap;
-}
-.comment-text {
-	font-family: var(--sans);
-	font-size: var(--fs-sm);
-	white-space: pre-wrap;
-}
-.comment-actions {
-	display: flex;
-	flex: none;
-	align-items: center;
-	gap: var(--s1);
-	padding: var(--s1) var(--bar-pad) 0 0;
-}
-.workspace-section {
-	margin: 0;
-	padding: var(--s3) var(--x) var(--s1);
-	color: var(--muted);
-	font-size: var(--fs-xs);
-	font-weight: var(--fw-strong);
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
-}
-.commit-row {
-	align-items: flex-start;
-	padding-top: var(--s1);
-	padding-bottom: var(--s1);
-}
-.commit-row .workspace-name {
-	white-space: normal;
-	font-family: var(--sans);
-	font-size: var(--fs-sm);
-}
-.commit-row .workspace-name .muted {
-	font-family: var(--mono);
-	font-size: var(--fs-xs);
-}
-/* Pushed commits: hollow dot; not yet pushed: filled. */
-.commit-dot {
-	flex: none;
-	width: 7px;
-	height: 7px;
-	margin-top: 6px;
-	border: 1px solid var(--faint);
-	border-radius: 50%;
-}
-.commit-row.unpushed .commit-dot {
-	border-color: var(--text);
-	background: var(--text);
-}
-.commit-meta {
-	display: flex;
-	flex-direction: column;
-	gap: var(--s1);
-	padding: var(--s2) var(--x);
-	border-bottom: 1px solid var(--line);
-	font-size: var(--fs-xs);
-}
-.commit-message {
-	margin: 0;
-	font-family: var(--sans);
-	font-size: var(--fs-sm);
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-}
-.workspace-commit {
-	flex: none;
-	color: var(--muted);
-	font-size: var(--fs-xs);
-}
 .workspace-upload {
 	order: 1;
 	margin-left: auto;
 	cursor: pointer;
 }
-.comment-count {
-	flex: none;
-	color: var(--muted);
-	font-family: var(--sans);
-	font-size: var(--fs-xs);
-}
-.line-comment .icon-button {
-	width: var(--control-sm);
-	height: var(--control-sm);
-	margin: calc(-1 * var(--s1)) calc(-1 * var(--s2)) 0 0;
-}
-.line-comment.editor {
-	flex-direction: column;
-	align-items: stretch;
-}
-.line-comment textarea {
-	width: 100%;
-	padding: var(--s1) 0;
-	border: 0;
-	border-bottom: 1px solid var(--line);
-	outline: 0;
-	resize: vertical;
-	background: transparent;
-	font: inherit;
-}
-.line-comment-actions {
-	display: flex;
-	justify-content: flex-end;
-	gap: var(--s3);
-}
-.review-bar {
-	flex: none;
-	display: flex;
-	align-items: center;
-	gap: var(--s3);
-	padding: var(--s2) var(--x);
-	border-top: 1px solid var(--line);
-	background: var(--bg);
-	font-size: var(--fs-sm);
-}
 .workspace-row.ignored {
 	color: var(--faint);
-}
-.workspace-row.match {
-	align-items: flex-start;
-	padding-top: var(--s1);
-	padding-bottom: var(--s1);
-}
-.workspace-row.match .workspace-name {
-	white-space: pre;
 }
 .workspace-search {
 	width: auto;
@@ -1953,15 +1735,6 @@ button.diff-number:hover {
 	color: var(--text);
 	font-weight: var(--fw-strong);
 }
-.workspace-glob > span {
-	flex: none;
-	width: 4.5em;
-	font-size: var(--fs-sm);
-}
-.workspace-glob input {
-	font-family: var(--mono);
-	font-size: var(--fs-sm);
-}
 .diff-line.marked {
 	background: var(--hover);
 	box-shadow: inset 2px 0 var(--muted);
@@ -1973,10 +1746,6 @@ button.diff-number:hover {
 }
 .patch .hunk button.diff-code:hover {
 	color: var(--text);
-}
-.review-bar > span {
-	flex: 1;
-	color: var(--muted);
 }
 .workspace-toggle.on {
 	color: var(--text);
@@ -3661,9 +3430,7 @@ button.history-edge:disabled {
 		align-items: center;
 	}
 	.queue-remove,
-	.branch-rename,
-	.comment-nav .icon-button,
-	.line-comment .icon-button {
+	.branch-rename {
 		width: var(--row);
 		height: var(--row);
 	}

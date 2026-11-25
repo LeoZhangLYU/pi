@@ -3,7 +3,6 @@ import { BACKGROUND_CONTEXT, filePreview, follow } from "@p2/app/v1";
 import {
 	ChevronIcon,
 	CloseIcon,
-	CommentIcon,
 	FileIcon,
 	FolderIcon,
 	type Navigation,
@@ -33,7 +32,7 @@ import {
 	useState,
 } from "react";
 import type { Workspace } from "./contract.ts";
-import { type CommentEditor, type FileView, type ReviewComment, reviewMessage, WorkspaceFile } from "./file.tsx";
+import { type FileView, WorkspaceFile } from "./file.tsx";
 import { type FuzzyMatch, rankFiles } from "./fuzzy.ts";
 import { workspaceMessages } from "./messages.ts";
 import type { WorkspaceQuery, WorkspaceResult } from "./protocol.ts";
@@ -97,7 +96,7 @@ function initialView(path: string): FileView {
 // Right-hand panel for the viewed conversation's working directory. All data comes
 // from that conversation's execution environment via the worker; media and downloads
 // use the separately authorized /workspace-file endpoint. Where it is (tab, folder,
-// file, search) is part of the route: folders and files are steps.
+// file) is part of the route: folders and files are steps.
 export function WorkspacePanel({
 	workspace,
 	nav,
@@ -111,7 +110,6 @@ export function WorkspacePanel({
 	where,
 	label,
 	owner,
-	onSend,
 }: {
 	workspace: Held<typeof Workspace> | undefined;
 	nav: Navigation;
@@ -130,15 +128,13 @@ export function WorkspacePanel({
 	label?: (location: Location) => string;
 	/** Terminals are a shell on the session's machine: only the owner gets them. */
 	owner: boolean;
-	/** Deliver review comments as the user's next message; absent for viewers who cannot send. */
-	onSend?: (text: string) => Promise<void>;
 }) {
 	const { t } = useMessages(workspaceMessages);
-	const { tab, directory, file: selection, search: submitted } = route;
-	// Docked with room for a file beside the list (measured below): Files and Search then show the open file
-	// to the left of their list instead of in its place. Phones and narrow windows keep one column.
+	const { tab, directory, file: selection } = route;
+	// Docked with room for a file beside the list (measured below): Files then shows the open file to the left of
+	// its list instead of in its place. Phones and narrow windows keep one column.
 	const [roomy, setRoomy] = useState(false);
-	const split = roomy && selection !== undefined && (tab === "files" || tab === "search");
+	const split = roomy && selection !== undefined && tab === "files";
 	// Steps applied to the latest route, not this render's: queued steps may be pending.
 	const update = (change: (current: WorkspaceRoute) => WorkspaceRoute) => (current: typeof nav.route) => ({
 		...current,
@@ -171,17 +167,15 @@ export function WorkspacePanel({
 		if (next) step({ file: next });
 		else void nav.close(update((current) => ({ ...current, file: undefined })));
 	};
-	const setSubmitted = (search: WorkspaceRoute["search"]) =>
-		void nav.replace(update((current) => ({ ...current, search }))(nav.route));
-	// Tabs are lateral: switching returns to where the panel opened, keeping each tab's
-	// folder and search but dropping files visited meanwhile.
+	// Tabs are lateral: switching returns to where the panel opened, keeping the folder
+	// but dropping files visited meanwhile.
 	const setTab = (next: WorkspaceTab) => {
 		const current = nav.route.workspace;
 		if (!current) return;
 		const target: WorkspaceRoute = {
 			tab: next,
 			directory: current.directory,
-			...(current.search ? { search: current.search } : {}),
+
 			...(current.terminal ? { terminal: current.terminal } : {}),
 			...(next === "terminal" ? { startTerminal: true } : {}),
 		};
@@ -190,13 +184,6 @@ export function WorkspacePanel({
 			(landed) => ({ ...landed, workspace: target }),
 		);
 	};
-	// Inputs start from the submitted search a restored entry carries.
-	const [searchText, setSearchText] = useState(submitted?.text ?? "");
-	const [include, setInclude] = useState(submitted?.include ?? "");
-	const [exclude, setExclude] = useState(submitted?.exclude ?? "");
-	const [filters, setFilters] = useState(Boolean(submitted?.include || submitted?.exclude));
-	const searchKey = `search:${JSON.stringify(submitted)}`;
-	const [search, setSearch] = useState<Loaded<Extract<WorkspaceResult, { kind: "search" }>>>({ loading: false });
 	const [_collapsed, _setCollapsed] = useState<ReadonlySet<string>>(new Set());
 	const [wrap, setWrap] = useState(() => localStorage.getItem("pi-workspace-wrap") === "1");
 	const [version, setVersion] = useState(0);
@@ -222,50 +209,6 @@ export function WorkspacePanel({
 	const [fileIndex, setFileIndex] = useState<Loaded<Extract<WorkspaceResult, { kind: "files" }>>>({ loading: false });
 	const [place, setPlace] = useState<Loaded<Extract<WorkspaceResult, { kind: "place" }>>>({ loading: true });
 	const [file, setFile] = useState<Loaded<Extract<WorkspaceResult, { kind: "file" }>>>({ loading: true });
-	// Draft review comments survive reloads, per conversation, until sent or discarded.
-	const commentsKey = `pi-review:${sessionId}:${conversationId}`;
-	const [comments, setCommentsState] = useState<ReviewComment[]>([]);
-	useEffect(() => {
-		try {
-			const saved: unknown = JSON.parse(localStorage.getItem(commentsKey) ?? "[]");
-			setCommentsState(Array.isArray(saved) ? (saved as ReviewComment[]) : []);
-		} catch {
-			setCommentsState([]);
-		}
-	}, [commentsKey]);
-	const setComments = (next: ReviewComment[]) => {
-		setCommentsState(next);
-		if (next.length) localStorage.setItem(commentsKey, JSON.stringify(next));
-		else localStorage.removeItem(commentsKey);
-	};
-	// The open comment box (new or edit) is kept too, so a reload mid-typing loses nothing.
-	const editorKey = `pi-review-editor:${sessionId}:${conversationId}`;
-	const [editor, setEditorState] = useState<CommentEditor>();
-	useEffect(() => {
-		try {
-			const saved: unknown = JSON.parse(localStorage.getItem(editorKey) ?? "null");
-			setEditorState(saved && typeof saved === "object" ? (saved as CommentEditor) : undefined);
-		} catch {
-			setEditorState(undefined);
-		}
-	}, [editorKey]);
-	const setEditor = (next: CommentEditor | undefined) => {
-		setEditorState(next);
-		if (next) localStorage.setItem(editorKey, JSON.stringify(next));
-		else localStorage.removeItem(editorKey);
-	};
-	const commented = new Set(comments.map((comment) => comment.path));
-	// Sorted by file and line, so the agent reads them in order; sent comments leave the drafts.
-	const send = (batch: ReviewComment[]) => {
-		if (!onSend || sending || !batch.length) return;
-		setSending(true);
-		const ids = new Set(batch.map((comment) => comment.id));
-		onSend(reviewMessage(batch.toSorted((a, b) => a.path.localeCompare(b.path) || a.end - b.end)))
-			.then(() => setComments(comments.filter((comment) => !ids.has(comment.id))))
-			.catch(() => {})
-			.finally(() => setSending(false));
-	};
-	const [sending, setSending] = useState(false);
 	const [uploading, setUploading] = useState<string>();
 	const [uploadError, setUploadError] = useState<string>();
 	// Until the conversation is attached, queries wait instead of failing; attaching
@@ -339,7 +282,6 @@ export function WorkspacePanel({
 	};
 	// Only what is shown loads: a change under an open file reloads the file, not the folder listing behind it.
 	const showsListing = tab === "files" && (!selection || split);
-	const showsSearch = tab === "search" && (!selection || split);
 	// Folders the tree shows: the root and each expanded folder inside a shown one that lists it.
 	const shownFolders: string[] = [""];
 	for (let index = 0; index < shownFolders.length; index++) {
@@ -427,22 +369,6 @@ export function WorkspacePanel({
 			setFile,
 		);
 	}, [load, query, selection?.path, needsFile, version]);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: version triggers refetches.
-	useEffect(() => {
-		if (!submitted || !showsSearch) return;
-		return load(
-			searchKey,
-			() =>
-				query<Extract<WorkspaceResult, { kind: "search" }>>({
-					kind: "search",
-					text: submitted.text,
-					path: "",
-					...(submitted.include ? { include: submitted.include } : {}),
-					...(submitted.exclude ? { exclude: submitted.exclude } : {}),
-				}),
-			setSearch,
-		);
-	}, [load, query, submitted, searchKey, version, showsSearch]);
 
 	const panel = useRef<HTMLElement>(null);
 	// Each list, file and commit keeps its scroll position for Back. Keyed by the panel's
@@ -513,9 +439,6 @@ export function WorkspacePanel({
 				error={fileLoaded?.error}
 				url={fileUrl(selection.path)}
 				wrap={wrap}
-				comments={comments}
-				editor={editor}
-				onEditor={setEditor}
 				line={selection.line}
 				onView={(view) =>
 					void nav.replace(update((current) => ({ ...current, file: { ...selection, view } }))(nav.route))
@@ -526,8 +449,6 @@ export function WorkspacePanel({
 				}}
 				onBack={() => setSelection(undefined)}
 				closable={split}
-				onComments={setComments}
-				onSendOne={onSend && !sending ? (comment) => send([comment]) : undefined}
 			/>
 		);
 	}
@@ -708,148 +629,6 @@ export function WorkspacePanel({
 				)}
 			</>
 		);
-	} else if (tab === "comments") {
-		const ordered = comments.toSorted((a, b) => a.path.localeCompare(b.path) || a.end - b.end);
-		body = ordered.length ? (
-			<div className="workspace-list">
-				{ordered.map((comment) => (
-					<div key={comment.id} className="comment-row">
-						<button
-							type="button"
-							className="workspace-row"
-							onClick={() =>
-								// One step to the file; Back returns to this list.
-								step({
-									file: { path: comment.path, view: comment.view, line: comment.end },
-								})
-							}
-						>
-							<span className="workspace-name">
-								<span className="muted">
-									{comment.path}:{comment.end}
-								</span>
-								<br />
-								<span className="comment-quote">{comment.quote}</span>
-								<br />
-								<span className="comment-text">{comment.text}</span>
-							</span>
-						</button>
-						<span className="comment-actions">
-							{onSend && (
-								<button
-									type="button"
-									className="text-action"
-									disabled={sending}
-									onClick={() => send([comment])}
-								>
-									{t("send")}
-								</button>
-							)}
-							<button
-								type="button"
-								className="icon-button"
-								aria-label={t("deleteComment")}
-								onClick={() => setComments(comments.filter((entry) => entry.id !== comment.id))}
-							>
-								<CloseIcon />
-							</button>
-						</span>
-					</div>
-				))}
-			</div>
-		) : (
-			<p className="notice workspace-note">{t("noUnsentComments")}</p>
-		);
-	} else if (tab === "search") {
-		const value = search.value;
-		const filtered = Boolean(include.trim() || exclude.trim());
-		const glob = (label: string, text: string, set: (value: string) => void, example: string) => (
-			<label className="search workspace-search workspace-glob">
-				<span>{label}</span>
-				<input
-					value={text}
-					maxLength={500}
-					autoCapitalize="off"
-					autoCorrect="off"
-					spellCheck={false}
-					onChange={(event) => set(event.target.value)}
-					placeholder={example}
-					aria-label={`Files to ${label}`}
-				/>
-			</label>
-		);
-		body = (
-			<>
-				<form
-					onSubmit={(event) => {
-						event.preventDefault();
-						if (searchText.trim()) setSubmitted({ text: searchText, include, exclude });
-					}}
-				>
-					<div className="search workspace-search">
-						<SearchIcon />
-						<input
-							type="search"
-							value={searchText}
-							maxLength={200}
-							onChange={(event) => setSearchText(event.target.value)}
-							placeholder={t("searchInFiles")}
-							aria-label={t("searchInFiles")}
-						/>
-						<button
-							type="button"
-							className="text-action"
-							aria-expanded={filters}
-							onClick={() => setFilters(!filters)}
-						>
-							{filters || !filtered ? t("filters") : t("filtersOn")}
-						</button>
-					</div>
-					{filters && (
-						<>
-							{glob("include", include, setInclude, "*.ts, src/")}
-							{glob("exclude", exclude, setExclude, "*.test.ts, dist")}
-						</>
-					)}
-					{/* Enter in any field submits the form. */}
-					<button type="submit" hidden />
-				</form>
-				{search.error ? (
-					<p className="notice error workspace-note">{search.error}</p>
-				) : !submitted ? (
-					<p className="notice workspace-note">
-						{t("searchHint")}
-						{filters && t("filtersHint")}
-					</p>
-				) : !value || search.key !== searchKey ? (
-					<div className="spinner large" />
-				) : (
-					<div className="workspace-list">
-						{value.matches.map((match, index) => (
-							<button
-								type="button"
-								key={`${match.path}:${match.line}:${index}`}
-								className="workspace-row match"
-								aria-current={
-									split && selection?.path === match.path && selection.line === match.line ? "true" : undefined
-								}
-								onClick={() => setSelection({ path: match.path, view: "file", line: match.line })}
-							>
-								<span className="workspace-name">
-									<span className="muted">
-										{match.path}:{match.line}
-									</span>
-									<br />
-									{match.text.trim()}
-								</span>
-							</button>
-						))}
-						{!value.matches.length && <p className="notice workspace-note">{t("noMatches")}</p>}
-						{value.truncated && <p className="notice workspace-note">{t("showingFirstMatches")}</p>}
-					</div>
-				)}
-			</>
-		);
 	}
 
 	return (
@@ -880,8 +659,6 @@ export function WorkspacePanel({
 						{(
 							[
 								["files", t("files"), <FolderIcon key="icon" size={20} />, 0],
-								["search", t("search"), <SearchIcon key="icon" size={20} />, 0],
-								["comments", t("comments"), <CommentIcon key="icon" />, comments.length],
 								...(owner ? [["terminal", "Terminal", <TerminalIcon key="icon" size={20} />, 0] as const] : []),
 							] as const
 						).map(([id, label, icon, count]) => (
@@ -925,32 +702,6 @@ export function WorkspacePanel({
 					{moveNote && !terminal && <p className="notice workspace-note">{moveNote}</p>}
 					{body}
 				</div>
-				{comments.length > 0 && (
-					<div className="review-bar">
-						<span>
-							{comments.length} comment{comments.length === 1 ? "" : "s"}
-							{commented.size > 1 ? ` in ${commented.size} files` : ""}
-						</span>
-						<button
-							type="button"
-							className="text-action"
-							onClick={() => {
-								setComments([]);
-								setEditor(undefined);
-							}}
-						>
-							{t("discard")}
-						</button>
-						<button
-							type="button"
-							className="button primary"
-							disabled={!onSend || sending}
-							onClick={() => send(comments)}
-						>
-							{t("sendAll")}
-						</button>
-					</div>
-				)}
 			</div>
 		</aside>
 	);

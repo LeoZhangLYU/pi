@@ -2,13 +2,12 @@ import { createContext, type RefObject, useContext, useLayoutEffect, useSyncExte
 // Adapted from Pi Mobile: independent browser-only navigation, no app imports.
 // Plugins own named modal locators; the runtime owns the stack and Back behavior.
 export type Layer = { kind: "drawer" } | { kind: "sheet" | "viewer"; name: string; locator?: string };
-export type WorkspaceTab = "files" | "search" | "comments" | "terminal";
+export type WorkspaceTab = "files" | "terminal";
 export type WorkspaceFileRoute = { path: string; view: "file" | "preview"; line?: number };
 export type WorkspaceRoute = {
 	tab: WorkspaceTab;
 	directory: string;
 	file?: WorkspaceFileRoute;
-	search?: { text: string; include?: string; exclude?: string };
 	terminal?: string;
 	startTerminal?: boolean;
 };
@@ -365,7 +364,7 @@ export class Navigation {
 		return this.run(() => this.add(route));
 	}
 
-	/** The same screen in another state (tabs, view switches, submitted search). */
+	/** The same screen in another state (tabs, view switches). */
 	replace(route: Route, expected?: Route): Promise<void> {
 		return this.run(() => {
 			// Server state may arrive while a user navigation is queued. Never replace its destination.

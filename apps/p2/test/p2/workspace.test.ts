@@ -75,7 +75,7 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 		await fixture?.close();
 	});
 
-	it("lists folders, ignored annotations, all filenames, text and search", async () => {
+	it("lists folders, ignored annotations, all filenames and text", async () => {
 		const list = await workspace.query({ kind: "list", path: "" }, BACKGROUND_CONTEXT);
 		assert.equal(list.kind, "list");
 		if (list.kind !== "list") return;
@@ -85,17 +85,6 @@ describe("workspace plugin (fake provider, temporary git repository)", () => {
 		assert(files.kind === "files" && files.paths.includes("src/hello.ts") && !files.paths.includes("ignored.txt"));
 		const file = await workspace.query({ kind: "file", path: "src/hello.ts" }, BACKGROUND_CONTEXT);
 		assert(file.kind === "file" && file.text?.includes("after"));
-		const search = await workspace.query(
-			{
-				kind: "search",
-				path: "",
-				text: "hello",
-				include: "*.{ts,md}",
-				exclude: "new.md",
-			},
-			BACKGROUND_CONTEXT,
-		);
-		assert(search.kind === "search" && search.matches.length === 1 && search.matches[0]?.path === "src/hello.ts");
 		await assert.rejects(
 			workspace.query({ kind: "file", path: "../data/settings.json" }, BACKGROUND_CONTEXT),
 			/Invalid/,

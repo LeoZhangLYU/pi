@@ -15,11 +15,9 @@ export type WorkspaceEntry = {
 	/** Matched by .gitignore (not reported for tracked files or outside a repository). */
 	ignored?: boolean;
 };
-export type WorkspaceMatch = { path: string; line: number; text: string };
 export type WorkspaceResult =
 	| { kind: "list"; path: string; entries: WorkspaceEntry[]; truncated: boolean }
 	| { kind: "file"; path: string; size: number; binary: boolean; text?: string; truncated: boolean }
-	| { kind: "search"; text: string; path: string; matches: WorkspaceMatch[]; truncated: boolean }
 	| { kind: "files"; paths: string[]; truncated: boolean }
 	| {
 			kind: "place";
@@ -36,73 +34,5 @@ export type WorkspaceBytes = { size: number; start: number; data: string };
 export const WORKSPACE_TEXT_LIMIT = 1024 * 1024;
 export const WORKSPACE_READ_CHUNK = 1024 * 1024;
 export const WORKSPACE_DOWNLOAD_LIMIT = 25 * 1024 * 1024;
-
-/** Search text: 1-200 characters on one line. */
-export function workspaceSearchText(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() && value.length <= 200 && !/[\0\r\n]/.test(value)
-		? value
-		: undefined;
-}
-
-/**
- * VS Code-style file globs, comma-separated: `*.ts, src/`, `*.{ts,tsx}`. Braces expand;
- * a pattern matches at any depth unless it starts with `./` or `/`. Returns normalized
- * git glob patterns (`**\/*.ts`); callers also match everything below a matching folder.
- * Undefined when invalid: control characters, backslashes, `..` segments, unbalanced
- * braces, over 500 characters or 32 expanded patterns. `""` is no patterns.
- */
-export function workspaceGlobs(value: unknown): string[] | undefined {
-	if (typeof value !== "string" || value.length > 500 || value.includes("\\")) return undefined;
-	if ([...value].some((char) => char < " ")) return undefined;
-	const patterns: string[] = [];
-	// Expands the first brace group of each pattern until none is left.
-	const expand = (pattern: string): boolean => {
-		const open = pattern.indexOf("{");
-		if (open < 0) {
-			if (pattern.includes("}")) return false;
-			patterns.push(pattern);
-			return patterns.length <= 32;
-		}
-		const parts: string[] = [];
-		let depth = 0;
-		let start = open + 1;
-		for (let index = open; index < pattern.length; index++) {
-			const char = pattern[index];
-			if (char === "{") depth++;
-			else if (char === "," && depth === 1) {
-				parts.push(pattern.slice(start, index));
-				start = index + 1;
-			} else if (char === "}" && --depth === 0) {
-				parts.push(pattern.slice(start, index));
-				const rest = pattern.slice(index + 1);
-				return parts.every((part) => expand(`${pattern.slice(0, open)}${part}${rest}`));
-			}
-		}
-		return false;
-	};
-	// Commas inside braces belong to the brace group, not the list.
-	let depth = 0;
-	let start = 0;
-	for (let index = 0; index <= value.length; index++) {
-		const char = value[index];
-		if (char === "{") depth++;
-		else if (char === "}") depth--;
-		else if (index === value.length || (char === "," && depth === 0)) {
-			const pattern = value.slice(start, index).trim();
-			start = index + 1;
-			if (pattern && !expand(pattern)) return undefined;
-		}
-	}
-	const normalized: string[] = [];
-	for (const pattern of patterns) {
-		const anchored = pattern.startsWith("/") || pattern.startsWith("./");
-		const segments = pattern.split("/").filter((segment) => segment && segment !== ".");
-		if (segments.includes("..")) return undefined;
-		if (!segments.length) continue;
-		const glob = segments.join("/");
-		normalized.push(anchored || glob === "**" || glob.startsWith("**/") ? glob : `**/${glob}`);
-	}
-	return [...new Set(normalized)];
-}
 
 export { workspacePath } from "./contract.ts";

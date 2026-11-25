@@ -10,7 +10,7 @@ import { Sessions } from "../../plugins/sessions/contract.ts";
 import { Browser, browserTests } from "./browser.ts";
 import { type Fixture, holdIn, startFixture } from "./helpers.ts";
 
-const input = (selector: string, value: string) =>
+const _input = (selector: string, value: string) =>
 	`(()=>{const e=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`;
 describe("workspace and terminal structural parity", { skip: !browserTests }, () => {
 	let fixture: Fixture, browser: Browser, id: string;
@@ -47,7 +47,7 @@ describe("workspace and terminal structural parity", { skip: !browserTests }, ()
 		await browser.click('button[aria-label="Workspace"]');
 		await browser.wait(`document.querySelector('.workspace-tree .workspace-row.directory')`);
 	}
-	it("uses the canonical phone tree, previews, comment editor and Back; keeps unsent review drafts after reload", async () => {
+	it("uses the canonical phone tree, previews and Back", async () => {
 		await open(390, 844);
 		assert.equal(await browser.evaluate<number>(`document.querySelectorAll('[class*="p2-workspace"]').length`), 0);
 		await browser.click(".workspace-tree .workspace-row.directory");
@@ -56,19 +56,7 @@ describe("workspace and terminal structural parity", { skip: !browserTests }, ()
 			`[...document.querySelectorAll('.workspace-row')].find(e=>e.querySelector('.workspace-name')?.textContent==='hello.ts').classList.add('test-file')`,
 		);
 		await browser.click(".test-file");
-		await browser.wait(`document.querySelector('.diff-line button.diff-number')`);
-		await browser.click(".diff-line button.diff-number");
-		await browser.wait(
-			`document.querySelector('textarea[aria-label=Comment]') && document.querySelector('.line-comment-actions')`,
-		);
-		await browser.evaluate(input("textarea[aria-label=Comment]", "Please explain this answer."));
-		await browser.evaluate(
-			`[...document.querySelectorAll('.line-comment-actions button')].find(e=>e.textContent==='Add comment').classList.add('test-add')`,
-		);
-		await browser.click(".test-add");
-		await browser.wait(`document.querySelector('.review-bar')?.textContent.includes('1 comment')`);
-		await browser.open(`http://127.0.0.1:${fixture.server.port}/s/${id}`);
-		await browser.wait(`document.querySelector('.line-comment-text')?.textContent==='Please explain this answer.'`);
+		await browser.wait(`document.querySelector('.workspace-view .diff-line')`);
 		await browser.click(".workspace-view button[aria-label=Back]");
 		await browser.wait(
 			`document.querySelector('.workspace-tree') && [...document.querySelectorAll('.workspace-name')].some(e=>e.textContent==='guide.md')`,
@@ -79,21 +67,10 @@ describe("workspace and terminal structural parity", { skip: !browserTests }, ()
 		await browser.click(".test-markdown");
 		await browser.wait(`document.querySelector('.workspace-markdown h3')?.textContent==='Guide'`);
 		await browser.click(".workspace-view button[aria-label=Back]");
-		await browser.click(".workspace-tabs button[title=Comments]");
-		await browser.wait(`document.querySelector('.comment-row')`);
-		await browser.click(".review-bar .button.primary");
-		await browser.wait(`!document.querySelector('.review-bar')`);
 		await browser.click('button[aria-label="Close workspace"]');
-		await browser.wait(`document.querySelector('.messages .user')?.textContent.includes('Review comments:')`);
 	});
-	it("searches with filters, follows filesystem changes, and measures/resizes the desktop panel", async () => {
+	it("follows filesystem changes and measures/resizes the desktop panel", async () => {
 		await open(1280, 900);
-		await browser.click(".workspace-tabs button[title=Search]");
-		await browser.wait(`document.querySelector('input[aria-label="Search text in files"]')`);
-		await browser.evaluate(input('input[aria-label="Search text in files"]', "answer"));
-		await browser.evaluate(`document.querySelector('input[aria-label="Search text in files"]').form.requestSubmit()`);
-		await browser.wait(`document.querySelector('.workspace-row.match')?.textContent.includes('hello.ts:1')`);
-		await browser.click(".workspace-tabs button[title=Files]");
 		writeFileSync(join(fixture.workspace, "new-visible.txt"), "Live change\n");
 		await browser.wait(
 			`[...document.querySelectorAll('.workspace-name')].some(e=>e.textContent==='new-visible.txt')`,

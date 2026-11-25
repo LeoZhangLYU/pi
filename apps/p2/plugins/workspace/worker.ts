@@ -15,7 +15,7 @@ import { conversationEnvironment, harnessOf, isLocalEnvironment, workerOf } from
 import { LocationMoveDoc } from "../locations/contract.worker.ts";
 import { Workspace, WorkspaceBackend, WorkspaceTransfer, WorkspaceWrites } from "./contract.ts";
 import { Workspace as EnvironmentWorkspace } from "./environment.ts";
-import { workspacePath, workspaceSearchText } from "./protocol.ts";
+import { workspacePath } from "./protocol.ts";
 
 export default defineFacet((host) => {
 	host.serve(WorkspaceWrites, (_params, self) => {
@@ -251,7 +251,6 @@ export default defineFacet((host) => {
 				worker().liveness.call(async () => {
 					if ("path" in query && workspacePath(query.path) === undefined)
 						throw new Error("Invalid workspace path");
-					if (query.kind === "search" && !workspaceSearchText(query.text)) throw new Error("Invalid search text");
 					const { workspace, location, privateRelative } = await workspaceResource.value.current();
 					if (query.kind === "place") {
 						const move = await harness().durable.snapshot(
@@ -272,14 +271,6 @@ export default defineFacet((host) => {
 						(query.path === privateRelative || query.path.startsWith(`${privateRelative}/`))
 					)
 						throw new Error("Path is private");
-					if (
-						privateRelative &&
-						query.kind === "search" &&
-						(!query.path || privateRelative.startsWith(`${query.path}/`))
-					) {
-						const relative = query.path ? privateRelative.slice(query.path.length + 1) : privateRelative;
-						query = { ...query, exclude: [query.exclude, `./${relative}/`].filter(Boolean).join(",") };
-					}
 					return workspace.query(query, durableContext(ctx));
 				}),
 			read: ({ path, ...range }, ctx) =>

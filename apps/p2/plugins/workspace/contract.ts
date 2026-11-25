@@ -8,17 +8,6 @@ export const QuerySchema = union([
 	obj({ kind: literal("file"), path: Path }),
 	/** Every file path below the root, for filtering by name: tracked and untracked, without ignored ones. */
 	obj({ kind: literal("files") }),
-	/**
-	 * Literal text search below `path` ("" = everywhere), skipping ignored files.
-	 * `include`/`exclude`: comma-separated file globs relative to `path`; see `workspaceGlobs`.
-	 */
-	obj({
-		kind: literal("search"),
-		path: Path,
-		text: str({ minLength: 1, maxLength: 200 }),
-		include: opt(str({ maxLength: 500 })),
-		exclude: opt(str({ maxLength: 500 })),
-	}),
 	/** Where the workspace is open now, and the session's waiting or failed move. */
 	obj({ kind: literal("place") }),
 ]);

@@ -1,11 +1,10 @@
-import { BACKGROUND_CONTEXT, contribute, defineFacet, follow, liveIn, Translations } from "@p2/app/v1";
+import { contribute, defineFacet, follow, liveIn, Translations } from "@p2/app/v1";
 import type { Navigation, WorkspaceRoute } from "@p2/app/v1/web";
 import {
 	FolderIcon,
 	locationLabel,
 	Slots,
 	useCanWrite,
-	useComposerState,
 	useMessages,
 	useNavigation,
 	useObject,
@@ -15,7 +14,6 @@ import {
 	useStatus,
 } from "@p2/app/v1/web";
 import { useEffect, useState } from "react";
-import { Chat } from "../chat/contract.ts";
 import { Sessions } from "../sessions/contract.ts";
 import { conversationLocation, Subagents } from "../subagents/contract.ts";
 import { Workspace } from "./contract.ts";
@@ -80,10 +78,7 @@ function NativePanel({
 	nav: Navigation;
 	route: WorkspaceRoute;
 }) {
-	const { t } = useMessages(workspaceMessages);
 	const workspace = useObject(Workspace, { session, conversation });
-	// Only to send review comments: a method-only reference (the chat view holds the state when it is open).
-	const chat = useObject(Chat, { session, conversation });
 	const rows = useReadable(liveIn(useObject(Sessions, {}), "owner")?.sessions);
 	const children = useReadable(liveIn(useObject(Subagents, {}), "reader")?.children);
 	// Where the viewed conversation works: a subagent may have its own location (e.g. a git worktree, another machine).
@@ -92,7 +87,6 @@ function NativePanel({
 		children?.[session]?.find((child) => child.conversationId === conversation),
 	);
 	const cwd = location?.cwd ?? "";
-	const { steer, setError } = useComposerState();
 	// Why the workspace is not open: a failed open shows its error (Retry opens it again with a new reference)
 	// instead of loading forever.
 	const [unavailable, setUnavailable] = useState<string>();
@@ -118,24 +112,6 @@ function NativePanel({
 			cwd={cwd}
 			{...(location ? { where: locationLabel(location.env, location.cwd) } : {})}
 			owner={owner}
-			// A member's or one-shot agent's conversation takes no messages: no review comments to send there.
-			onSend={
-				children?.[session]?.some((child) => child.conversationId === conversation)
-					? undefined
-					: async (text) => {
-							try {
-								const writer = liveIn(chat, "participant");
-								if (!writer) throw new Error(t("readOnlyConversation"));
-								await writer.send(
-									{ text, requestId: crypto.randomUUID(), whenBusy: steer ? "steer" : "followUp" },
-									BACKGROUND_CONTEXT,
-								);
-							} catch (error) {
-								setError(error instanceof Error ? error.message : t("couldNotSendComments"));
-								throw error;
-							}
-						}
-			}
 		/>
 	);
 }

@@ -13,19 +13,15 @@ import {
 	WORKSPACE_TEXT_LIMIT,
 	type WorkspaceBytes,
 	type WorkspaceEntry,
-	type WorkspaceMatch,
 	type WorkspaceQuery,
 	type WorkspaceResult,
 	type WorkspaceUpload,
-	workspaceGlobs,
 	workspacePath,
 } from "./protocol.ts";
 
 const LIST_LIMIT = 2000;
 const STATUS_BYTES = 1024 * 1024;
 const GIT_TIMEOUT = 10_000;
-const SEARCH_BYTES = 256 * 1024;
-const SEARCH_LIMIT = 500;
 const FILES_LIMIT = 50_000;
 const FILES_BYTES = 4 * 1024 * 1024;
 const WALK_DIRECTORIES = 5000;
@@ -116,8 +112,6 @@ export class Workspace {
 				return this.file(query.path, context);
 			case "files":
 				return this.files(context);
-			case "search":
-				return this.search(query, context);
 		}
 	}
 
@@ -315,98 +309,6 @@ export class Workspace {
 		return { kind: "files", paths, truncated };
 	}
 
-	/**
-	 * Literal, smart-case (case-insensitive unless the text has capitals) search of text
-	 * files below `path`, tracked and untracked, skipping ignored files. Outside a
-	 * repository it searches the directory itself. Include/exclude globs relative to
-	 * `path` become case-insensitive glob pathspecs; a pattern also matches everything
-	 * below a folder it matches. Includes are alternatives; excludes apply to all.
-	 */
-	private async search(
-		query: Extract<WorkspaceQuery, { kind: "search" }>,
-		context: Context,
-	): Promise<WorkspaceResult> {
-		const { text, path } = query;
-		if (path) await this.resolve(path, context);
-		const include = workspaceGlobs(query.include ?? "");
-		const exclude = workspaceGlobs(query.exclude ?? "");
-		if (!include || !exclude) throw new Error("Invalid file pattern");
-		// Every pathspec carries explicit magic, so the scope path itself stays literal.
-		const base = path ? `${path.replace(/[*?[\\]/g, "\\$&")}/` : "";
-		const specs = (patterns: string[], magic: string) =>
-			patterns.flatMap((pattern) => [`:(${magic})${base}${pattern}`, `:(${magic})${base}${pattern}/**`]);
-		const pathspecs = [
-			...(include.length ? specs(include, "glob,icase") : path ? [`:(literal)${path}`] : []),
-			...specs(exclude, "glob,icase,exclude"),
-		];
-		const args = [
-			"grep",
-			"-n",
-			"-z",
-			"-I",
-			"-F",
-			"--no-color",
-			"--no-textconv",
-			"--exclude-standard",
-			"-m",
-			"20",
-			...(text === text.toLowerCase() ? ["-i"] : []),
-			"-e",
-			text,
-			"--",
-			...pathspecs,
-		];
-		const grep = async (mode: string) => {
-			let run = await this.git(["grep", mode, ...args.slice(1)], SEARCH_BYTES, context);
-			// Git before 2.38 has no grep -m. Keep the byte/time limits and cap each file below instead.
-			if (run.exitCode === 129 && run.stderr.includes("unknown switch `m'")) {
-				args.splice(args.indexOf("-m"), 2);
-				run = await this.git(["grep", mode, ...args.slice(1)], SEARCH_BYTES, context);
-			}
-			return run;
-		};
-		let run = await grep("--untracked");
-		// Not a repository: search the directory itself.
-		if (run.exitCode === 128) run = await grep("--no-index");
-		if (run.exitCode > 1) throw new Error(firstLine(run.stderr) ?? "Search failed");
-		const matches: WorkspaceMatch[] = [];
-		const perFile = new Map<string, number>();
-		// Records are path NUL line NUL text LF; a cut record at the output cap is dropped.
-		let position = 0;
-		while (matches.length < SEARCH_LIMIT) {
-			const pathEnd = run.stdout.indexOf("\0", position);
-			const lineEnd = pathEnd < 0 ? -1 : run.stdout.indexOf("\0", pathEnd + 1);
-			const textEnd = lineEnd < 0 ? -1 : run.stdout.indexOf("\n", lineEnd + 1);
-			if (textEnd < 0) break;
-			const matchPath = run.stdout.slice(position, pathEnd);
-			const count = perFile.get(matchPath) ?? 0;
-			if (count < 20) {
-				matches.push({
-					path: matchPath,
-					line: Number(run.stdout.slice(pathEnd + 1, lineEnd)),
-					text: run.stdout.slice(lineEnd + 1, textEnd).slice(0, 300),
-				});
-				perFile.set(matchPath, count + 1);
-			}
-			position = textEnd + 1;
-		}
-		return {
-			kind: "search",
-			text,
-			path,
-			matches,
-			truncated: run.truncated || matches.length >= SEARCH_LIMIT,
-		};
-	}
-
-	/**
-	 * Git without a shell, against untrusted repository configuration: no optional locks
-	 * (never blocks the agent's git), no network fetches, no prompts, no pager, no system
-	 * config, no fsmonitor, literal pathspecs and every configured clean/smudge filter
-	 * disabled. Stdout and stderr are captured separately; stdout beyond `limit` cancels
-	 * the command and is reported as truncated.
-	 */
-	/** `overrides`: filter overrides this request already fetched. */
 	/**
 	 * One chunk of an upload into a folder: chunks append to a hidden temporary file
 	 * in that folder, renamed into place by the final one. Existing files are never
@@ -649,7 +551,7 @@ export class Workspace {
 	}
 }
 
-function firstLine(text: string): string | undefined {
+function _firstLine(text: string): string | undefined {
 	return text.trim().split("\n")[0]?.slice(0, 300) || undefined;
 }
 

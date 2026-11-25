@@ -10,47 +10,6 @@ import { Workspace } from "../../plugins/workspace/environment.ts";
 
 const context = BACKGROUND_CONTEXT;
 
-test("search without git grep -m keeps per-file limits and propagates other errors", async () => {
-	const directory = await realpath(await mkdtemp(join(tmpdir(), "p2-workspace-grep-")));
-	try {
-		await writeFile(join(directory, "many.txt"), "needle\n".repeat(25));
-		await writeFile(join(directory, "other.txt"), "needle\n");
-		for (const repo of [false, true]) {
-			if (repo) execFileSync("git", ["init", "-q"], { cwd: directory });
-			const env = new NodeExecutionEnv({ cwd: directory });
-			const exec = env.exec.bind(env);
-			let rejected = 0;
-			let fail = false;
-			env.exec = async (argv, options, executing) => {
-				if (typeof argv !== "string" && argv.includes("grep") && (fail || argv.includes("-m"))) {
-					rejected++;
-					options?.onOutput?.(fail ? "fatal: fixture failure\n" : "error: unknown switch `m'\n", executing, {
-						stream: "stderr",
-					});
-					return { ok: true, value: { exitCode: 129 } };
-				}
-				return exec(argv, options, executing);
-			};
-			const workspace = new Workspace(env, []);
-			const result = await workspace.query({ kind: "search", path: "", text: "needle" }, context);
-			assert(result.kind === "search");
-			assert.equal(rejected, 1);
-			assert.equal(result.matches.filter((match) => match.path === "many.txt").length, 20);
-			assert.equal(result.matches.filter((match) => match.path === "other.txt").length, 1);
-			assert.equal(result.truncated, false);
-			fail = true;
-			await assert.rejects(
-				workspace.query({ kind: "search", path: "", text: "needle" }, context),
-				/fixture failure/,
-			);
-			assert.equal(rejected, 2, "unrelated failures are not retried");
-		}
-	} finally {
-		await rm(directory, { recursive: true, force: true });
-	}
-});
-
-// Pi Mobile 24e3fccdd: a subagent's own cwd may be a linked worktree, whose index and HEAD live in the main repository.
 test("a linked git worktree's index and HEAD are watched", { timeout: 60_000 }, async () => {
 	const directory = await realpath(await mkdtemp(join(tmpdir(), "p2-workspace-worktree-")));
 	const git = (cwd: string, ...args: string[]) =>
